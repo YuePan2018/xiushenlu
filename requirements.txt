@@ -1,0 +1,8 @@
+dashscope
+qwen-agent
+fastapi
+uvicorn[standard]
+websockets
+pyyaml
+python-dotenv
+numpy

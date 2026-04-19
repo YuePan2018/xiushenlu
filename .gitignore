@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+
+.env
+.venv/
+.claude/
+
+data/logs/*.jsonl
+
+app/workspace/
+workspace/

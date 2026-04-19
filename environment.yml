@@ -1,0 +1,15 @@
+name: xiushenlu
+channels:
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - dashscope
+      - qwen-agent
+      - fastapi
+      - uvicorn[standard]
+      - websockets
+      - pyyaml
+      - python-dotenv
+      - numpy

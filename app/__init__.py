@@ -1,0 +1,2 @@
+"""Xiushenlu assistant package."""
+
