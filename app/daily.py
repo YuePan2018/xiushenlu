@@ -71,7 +71,7 @@ def append_record(
     path = daily_path(cfg, target_date)
     day = path.stem
     timestamp = datetime.now().strftime("%H:%M:%S")
-    record = f"- {timestamp} {content.strip()}"
+    record = _format_record(timestamp, content)
 
     if path.exists():
         original = safe_read_text(path, cfg).strip()
@@ -81,6 +81,17 @@ def append_record(
 
     safe_write_text(path, content_text.rstrip() + "\n", cfg)
     return path
+
+
+def _format_record(timestamp: str, content: str) -> str:
+    lines = content.strip().splitlines()
+    if len(lines) == 1:
+        return f"- {timestamp} {lines[0]}"
+
+    formatted = [f"- {timestamp} {lines[0]}"]
+    for line in lines[1:]:
+        formatted.append(f"  {line}" if line else "  ")
+    return "\n".join(formatted)
 
 
 def _replace_or_append_section(original: str, title: str, section: str) -> str:
@@ -107,5 +118,4 @@ def _append_to_section(original: str, title: str, line: str) -> str:
 
     before = original[:next_heading].rstrip()
     after = original[next_heading:]
-    return before + "\n" + line + after
-
+    return before + "\n" + line + "\n" + after

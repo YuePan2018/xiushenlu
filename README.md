@@ -20,12 +20,12 @@
 - 运行 `python app/main.py`，向模型发送一句测试 prompt，并打印模型回复。
 - 使用 `EventLogger.append_event(type, summary, detail=None)` 追加写入本地事件日志。
 - 已有数据目录约定说明和长期目标模板。
-- 使用 `read_goals()` 只读读取 `data/memory/goals.md`。
+- 使用 `read_goals()` 只读读取 `data/memory/goals.md`；该文件属于个人数据，不提交到版本库。
 - 运行 `python app/main.py plan`，读取长期目标和今日待办，生成当天计划并写入 `data/daily/YYYY-MM-DD.md`。
 - 运行 `python app/main.py log "内容"`，向当天 daily 追加记录。
 - 运行 `python app/main.py review`，根据当天 daily 和事件日志生成复盘。
 - 运行 `python app/main.py status`，查看当天 daily 内容。
-- 运行 `python app/main.py cost`，查看今日和本月 LLM token 消耗；模型价格未配置时只统计 token，不估算费用。
+- 运行 `python app/main.py cost`，查看今日和本月 LLM token 消耗，并把统计写入当天 daily 的记录区块。
 - 使用路径白名单保护运行时文件读写，并阻止普通流程改写 `data/memory/goals.md`。
 - 已建立 Phase 1 需要的数据目录：
   - `data/daily/`
@@ -101,7 +101,11 @@ python app/main.py plan
 计划命令会读取：
 
 - `data/memory/goals.md`：长期目标，只读输入。
-- `data/inbox/today_tasks.md`：今日待办，可手动编辑。
+- `data/inbox/today_tasks.md`：今日待办，可由用户或 agent 更新。
+
+`data/inbox/` 是当天输入篮子，用来放临时材料、今日待办、待总结片段和后续 agent 准备处理的材料。`today_tasks.md` 是当天计划最直接的任务来源；如果使用 `python app/main.py plan --tasks "..."`，传入内容会同步写回 `data/inbox/today_tasks.md`，后续 agent 也可以用这个入口更新当天待办。
+
+`data/` 下的实际个人数据和运行数据默认不提交到版本库；可提交的是 `*.example.md` 模板、目录占位文件和说明文档。
 
 输出会写入：
 
@@ -131,6 +135,8 @@ python app/main.py status
 ```powershell
 python app/main.py cost
 ```
+
+该命令会打印 token 统计，并把同一份统计追加到当天 daily 的 `记录` 区块。当前优先统计 token，不做费用估算。
 
 ## 当前目录结构
 

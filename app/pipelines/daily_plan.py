@@ -7,11 +7,11 @@ from typing import Any
 
 from app.config import load_config, resolve_project_path
 from app.daily import write_daily_section
+from app.inbox import read_today_tasks
 from app.llm.provider import LLMProvider
 from app.llm.usage import append_llm_call_event
 from app.logger import EventLogger
 from app.memory.goals import read_goals
-from app.safety import safe_read_text
 
 
 @dataclass(frozen=True)
@@ -32,7 +32,7 @@ def generate_daily_plan(
     current_date = target_date or date.today()
     date_text = current_date.isoformat()
     goals = read_goals(cfg)
-    tasks = tasks_text if tasks_text is not None else _read_today_tasks(cfg)
+    tasks = tasks_text if tasks_text is not None else read_today_tasks(cfg)
     prompt = _build_prompt(date_text=date_text, goals=goals, tasks=tasks)
 
     plan = provider.chat(prompt).strip()
@@ -53,13 +53,6 @@ def generate_daily_plan(
     )
 
     return DailyPlanResult(date=date_text, path=daily_path, plan=plan)
-
-
-def _read_today_tasks(config: dict[str, Any]) -> str:
-    path = resolve_project_path(config["paths"]["inbox_dir"]) / "today_tasks.md"
-    if not path.exists():
-        return ""
-    return safe_read_text(path, config).strip()
 
 
 def _daily_path(config: dict[str, Any], date_text: str) -> Path:

@@ -11,6 +11,7 @@ if __package__ in (None, ""):
 from app.config import load_config
 from app.cost import summarize_token_usage
 from app.daily import append_record, read_daily
+from app.inbox import write_today_tasks
 from app.llm.qwen_agent_impl import QwenAgentProvider
 from app.logger import EventLogger
 from app.pipelines.daily_plan import generate_daily_plan
@@ -29,7 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     plan = subparsers.add_parser("plan", help="生成今日计划")
-    plan.add_argument("--tasks", help="直接从命令行传入今日待办，覆盖 data/inbox/today_tasks.md")
+    plan.add_argument("--tasks", help="直接传入今日待办，并写入 data/inbox/today_tasks.md")
 
     subparsers.add_parser("review", help="生成晚间复盘")
 
@@ -52,6 +53,17 @@ def smoke_test() -> int:
 
 def run_plan(tasks: str | None = None) -> int:
     config = load_config()
+    if tasks is not None:
+        tasks_path = write_today_tasks(tasks, config)
+        EventLogger().append_event(
+            "today_tasks_updated",
+            "更新今日待办",
+            {
+                "path": str(tasks_path),
+                "source": "plan --tasks",
+                "chars": len(tasks.strip()),
+            },
+        )
     provider = QwenAgentProvider(config)
     result = generate_daily_plan(provider, config=config, tasks_text=tasks)
     print(f"计划已写入：{result.path}")
@@ -99,14 +111,28 @@ def run_status() -> int:
 def run_cost() -> int:
     config = load_config()
     stats = summarize_token_usage(config)
-    print(_format_stats("今日", stats["today"], config))
+    today_text = _format_stats("今日", stats["today"], config)
+    month_text = _format_stats("本月", stats["month"], config)
+    report = f"{today_text}\n\n{month_text}"
+    print(report)
+
+    path = append_record(f"token 消耗统计\n```text\n{report}\n```", config)
+    EventLogger().append_event(
+        "cost_reported",
+        "记录 token 消耗统计",
+        {
+            "date": path.stem,
+            "daily_path": str(path),
+            "today": _stats_detail(stats["today"]),
+            "month": _stats_detail(stats["month"]),
+        },
+    )
     print()
-    print(_format_stats("本月", stats["month"], config))
+    print(f"统计已写入：{path}")
     return 0
 
 
 def _format_stats(label: str, stats, config: dict) -> str:
-    currency = config.get("cost", {}).get("currency", "CNY")
     lines = [
         f"{label} LLM 调用：{stats.calls} 次",
         f"输入 token：{stats.tokens_in}",
@@ -114,15 +140,22 @@ def _format_stats(label: str, stats, config: dict) -> str:
         f"总 token：{stats.total_tokens}",
         f"估算调用：{stats.estimated_calls} 次",
     ]
-    if stats.cost is None:
-        lines.append("费用估算：未配置模型价格")
-    else:
-        lines.append(f"费用估算：{stats.cost:.4f} {currency}")
     if stats.by_model:
         lines.append("按模型：")
         for model, total in sorted(stats.by_model.items()):
             lines.append(f"- {model}: {total} tokens")
     return "\n".join(lines)
+
+
+def _stats_detail(stats) -> dict:
+    return {
+        "calls": stats.calls,
+        "tokens_in": stats.tokens_in,
+        "tokens_out": stats.tokens_out,
+        "total_tokens": stats.total_tokens,
+        "estimated_calls": stats.estimated_calls,
+        "by_model": dict(stats.by_model),
+    }
 
 
 def main(argv: list[str] | None = None) -> int:

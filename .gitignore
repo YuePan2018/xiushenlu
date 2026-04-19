@@ -5,9 +5,25 @@ __pycache__/
 .venv/
 .claude/
 
-data/logs/*.jsonl
-data/daily/*.md
-data/state/*.db
+data/daily/*
+!data/daily/.gitkeep
+!data/daily/*.example.md
+
+data/inbox/*
+!data/inbox/.gitkeep
+!data/inbox/*.example.md
+
+data/logs/*
+!data/logs/.gitkeep
+!data/logs/*.example.*
+
+data/memory/*
+!data/memory/.gitkeep
+!data/memory/*.example.md
+
+data/state/*
+!data/state/.gitkeep
+
 data/quarantine/*
 !data/quarantine/.gitkeep
 
