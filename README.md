@@ -20,6 +20,8 @@
 - 运行 `python app/main.py`，向模型发送一句测试 prompt，并打印模型回复。
 - 使用 `EventLogger.append_event(type, summary, detail=None)` 追加写入本地事件日志。
 - 已有数据目录约定说明和长期目标模板。
+- 使用 `read_goals()` 只读读取 `data/memory/goals.md`。
+- 运行 `python app/main.py plan`，读取长期目标和今日待办，生成当天计划并写入 `data/daily/YYYY-MM-DD.md`。
 - 已建立 Phase 1 需要的数据目录：
   - `data/daily/`
   - `data/inbox/`
@@ -28,9 +30,8 @@
 
 ## 当前还不能做什么
 
-- 还不能生成每日计划文件。
 - 还不能生成晚间复盘。
-- 还没有 `plan`、`review`、`log`、`status` 等 CLI 命令。
+- 还没有 `review`、`log`、`status` 等 CLI 命令。
 - 还没有定时调度。
 - 还没有手机通知。
 - 还没有 Web 控制台。
@@ -87,6 +88,23 @@ python app/main.py
 
 成功时会看到模型返回一句确认连通的回复。
 
+生成今日计划：
+
+```powershell
+conda activate xiushenlu
+python app/main.py plan
+```
+
+计划命令会读取：
+
+- `data/memory/goals.md`：长期目标，只读输入。
+- `data/inbox/today_tasks.md`：今日待办，可手动编辑。
+
+输出会写入：
+
+- `data/daily/YYYY-MM-DD.md`
+- `data/logs/events.jsonl`
+
 ## 当前目录结构
 
 ```text
@@ -124,10 +142,10 @@ xiushenlu/
 
 ## 下一步
 
-按照 `docs/规划/2026-04-16_修身炉规划.md`，下一步是批次 C：
+按照 `docs/规划/2026-04-16_修身炉规划.md`，下一步是批次 D：
 
-- 新增 `app/pipelines/daily_plan.py`。
-- 读取 `data/memory/goals.md` 和 `data/inbox/today_tasks.md`。
-- 调用 LLM 生成计划。
-- 写入 `data/daily/YYYY-MM-DD.md`。
-- 记录计划生成事件。
+- 新增 `app/pipelines/nightly_review.py`。
+- 读取当天 daily 文件和事件日志。
+- 调用 LLM 生成晚间复盘。
+- 将复盘追加到当天 daily 文件。
+- 记录复盘生成事件。

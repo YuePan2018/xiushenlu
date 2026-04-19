@@ -6,6 +6,7 @@ __pycache__/
 .claude/
 
 data/logs/*.jsonl
+data/daily/*.md
 
 app/workspace/
 workspace/
