@@ -30,7 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     plan = subparsers.add_parser("plan", help="生成今日计划")
-    plan.add_argument("--tasks", help="直接传入今日待办，并写入 data/inbox/today_tasks.md")
+    plan.add_argument("--tasks", help="直接传入今日待办，并写入 data/user_inputs/today_tasks.md")
 
     subparsers.add_parser("review", help="生成晚间复盘")
 
