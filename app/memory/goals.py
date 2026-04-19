@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import load_config, resolve_project_path
+from app.safety import safe_read_text
 
 
 def goals_path(config: dict[str, Any] | None = None) -> Path:
@@ -16,5 +17,4 @@ def read_goals(config: dict[str, Any] | None = None) -> str:
     path = goals_path(config)
     if not path.exists():
         return ""
-    return path.read_text(encoding="utf-8").strip()
-
+    return safe_read_text(path, config).strip()

@@ -1,6 +1,6 @@
 # 修身炉
 
-修身炉是一个面向个人认知与执行管理的本地助手项目。当前版本处于 Phase 1 / 批次 A：已经完成项目骨架、配置加载、Qwen Agent LLM Provider 接入，以及一次真实 LLM 连通验收。
+修身炉是一个面向个人认知与执行管理的本地助手项目。当前版本已完成 Phase 1 的最小闭环：项目骨架、配置加载、Qwen Agent LLM Provider、事件日志、计划、记录、复盘、状态查看、token 统计和基础路径安全。
 
 第一阶段目标是先跑通最小闭环：
 
@@ -8,7 +8,7 @@
 记录 -> 计划 -> 复盘
 ```
 
-当前还不是完整 agent，也不是自动化调度系统。它现在更接近一个可继续扩展的本地 Python CLI 骨架。
+当前还不是完整自主 agent，也不是自动化调度系统。它现在是一个可继续扩展的本地 Python CLI 执行闭环。
 
 ## 当前能做到什么
 
@@ -22,6 +22,11 @@
 - 已有数据目录约定说明和长期目标模板。
 - 使用 `read_goals()` 只读读取 `data/memory/goals.md`。
 - 运行 `python app/main.py plan`，读取长期目标和今日待办，生成当天计划并写入 `data/daily/YYYY-MM-DD.md`。
+- 运行 `python app/main.py log "内容"`，向当天 daily 追加记录。
+- 运行 `python app/main.py review`，根据当天 daily 和事件日志生成复盘。
+- 运行 `python app/main.py status`，查看当天 daily 内容。
+- 运行 `python app/main.py cost`，查看今日和本月 LLM token 消耗；模型价格未配置时只统计 token，不估算费用。
+- 使用路径白名单保护运行时文件读写，并阻止普通流程改写 `data/memory/goals.md`。
 - 已建立 Phase 1 需要的数据目录：
   - `data/daily/`
   - `data/inbox/`
@@ -30,13 +35,11 @@
 
 ## 当前还不能做什么
 
-- 还不能生成晚间复盘。
-- 还没有 `review`、`log`、`status` 等 CLI 命令。
 - 还没有定时调度。
 - 还没有手机通知。
 - 还没有 Web 控制台。
 
-这些能力会在 Phase 1 后续能力批次中逐步补齐。
+这些能力会在后续里程碑中逐步补齐。
 
 ## 环境
 
@@ -105,6 +108,30 @@ python app/main.py plan
 - `data/daily/YYYY-MM-DD.md`
 - `data/logs/events.jsonl`
 
+添加今日记录：
+
+```powershell
+python app/main.py log "今天完成了一个关键任务"
+```
+
+生成晚间复盘：
+
+```powershell
+python app/main.py review
+```
+
+查看今日状态：
+
+```powershell
+python app/main.py status
+```
+
+查看 token 消耗：
+
+```powershell
+python app/main.py cost
+```
+
 ## 当前目录结构
 
 ```text
@@ -122,6 +149,8 @@ xiushenlu/
     inbox/
     memory/
     logs/
+    state/
+    quarantine/
   docs/
     规划/
     吸纳/
@@ -142,10 +171,8 @@ xiushenlu/
 
 ## 下一步
 
-按照 `docs/规划/2026-04-16_修身炉规划.md`，下一步是批次 D：
+按照 `docs/规划/2026-04-16_修身炉规划.md`，Phase 1 的能力批次已经完成。下一步进入后续里程碑：
 
-- 新增 `app/pipelines/nightly_review.py`。
-- 读取当天 daily 文件和事件日志。
-- 调用 LLM 生成晚间复盘。
-- 将复盘追加到当天 daily 文件。
-- 记录复盘生成事件。
+- 自动化与通知：定时运行计划/复盘，并通过 PushPlus / PushDeer 推送。
+- 本地控制台：查看状态、日志、计划和复盘。
+- 更完整的安全与审批：工具注册、审批队列、异常暂停。

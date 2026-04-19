@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 from app.config import load_config, resolve_project_path
+from app.daily import write_daily_section
 from app.llm.provider import LLMProvider
+from app.llm.usage import append_llm_call_event
 from app.logger import EventLogger
 from app.memory.goals import read_goals
+from app.safety import safe_read_text
 
 
 @dataclass(frozen=True)
@@ -34,9 +37,10 @@ def generate_daily_plan(
 
     plan = provider.chat(prompt).strip()
     daily_path = _daily_path(cfg, date_text)
-    _write_plan_section(daily_path, date_text=date_text, plan=plan)
+    _write_plan_section(date_text=date_text, plan=plan)
 
     event_logger = logger or EventLogger()
+    append_llm_call_event(event_logger, provider, "daily_plan")
     event_logger.append_event(
         "plan_generated",
         f"生成 {date_text} 的计划",
@@ -55,7 +59,7 @@ def _read_today_tasks(config: dict[str, Any]) -> str:
     path = resolve_project_path(config["paths"]["inbox_dir"]) / "today_tasks.md"
     if not path.exists():
         return ""
-    return path.read_text(encoding="utf-8").strip()
+    return safe_read_text(path, config).strip()
 
 
 def _daily_path(config: dict[str, Any], date_text: str) -> Path:
@@ -87,24 +91,5 @@ def _build_prompt(date_text: str, goals: str, tasks: str) -> str:
 """
 
 
-def _write_plan_section(path: Path, date_text: str, plan: str) -> None:
-    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    section = f"## 计划\n\n生成时间：{generated_at}\n\n{plan.strip()}\n"
-    if path.exists():
-        original = path.read_text(encoding="utf-8").strip()
-        content = _replace_or_append_section(original, "计划", section)
-    else:
-        content = f"# {date_text}\n\n{section}"
-    path.write_text(content.rstrip() + "\n", encoding="utf-8")
-
-
-def _replace_or_append_section(original: str, title: str, section: str) -> str:
-    heading = f"## {title}"
-    if heading not in original:
-        return original.rstrip() + "\n\n" + section
-
-    start = original.index(heading)
-    next_heading = original.find("\n## ", start + len(heading))
-    if next_heading == -1:
-        return original[:start].rstrip() + "\n\n" + section
-    return original[:start].rstrip() + "\n\n" + section.rstrip() + "\n" + original[next_heading:]
+def _write_plan_section(date_text: str, plan: str) -> None:
+    write_daily_section("计划", plan, target_date=date_text, mode="replace")

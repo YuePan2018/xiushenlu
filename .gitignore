@@ -7,6 +7,9 @@ __pycache__/
 
 data/logs/*.jsonl
 data/daily/*.md
+data/state/*.db
+data/quarantine/*
+!data/quarantine/.gitkeep
 
 app/workspace/
 workspace/

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import load_config, resolve_project_path
+from app.safety import safe_append_text, safe_read_text
 
 
 class EventLogger:
@@ -18,7 +19,6 @@ class EventLogger:
             log_path = logs_dir / "events.jsonl"
 
         self.log_path = resolve_project_path(log_path)
-        self.log_path.parent.mkdir(parents=True, exist_ok=True)
 
     def append_event(
         self,
@@ -37,8 +37,24 @@ class EventLogger:
             "summary": summary,
             "detail": detail,
         }
-        with self.log_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+        safe_append_text(self.log_path, json.dumps(event, ensure_ascii=False, default=str) + "\n")
 
         return event
 
+    def read_events(self) -> list[dict[str, Any]]:
+        if not self.log_path.exists():
+            return []
+
+        events: list[dict[str, Any]] = []
+        for line in safe_read_text(self.log_path).splitlines():
+            if not line.strip():
+                continue
+            events.append(json.loads(line))
+        return events
+
+    def read_events_for_date(self, date_text: str) -> list[dict[str, Any]]:
+        return [
+            event
+            for event in self.read_events()
+            if str(event.get("ts", "")).startswith(date_text)
+        ]

@@ -9,8 +9,12 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import load_config
+from app.cost import summarize_token_usage
+from app.daily import append_record, read_daily
 from app.llm.qwen_agent_impl import QwenAgentProvider
+from app.logger import EventLogger
 from app.pipelines.daily_plan import generate_daily_plan
+from app.pipelines.nightly_review import generate_nightly_review
 
 
 def configure_output_encoding() -> None:
@@ -26,6 +30,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     plan = subparsers.add_parser("plan", help="生成今日计划")
     plan.add_argument("--tasks", help="直接从命令行传入今日待办，覆盖 data/inbox/today_tasks.md")
+
+    subparsers.add_parser("review", help="生成晚间复盘")
+
+    log = subparsers.add_parser("log", help="添加一条今日记录")
+    log.add_argument("content", nargs="+", help="记录内容")
+
+    subparsers.add_parser("status", help="查看今日 daily 内容")
+    subparsers.add_parser("cost", help="查看今日和本月 token 消耗")
 
     return parser
 
@@ -48,6 +60,71 @@ def run_plan(tasks: str | None = None) -> int:
     return 0
 
 
+def run_review() -> int:
+    config = load_config()
+    provider = QwenAgentProvider(config)
+    result = generate_nightly_review(provider, config=config)
+    print(f"复盘已写入：{result.path}")
+    print()
+    print(result.review)
+    return 0
+
+
+def run_log(content_parts: list[str]) -> int:
+    config = load_config()
+    content = " ".join(content_parts)
+    path = append_record(content, config)
+    EventLogger().append_event(
+        "user_log",
+        "添加今日记录",
+        {
+            "date": path.stem,
+            "daily_path": str(path),
+            "content": content,
+        },
+    )
+    print(f"记录已写入：{path}")
+    return 0
+
+
+def run_status() -> int:
+    text = read_daily()
+    if not text.strip():
+        print("今天还没有 daily 记录。")
+        return 0
+    print(text)
+    return 0
+
+
+def run_cost() -> int:
+    config = load_config()
+    stats = summarize_token_usage(config)
+    print(_format_stats("今日", stats["today"], config))
+    print()
+    print(_format_stats("本月", stats["month"], config))
+    return 0
+
+
+def _format_stats(label: str, stats, config: dict) -> str:
+    currency = config.get("cost", {}).get("currency", "CNY")
+    lines = [
+        f"{label} LLM 调用：{stats.calls} 次",
+        f"输入 token：{stats.tokens_in}",
+        f"输出 token：{stats.tokens_out}",
+        f"总 token：{stats.total_tokens}",
+        f"估算调用：{stats.estimated_calls} 次",
+    ]
+    if stats.cost is None:
+        lines.append("费用估算：未配置模型价格")
+    else:
+        lines.append(f"费用估算：{stats.cost:.4f} {currency}")
+    if stats.by_model:
+        lines.append("按模型：")
+        for model, total in sorted(stats.by_model.items()):
+            lines.append(f"- {model}: {total} tokens")
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     configure_output_encoding()
     parser = build_parser()
@@ -55,6 +132,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "plan":
         return run_plan(tasks=args.tasks)
+    if args.command == "review":
+        return run_review()
+    if args.command == "log":
+        return run_log(args.content)
+    if args.command == "status":
+        return run_status()
+    if args.command == "cost":
+        return run_cost()
 
     return smoke_test()
 
