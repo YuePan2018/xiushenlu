@@ -5,31 +5,9 @@ __pycache__/
 .venv/
 .claude/
 
-data/user_records/*
-!data/user_records/.gitkeep
-!data/user_records/*.example.md
-
-data/user_inputs/*
-!data/user_inputs/.gitkeep
-!data/user_inputs/*.example.md
-
-data/system_logs/*
-!data/system_logs/.gitkeep
-!data/system_logs/*.example.*
-
-data/memory/*
-!data/memory/.gitkeep
-!data/memory/*.example.md
-
-data/state/*
-!data/state/.gitkeep
-
-data/quarantine/*
-!data/quarantine/.gitkeep
-
 app/workspace/
 workspace/
 
-docs/
-
+config/
+data/
 docs/
