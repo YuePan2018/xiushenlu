@@ -16,7 +16,7 @@
 
 - **LLM Provider 抽象**：业务 pipeline 依赖 `LLMProvider.chat()`，当前实现是 Qwen Agent，后续可以替换其他模型。
 - **固定 pipeline 优先**：先把计划、记录、复盘做成可解释流程，而不是一开始引入不可控 agent loop。
-- **双层数据**：Markdown daily 给用户阅读，JSON Lines events 给机器统计、审计和复盘。
+- **双层数据**：Markdown daily 给用户阅读，按日 JSON Lines events 给机器统计、审计和复盘。
 - **安全边界**：用路径白名单限制文件读写，并保护长期目标文件不被普通流程改写。
 - **数据隐私**：`data/` 下实际个人数据和运行数据不提交，只提交 example 模板和目录占位。
 - **成本意识**：每次 LLM 调用记录 token usage，`cost` 命令本地统计并写入 daily。
@@ -29,7 +29,7 @@
 - 使用 `qwen_agent.agents.Assistant` 调用 Qwen 模型。
 - 提供一个薄的 `LLMProvider.chat(prompt) -> str` 抽象，后续每日计划、晚间复盘 pipeline 可以复用。
 - 运行 `python app/main.py`，向模型发送一句测试 prompt，并打印模型回复。
-- 使用 `EventLogger.append_event(type, summary, detail=None)` 追加写入本地事件日志。
+- 使用 `EventLogger.append_event(type, summary, detail=None)` 追加写入本地每日事件日志。
 - 已有数据目录约定说明和长期目标模板。
 - 使用 `read_goals()` 只读读取 `data/memory/goals.md`；该文件属于个人数据，不提交到版本库。
 - 运行 `python app/main.py plan`，读取长期目标和今日待办，生成当天计划并写入 `data/user_records/YYYY-MM-DD.md`。
@@ -67,7 +67,7 @@ flowchart TD
     Plan --> Tasks["data/user_inputs/today_tasks.md"]
     Plan --> LLM["LLMProvider / QwenAgentProvider"]
     Review --> Daily["data/user_records/YYYY-MM-DD.md"]
-    Review --> Events["data/system_logs/events.jsonl"]
+    Review --> Events["data/system_logs/YYYY-MM-DD.jsonl"]
     Review --> LLM
 
     Log --> Daily
@@ -94,15 +94,13 @@ flowchart TD
 conda activate xiushenlu
 ```
 
-当前环境是从已有的 `shenshen` 环境克隆出来的，用于避免在 base 环境或系统 Python 中安装项目依赖。
-
 如果以后需要从配置文件重建环境，可以参考：
 
 ```powershell
 conda env create -f environment.yml
 ```
 
-依赖清单也保留在 `requirements.txt`，与 `llm/requirements.txt` 的原始 Qwen Agent 项目依赖保持一致。
+依赖清单也保留在 `requirements.txt`
 
 ## 配置
 
@@ -155,7 +153,7 @@ python app/main.py plan
 输出会写入：
 
 - `data/user_records/YYYY-MM-DD.md`
-- `data/system_logs/events.jsonl`
+- `data/system_logs/YYYY-MM-DD.jsonl`
 
 添加今日记录：
 
@@ -183,7 +181,7 @@ python app/main.py cost
 
 该命令会打印 token 统计，并把同一份统计追加到当天 daily 的 `记录` 区块。当前优先统计 token，不做费用估算。
 
-`cost` 不调用 LLM，只读取本地 `events.jsonl` 中的 `llm_call` 事件。
+`cost` 不调用 LLM，只读取本地 `data/system_logs/YYYY-MM-DD.jsonl` 中的 `llm_call` 事件。
 
 ## 当前目录结构
 

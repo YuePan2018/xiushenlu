@@ -41,7 +41,7 @@ python app/main.py --help
 - `app/llm/qwen_agent_impl.py`：Qwen Agent Provider 实现。
 - `app/daily.py`：daily Markdown 读写。
 - `app/inbox.py`：today tasks 读写。
-- `app/logger.py`：events JSON Lines 日志。
+- `app/logger.py`：按日 events JSON Lines 日志。
 - `app/cost.py`：本地 token 汇总。
 - `app/safety.py`：路径白名单和 protected file 检查。
 
@@ -67,6 +67,15 @@ python app/main.py --help
 `data/memory/goals.md` 是用户维护的长期目标权威来源。普通 pipeline 只能读取它，不能自动改写它。
 
 `data/user_inputs/today_tasks.md` 是当天输入，可以由用户手写，也可以通过 `python app/main.py plan --tasks "..."` 更新。
+
+当前正式事件类型只有：
+
+- `llm_call`
+- `plan_generated`
+- `user_log`
+- `review_generated`
+
+不要重新加入 `today_tasks_updated` 或 `cost_reported`。
 
 ## 安全规则
 

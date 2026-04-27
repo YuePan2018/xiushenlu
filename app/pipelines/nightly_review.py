@@ -52,13 +52,7 @@ def generate_nightly_review(
 
 
 def _events_for_date(logger: EventLogger, date_text: str) -> list[dict[str, Any]]:
-    events = []
-    for event in logger.read_events():
-        detail = event.get("detail")
-        detail_date = detail.get("date") if isinstance(detail, dict) else None
-        if detail_date == date_text or str(event.get("ts", "")).startswith(date_text):
-            events.append(event)
-    return events
+    return logger.read_events_for_date(date_text)
 
 
 def _build_prompt(date_text: str, daily_text: str, events: list[dict[str, Any]]) -> str:
@@ -85,4 +79,3 @@ Daily 记录：
 
 def _format_event(event: dict[str, Any]) -> str:
     return f"- {event.get('ts', '')} [{event.get('type', '')}] {event.get('summary', '')}"
-

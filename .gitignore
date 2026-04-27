@@ -5,25 +5,13 @@ __pycache__/
 .venv/
 .claude/
 
-data/daily/*
-!data/daily/.gitkeep
-!data/daily/*.example.md
-
 data/user_records/*
 !data/user_records/.gitkeep
 !data/user_records/*.example.md
 
-data/inbox/*
-!data/inbox/.gitkeep
-!data/inbox/*.example.md
-
 data/user_inputs/*
 !data/user_inputs/.gitkeep
 !data/user_inputs/*.example.md
-
-data/logs/*
-!data/logs/.gitkeep
-!data/logs/*.example.*
 
 data/system_logs/*
 !data/system_logs/.gitkeep
@@ -41,3 +29,7 @@ data/quarantine/*
 
 app/workspace/
 workspace/
+
+docs/
+
+docs/

@@ -54,16 +54,7 @@ def smoke_test() -> int:
 def run_plan(tasks: str | None = None) -> int:
     config = load_config()
     if tasks is not None:
-        tasks_path = write_today_tasks(tasks, config)
-        EventLogger().append_event(
-            "today_tasks_updated",
-            "更新今日待办",
-            {
-                "path": str(tasks_path),
-                "source": "plan --tasks",
-                "chars": len(tasks.strip()),
-            },
-        )
+        write_today_tasks(tasks, config)
     provider = QwenAgentProvider(config)
     result = generate_daily_plan(provider, config=config, tasks_text=tasks)
     print(f"计划已写入：{result.path}")
@@ -117,16 +108,6 @@ def run_cost() -> int:
     print(report)
 
     path = append_record(f"token 消耗统计\n```text\n{report}\n```", config)
-    EventLogger().append_event(
-        "cost_reported",
-        "记录 token 消耗统计",
-        {
-            "date": path.stem,
-            "daily_path": str(path),
-            "today": _stats_detail(stats["today"]),
-            "month": _stats_detail(stats["month"]),
-        },
-    )
     print()
     print(f"统计已写入：{path}")
     return 0
@@ -145,17 +126,6 @@ def _format_stats(label: str, stats, config: dict) -> str:
         for model, total in sorted(stats.by_model.items()):
             lines.append(f"- {model}: {total} tokens")
     return "\n".join(lines)
-
-
-def _stats_detail(stats) -> dict:
-    return {
-        "calls": stats.calls,
-        "tokens_in": stats.tokens_in,
-        "tokens_out": stats.tokens_out,
-        "total_tokens": stats.total_tokens,
-        "estimated_calls": stats.estimated_calls,
-        "by_model": dict(stats.by_model),
-    }
 
 
 def main(argv: list[str] | None = None) -> int:

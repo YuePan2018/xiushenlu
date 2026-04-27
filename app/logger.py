@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+import re
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -9,14 +10,20 @@ from app.config import load_config, resolve_project_path
 from app.safety import safe_append_text, safe_read_text
 
 
+DAILY_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+DAILY_LOG_FILE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.jsonl$")
+MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+
+
 class EventLogger:
     """Append-only JSON Lines event logger."""
 
     def __init__(self, log_path: str | Path | None = None) -> None:
+        config = load_config()
+        self.logs_dir = resolve_project_path(config["paths"]["logs_dir"])
+        self._explicit_log_path = log_path is not None
         if log_path is None:
-            config = load_config()
-            logs_dir = resolve_project_path(config["paths"]["logs_dir"])
-            log_path = logs_dir / "events.jsonl"
+            log_path = self.logs_dir / f"{date.today().isoformat()}.jsonl"
 
         self.log_path = resolve_project_path(log_path)
 
@@ -42,19 +49,39 @@ class EventLogger:
         return event
 
     def read_events(self) -> list[dict[str, Any]]:
-        if not self.log_path.exists():
-            return []
+        if self._explicit_log_path:
+            return self._read_event_file(self.log_path)
 
         events: list[dict[str, Any]] = []
-        for line in safe_read_text(self.log_path).splitlines():
-            if not line.strip():
-                continue
-            events.append(json.loads(line))
+        for path in sorted(self.logs_dir.glob("*.jsonl")):
+            if DAILY_LOG_FILE_RE.fullmatch(path.name):
+                events.extend(self._read_event_file(path))
         return events
 
     def read_events_for_date(self, date_text: str) -> list[dict[str, Any]]:
+        if not DAILY_DATE_RE.fullmatch(date_text):
+            return []
+        if self._explicit_log_path:
+            return self.read_events()
+        return self._read_event_file(self.logs_dir / f"{date_text}.jsonl")
+
+    def read_events_for_month(self, month_text: str) -> list[dict[str, Any]]:
+        if not MONTH_RE.fullmatch(month_text):
+            return []
+        if self._explicit_log_path:
+            return self.read_events()
+
+        events: list[dict[str, Any]] = []
+        for path in sorted(self.logs_dir.glob(f"{month_text}-*.jsonl")):
+            if DAILY_LOG_FILE_RE.fullmatch(path.name):
+                events.extend(self._read_event_file(path))
+        return events
+
+    def _read_event_file(self, path: Path) -> list[dict[str, Any]]:
+        if not path.exists():
+            return []
         return [
-            event
-            for event in self.read_events()
-            if str(event.get("ts", "")).startswith(date_text)
+            json.loads(line)
+            for line in safe_read_text(path).splitlines()
+            if line.strip()
         ]

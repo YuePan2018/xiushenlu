@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 from app.config import load_config
@@ -27,27 +27,26 @@ def summarize_token_usage(
     cfg = config or load_config()
     event_logger = logger or EventLogger()
     current_date = today or date.today()
+    current_date_text = current_date.isoformat()
     current_month = current_date.strftime("%Y-%m")
 
     today_stats = TokenStats()
     month_stats = TokenStats()
 
-    for event in event_logger.read_events():
+    _add_llm_events(today_stats, event_logger.read_events_for_date(current_date_text), cfg)
+    _add_llm_events(month_stats, event_logger.read_events_for_month(current_month), cfg)
+
+    return {"today": today_stats, "month": month_stats}
+
+
+def _add_llm_events(stats: TokenStats, events: list[dict[str, Any]], config: dict[str, Any]) -> None:
+    for event in events:
         if event.get("type") != "llm_call":
             continue
         detail = event.get("detail")
         if not isinstance(detail, dict):
             continue
-
-        event_date = _event_date(event)
-        if event_date is None:
-            continue
-        if event_date.strftime("%Y-%m") == current_month:
-            _add_event(month_stats, detail, cfg)
-        if event_date == current_date:
-            _add_event(today_stats, detail, cfg)
-
-    return {"today": today_stats, "month": month_stats}
+        _add_event(stats, detail, config)
 
 
 def _add_event(stats: TokenStats, detail: dict[str, Any], config: dict[str, Any]) -> None:
@@ -79,17 +78,4 @@ def _estimate_cost(model: str, tokens_in: int, tokens_out: int, config: dict[str
     if input_per_1k is None or output_per_1k is None:
         return None
     return tokens_in / 1000 * float(input_per_1k) + tokens_out / 1000 * float(output_per_1k)
-
-
-def _event_date(event: dict[str, Any]) -> date | None:
-    ts = event.get("ts")
-    if not isinstance(ts, str):
-        return None
-    try:
-        dt = datetime.fromisoformat(ts)
-    except ValueError:
-        return None
-    if dt.tzinfo is not None:
-        dt = dt.astimezone()
-    return dt.date()
 
