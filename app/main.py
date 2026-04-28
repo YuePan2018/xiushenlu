@@ -12,7 +12,7 @@ from app.config import load_config
 from app.cost import summarize_token_usage
 from app.daily import append_record, read_daily
 from app.inbox import write_today_tasks
-from app.llm.qwen_agent_impl import QwenAgentProvider
+from app.llm.dashscope_impl import DashScopeProvider
 from app.logger import EventLogger
 from app.pipelines.daily_plan import generate_daily_plan
 from app.pipelines.nightly_review import generate_nightly_review
@@ -46,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def smoke_test() -> int:
     config = load_config()
-    provider = QwenAgentProvider(config)
+    provider = DashScopeProvider(config)
     reply = provider.chat("你好，请用一句话确认你已经连通。")
     print(reply)
     return 0
@@ -56,7 +56,7 @@ def run_plan(tasks: str | None = None) -> int:
     config = load_config()
     if tasks is not None:
         write_today_tasks(tasks, config)
-    provider = QwenAgentProvider(config)
+    provider = DashScopeProvider(config)
     result = generate_daily_plan(provider, config=config, tasks_text=tasks)
     print(f"计划已写入：{result.path}")
     print()
@@ -67,7 +67,7 @@ def run_plan(tasks: str | None = None) -> int:
 def run_review(date_str: str | None = None) -> int:
     from datetime import date as _date
     config = load_config()
-    provider = QwenAgentProvider(config)
+    provider = DashScopeProvider(config)
     target_date = _date.fromisoformat(date_str) if date_str else None
     result = generate_nightly_review(provider, config=config, target_date=target_date)
     print(f"复盘已写入：{result.path}")

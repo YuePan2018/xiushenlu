@@ -1,5 +1,5 @@
 from app.llm.provider import LLMProvider
-from app.llm.qwen_agent_impl import QwenAgentProvider
+from app.llm.dashscope_impl import DashScopeProvider
 
-__all__ = ["LLMProvider", "QwenAgentProvider"]
+__all__ = ["LLMProvider", "DashScopeProvider"]
 

@@ -34,7 +34,7 @@
 - 使用 `read_goals()` 只读读取 `data/memory/goals.md`；该文件属于个人数据，不提交到版本库。
 - 运行 `python app/main.py plan`，读取长期目标和今日待办，生成当天计划并写入 `data/user_records/YYYY-MM-DD.md`。
 - 运行 `python app/main.py log "内容"`，向当天 daily 追加记录。
-- 运行 `python app/main.py review`，根据当天 daily 和事件日志生成复盘。
+- 运行 `python app/main.py review`，根据当天 daily 和事件日志生成复盘；可加 `--date YYYY-MM-DD` 指定历史日期。
 - 运行 `python app/main.py status`，查看当天 daily 内容。
 - 运行 `python app/main.py cost`，查看今日和本月 LLM token 消耗，并把统计写入当天 daily 的记录区块。
 - 使用路径白名单保护运行时文件读写，并阻止普通流程改写 `data/memory/goals.md`。
@@ -165,6 +165,7 @@ python app/main.py log "今天完成了一个关键任务"
 
 ```powershell
 python app/main.py review
+python app/main.py review --date 2026-04-27  # 指定历史日期
 ```
 
 查看今日状态：
