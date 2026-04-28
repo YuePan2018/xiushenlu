@@ -56,24 +56,19 @@ def _events_for_date(logger: EventLogger, date_text: str) -> list[dict[str, Any]
 
 
 def _build_prompt(date_text: str, daily_text: str, events: list[dict[str, Any]]) -> str:
-    daily = daily_text.strip() or "（今天还没有 daily 记录）"
-    event_lines = "\n".join(_format_event(event) for event in events) or "（今天还没有事件日志）"
-    return f"""你是修身炉，一个帮助用户复盘学习和工作的个人执行助手。
+    daily_records = daily_text.strip() or "（今天还没有 daily 记录）"
+    return f"""你是一个帮助用户复盘学习和工作的个人执行助手。
 
-请根据 {date_text} 的 daily 记录和事件日志，生成晚间复盘。
+请根据 {date_text} 的 daily 记录，生成review。
 
 要求：
-- 用中文输出。
-- 必须基于事实记录，不要空泛表扬。
-- 输出“完成了什么”“能力增长/值得肯定的行为”“卡点或风险”“明日建议”四部分。
-- 如果记录很少，要先指出资料不足，再给出温和、具体的补记录建议。
-- 不要使用 emoji。
+- 重点分析学习工作的安排和工程经验，而不是每个目标的技术实现!
+- 输出“完成了什么”“改进建议”“值得肯定的行为”三部分。
+- daily记录的“##记录”标题下，没有的内容，说明没有完成。记录的内容，可能包含不是原定计划。
+- 最后基于事实，给予一句话的表扬。
 
 Daily 记录：
-{daily}
-
-事件日志：
-{event_lines}
+{daily_records}
 """
 
 

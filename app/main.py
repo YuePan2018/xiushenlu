@@ -32,7 +32,8 @@ def build_parser() -> argparse.ArgumentParser:
     plan = subparsers.add_parser("plan", help="生成今日计划")
     plan.add_argument("--tasks", help="直接传入今日待办，并写入 data/user_inputs/today_tasks.md")
 
-    subparsers.add_parser("review", help="生成晚间复盘")
+    review = subparsers.add_parser("review", help="生成晚间复盘")
+    review.add_argument("--date", help="指定日期，格式 YYYY-MM-DD，默认今天")
 
     log = subparsers.add_parser("log", help="添加一条今日记录")
     log.add_argument("content", nargs="+", help="记录内容")
@@ -63,10 +64,12 @@ def run_plan(tasks: str | None = None) -> int:
     return 0
 
 
-def run_review() -> int:
+def run_review(date_str: str | None = None) -> int:
+    from datetime import date as _date
     config = load_config()
     provider = QwenAgentProvider(config)
-    result = generate_nightly_review(provider, config=config)
+    target_date = _date.fromisoformat(date_str) if date_str else None
+    result = generate_nightly_review(provider, config=config, target_date=target_date)
     print(f"复盘已写入：{result.path}")
     print()
     print(result.review)
@@ -136,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "plan":
         return run_plan(tasks=args.tasks)
     if args.command == "review":
-        return run_review()
+        return run_review(date_str=args.date)
     if args.command == "log":
         return run_log(args.content)
     if args.command == "status":
