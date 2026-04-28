@@ -104,9 +104,9 @@ def run_status() -> int:
 
 def run_cost() -> int:
     config = load_config()
-    stats = summarize_token_usage(config)
-    today_text = _format_stats("今日", stats["today"], config)
-    month_text = _format_stats("本月", stats["month"], config)
+    stats = summarize_token_usage()
+    today_text = _format_stats("今日", stats["today"])
+    month_text = _format_stats("本月", stats["month"])
     report = f"{today_text}\n\n{month_text}"
     print(report)
 
@@ -116,7 +116,7 @@ def run_cost() -> int:
     return 0
 
 
-def _format_stats(label: str, stats, config: dict) -> str:
+def _format_stats(label: str, stats) -> str:
     lines = [
         f"{label} LLM 调用：{stats.calls} 次",
         f"输入 token：{stats.tokens_in}",
