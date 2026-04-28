@@ -17,7 +17,14 @@ logging.disable(logging.INFO)
 
 
 class QwenAgentProvider(LLMProvider):
-    """Qwen Agent implementation backed by DashScope credentials."""
+    """Qwen Agent implementation backed by DashScope credentials.
+
+    注意：Qwen3 系列模型（如 qwen3.5-plus）默认开启 thinking mode，
+    <think> 内容会污染 tool call JSON 解析，导致 qwen-agent 报错。
+    使用 Qwen3 模型时须在 llm_config 中加：
+        "extra_body": {"enable_thinking": False}
+    旧版 qwen-coder 等非 Qwen3 模型无此问题。
+    """
 
     def __init__(self, config: Mapping[str, Any]) -> None:
         load_dotenv()
