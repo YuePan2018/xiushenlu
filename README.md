@@ -1,243 +1,148 @@
 # 修身炉
 
-修身炉是一个面向个人认知与执行管理的本地助手项目。当前版本已完成 Phase 1 的最小闭环：项目骨架、配置加载、Qwen Agent LLM Provider、事件日志、计划、记录、复盘、状态查看、token 统计和基础路径安全。
+修身炉是一个面向个人认知与执行管理的本地助手项目。当前版本已完成 Phase 1 的最小闭环：配置加载、DashScope 直调 LLM Provider、事件日志、计划、记录、复盘、状态查看、token 统计和基础路径安全。
 
-它可以作为一个程序员面试项目来讲：核心不是“做了一个聊天机器人”，而是展示如何把 LLM 能力放进一个本地优先、可追踪、可审计、可逐步授权的执行系统里。
-
-第一阶段目标是先跑通最小闭环：
+它不是一个完整自主 agent，也不是后台调度系统。当前定位是一个可追踪、可审计、可逐步扩展的本地 Python CLI 执行闭环：
 
 ```text
-记录 -> 计划 -> 复盘
+长期目标 + 今日待办 -> 今日计划 -> 过程记录 -> 晚间复盘 -> token 统计
 ```
-
-当前还不是完整自主 agent，也不是自动化调度系统。它现在是一个可继续扩展的本地 Python CLI 执行闭环。
 
 ## 项目亮点
 
-- **LLM Provider 抽象**：业务 pipeline 依赖 `LLMProvider.chat()`，当前实现是 Qwen Agent，后续可以替换其他模型。
-- **固定 pipeline 优先**：先把计划、记录、复盘做成可解释流程，而不是一开始引入不可控 agent loop。
-- **双层数据**：Markdown daily 给用户阅读，按日 JSON Lines events 给机器统计、审计和复盘。
-- **安全边界**：用路径白名单限制文件读写，并保护长期目标文件不被普通流程改写。
-- **数据隐私**：`data/` 下实际个人数据和运行数据不提交，只提交 example 模板和目录占位。
-- **成本意识**：每次 LLM 调用记录 token usage，`cost` 命令本地统计并写入 daily。
+| 亮点 | 当前实现 |
+| --- | --- |
+| LLM Provider 抽象 | 业务 pipeline 只依赖 `LLMProvider.chat(prompt)`，当前主实现是 `DashScopeProvider`。 |
+| 固定 pipeline 优先 | 由代码控制流程，LLM 只负责生成计划/复盘文本，不让模型自行决定工具调用。 |
+| 双层数据 | Markdown daily 给用户阅读，按日 JSON Lines events 给机器统计、审计和复盘。 |
+| 安全边界 | 用路径白名单限制文件读写，并保护长期目标文件不被普通流程改写。 |
+| 数据隐私 | `data/` 下实际个人数据和运行数据默认不提交，只提交模板、占位文件和说明文档。 |
+| 成本意识 | 每次 LLM 调用记录 token usage，`cost` 命令本地统计并写入 daily。 |
 
-## 当前能做到什么
+## Demo 流程
 
-- 使用独立 conda 环境 `xiushenlu` 运行项目。
-- 从 `config/app.yaml` 读取模型、超时、重试次数、数据目录等配置。
-- 通过 `DASHSCOPE_API_KEY` 连接 DashScope。
-- 使用 `qwen_agent.agents.Assistant` 调用 Qwen 模型。
-- 提供一个薄的 `LLMProvider.chat(prompt) -> str` 抽象，后续每日计划、晚间复盘 pipeline 可以复用。
-- 运行 `python app/main.py`，向模型发送一句测试 prompt，并打印模型回复。
-- 使用 `EventLogger.append_event(type, summary, detail=None)` 追加写入本地每日事件日志。
-- 已有数据目录约定说明和长期目标模板。
-- 使用 `read_goals()` 只读读取 `data/memory/goals.md`；该文件属于个人数据，不提交到版本库。
-- 运行 `python app/main.py plan`，读取长期目标和今日待办，生成当天计划并写入 `data/user_records/YYYY-MM-DD.md`。
-- 运行 `python app/main.py log "内容"`，向当天 daily 追加记录。
-- 运行 `python app/main.py review`，根据当天 daily 和事件日志生成复盘；可加 `--date YYYY-MM-DD` 指定历史日期。
-- 运行 `python app/main.py status`，查看当天 daily 内容。
-- 运行 `python app/main.py cost`，查看今日和本月 LLM token 消耗，并把统计写入当天 daily 的记录区块。
-- 使用路径白名单保护运行时文件读写，并阻止普通流程改写 `data/memory/goals.md`。
-- 已建立 Phase 1 需要的数据目录：
-  - `data/user_records/`
-  - `data/user_inputs/`
-  - `data/memory/`
-  - `data/system_logs/`
-
-## 当前还不能做什么
-
-- 还没有定时调度。
-- 还没有手机通知。
-- 还没有 Web 控制台。
-
-这些能力会在后续里程碑中逐步补齐。
-
-## 架构概览
-
-```mermaid
-flowchart TD
-    User["用户 / 后续 agent"] --> CLI["CLI: app/main.py"]
-    CLI --> Plan["plan pipeline"]
-    CLI --> Log["log"]
-    CLI --> Review["review pipeline"]
-    CLI --> Status["status"]
-    CLI --> Cost["cost"]
-
-    Plan --> Goals["data/memory/goals.md"]
-    Plan --> Tasks["data/user_inputs/today_tasks.md"]
-    Plan --> LLM["LLMProvider / QwenAgentProvider"]
-    Review --> Daily["data/user_records/YYYY-MM-DD.md"]
-    Review --> Events["data/system_logs/YYYY-MM-DD.jsonl"]
-    Review --> LLM
-
-    Log --> Daily
-    Plan --> Daily
-    Review --> Daily
-    Cost --> Daily
-
-    Plan --> Events
-    Log --> Events
-    Review --> Events
-    Cost --> Events
-
-    Safety["app/safety.py"] --> Daily
-    Safety --> Events
-```
-
-更详细的面试讲解、流程图和结构图见 `docs/执行/2026-04-19.md`。
-
-## 环境
-
-本项目使用 conda 环境：
+在项目根目录运行：
 
 ```powershell
 conda activate xiushenlu
+
+# 1. 写入今日待办并生成计划，会调用 LLM
+python app/main.py plan --tasks "今天完成项目文档更新；整理面试讲解；晚上复盘"
+
+# 2. 过程中追加记录，不调用 LLM
+python app/main.py log "完成 README 和 AGENTS 的文档修正"
+python app/main.py log "补充 pipeline 参数表和模块职责表"
+
+# 3. 查看今天的 daily，不调用 LLM
+python app/main.py status
+
+# 4. 根据当天 daily 生成复盘，会调用 LLM
+python app/main.py review
+
+# 5. 统计今日和本月 token，不调用 LLM
+python app/main.py cost
 ```
 
-如果以后需要从配置文件重建环境，可以参考：
+这组命令会产生两类本地文件：
 
-```powershell
-conda env create -f environment.yml
-```
+| 文件 | 用途 |
+| --- | --- |
+| `data/user_inputs/today_tasks.md` | 今日待办输入。`plan --tasks "..."` 会覆盖写入它。 |
+| `data/user_records/YYYY-MM-DD.md` | 人类可读 daily，包含计划、记录、复盘和 token 统计。 |
+| `data/system_logs/YYYY-MM-DD.jsonl` | 机器可读事件流，记录 `llm_call`、`plan_generated`、`user_log`、`review_generated`。 |
 
-依赖清单也保留在 `requirements.txt`
+## 命令与参数
+
+| 命令 | 参数 | 是否调用 LLM | 作用 | 主要读写 |
+| --- | --- | --- | --- | --- |
+| `python app/main.py` | 无 | 是 | smoke test，发送一句连通性 prompt | 只输出到控制台 |
+| `python app/main.py plan` | 无 | 是 | 根据长期目标和 `today_tasks.md` 生成今日计划 | 读 `goals.md` / `today_tasks.md`，写 daily 和 events |
+| `python app/main.py plan --tasks "..."` | `--tasks`：今日待办文本 | 是 | 先覆盖写入今日待办，再生成计划 | 写 `today_tasks.md`，写 daily 和 events |
+| `python app/main.py log "..."` | 位置参数：记录内容，可多词 | 否 | 追加一条过程记录 | 写 daily 的 `记录` 区块，写 `user_log` 事件 |
+| `python app/main.py review` | 无 | 是 | 根据今天的 daily 生成晚间复盘 | 读 daily，写 daily 和 events |
+| `python app/main.py review --date YYYY-MM-DD` | `--date`：历史日期 | 是 | 对指定日期生成复盘 | 读指定日期 daily/events，写指定日期 daily/events |
+| `python app/main.py status` | 无 | 否 | 打印今天的 daily | 读 daily |
+| `python app/main.py cost` | 无 | 否 | 汇总今日和本月 token，并追加到 daily | 读 events，写 daily 的 `记录` 区块 |
+
 
 ## 配置
 
-主配置文件是：
+主配置文件是 `config/app.yaml`。
+
+| 配置段 | 当前值/含义 |
+| --- | --- |
+| `llm.provider` | `dashscope`，表示当前主路径是 DashScope SDK 直调。 |
+| `llm.model` | 当前默认 `qwen3.5-plus`。 |
+| `llm.api_key_env` | 默认 `DASHSCOPE_API_KEY`，也可通过项目根目录 `.env` 加载。 |
+| `assistant.system_prompt` | Provider 发送给模型的 system prompt。 |
+| `paths.*` | daily、inbox、memory、logs、state、quarantine 等目录。 |
+| `safety.allowed_dirs` | 允许读写的数据目录白名单。 |
+| `safety.protected_files` | 受保护文件，当前包含 `data/memory/goals.md`。 |
+
+当前代码主路径：
 
 ```text
-config/app.yaml
+app/main.py -> app.llm.dashscope_impl.DashScopeProvider -> dashscope.MultiModalConversation.call()
 ```
 
-当前默认模型：
+`app/llm/qwen_agent_impl.py` 仍保留为历史/备选实现，但 CLI 当前不使用它。
 
-```yaml
-llm:
-  provider: qwen_agent
-  model: "qwen3-max-2026-01-23"
-  timeout: 30
-  retry_count: 2
-  api_key_env: "DASHSCOPE_API_KEY"
-```
+## app 模块职责
 
-需要确保环境变量 `DASHSCOPE_API_KEY` 可用。也可以在项目根目录放 `.env` 文件，由 `python-dotenv` 自动加载。
+| 文件 | coding 职责 | 主要依赖 |
+| --- | --- | --- |
+| `app/main.py` | CLI 命令入口；解析参数；加载配置；组装 Provider；调用 pipeline 或本地读写函数。 | `config`、`DashScopeProvider`、`daily`、`inbox`、`logger`、`cost`、`pipelines` |
+| `app/config.py` | 读取 YAML 配置；把相对路径解析到项目根目录。 | `yaml`、`pathlib` |
+| `app/llm/provider.py` | 定义 `LLMProvider.chat()` 抽象和 `LLMCallUsage` 结构。 | 标准库 |
+| `app/llm/dashscope_impl.py` | 当前主 LLM 实现；读取 `DASHSCOPE_API_KEY`；调用 DashScope；记录 usage。 | `dashscope`、`python-dotenv`、`provider` |
+| `app/llm/qwen_agent_impl.py` | 历史/备选 `qwen_agent` 实现，当前 CLI 不走这条路径。 | `qwen_agent`、`dashscope`、`provider` |
+| `app/llm/usage.py` | 把 Provider 的 `last_usage` 写成 `llm_call` 事件。 | `logger`、`provider` |
+| `app/pipelines/daily_plan.py` | 今日计划 pipeline：读 goals/tasks，构造 prompt，调用 LLM，写 daily 和事件。 | `config`、`daily`、`inbox`、`goals`、`provider`、`usage`、`logger` |
+| `app/pipelines/nightly_review.py` | 晚间复盘 pipeline：读 daily/events，构造 prompt，调用 LLM，写 daily 和事件。 | `config`、`daily`、`provider`、`usage`、`logger` |
+| `app/daily.py` | daily Markdown 路径、读取、区块替换、记录追加。 | `config`、`safety` |
+| `app/inbox.py` | `today_tasks.md` 读取和写入。 | `config`、`safety` |
+| `app/memory/goals.py` | 长期目标只读读取。 | `config`、`safety` |
+| `app/logger.py` | 按日 JSON Lines 事件追加和读取。 | `config`、`safety` |
+| `app/cost.py` | 汇总本地 `llm_call` 事件，统计今日和本月 token。 | `logger` |
+| `app/safety.py` | 路径白名单、protected file 检查、安全读写封装。 | `config`、`pathlib` |
 
-## 运行
+## 数据规则
 
-在项目根目录执行：
+`data/` 下实际个人数据和运行数据默认不提交到 Git。
+
+| 可以提交 | 不应提交 |
+| --- | --- |
+| `data/README.md` | `data/user_records/*.md` |
+| `.gitkeep` | `data/user_inputs/today_tasks.md` |
+| `*.example.md` | `data/memory/goals.md` |
+|  | `data/system_logs/*.jsonl` |
+|  | `data/state/*` |
+|  | `data/quarantine/*` |
+
+## 验证建议
+
+不需要 LLM 的文档或本地逻辑改动至少跑：
 
 ```powershell
-conda activate xiushenlu
-python app/main.py
-```
-
-成功时会看到模型返回一句确认连通的回复。
-
-生成今日计划：
-
-```powershell
-conda activate xiushenlu
-python app/main.py plan
-```
-
-计划命令会读取：
-
-- `data/memory/goals.md`：长期目标，只读输入。
-- `data/user_inputs/today_tasks.md`：今日待办，可由用户或 agent 更新。
-
-`data/user_inputs/` 是当天输入篮子，用来放临时材料、今日待办、待总结片段和后续 agent 准备处理的材料。`today_tasks.md` 是当天计划最直接的任务来源；如果使用 `python app/main.py plan --tasks "..."`，传入内容会同步写回 `data/user_inputs/today_tasks.md`，后续 agent 也可以用这个入口更新当天待办。
-
-`data/` 下的实际个人数据和运行数据默认不提交到版本库；可提交的是 `*.example.md` 模板、目录占位文件和说明文档。
-
-输出会写入：
-
-- `data/user_records/YYYY-MM-DD.md`
-- `data/system_logs/YYYY-MM-DD.jsonl`
-
-添加今日记录：
-
-```powershell
-python app/main.py log "今天完成了一个关键任务"
-```
-
-生成晚间复盘：
-
-```powershell
-python app/main.py review
-python app/main.py review --date 2026-04-27  # 指定历史日期
-```
-
-查看今日状态：
-
-```powershell
+python -m compileall app
+python app/main.py --help
 python app/main.py status
 ```
 
-查看 token 消耗：
+只有改到 `app/cost.py`、事件日志统计、token usage 记录或相关展示时，才额外运行：
 
 ```powershell
 python app/main.py cost
 ```
 
-该命令会打印 token 统计，并把同一份统计追加到当天 daily 的 `记录` 区块。当前优先统计 token，不做费用估算。
-
-`cost` 不调用 LLM，只读取本地 `data/system_logs/YYYY-MM-DD.jsonl` 中的 `llm_call` 事件。
-
-## 当前目录结构
-
-```text
-xiushenlu/
-  app/
-    main.py
-    config.py
-    daily.py
-    inbox.py
-    logger.py
-    safety.py
-    cost.py
-    llm/
-      provider.py
-      qwen_agent_impl.py
-    pipelines/
-      daily_plan.py
-      nightly_review.py
-  config/
-    app.yaml
-  data/
-    user_records/
-    user_inputs/
-    memory/
-    system_logs/
-    state/
-    quarantine/
-  docs/
-    规划/
-    吸纳/
-    执行/
-  llm/
-  environment.yml
-  requirements.txt
-  README.md
-  AGENTS.md
-```
-
-## 文档
-
-项目文档已按用途整理：
-
-- `docs/规划/`：目标、路线图、能力批次和实施边界。
-- `docs/吸纳/`：外部产品、框架和方案的调研吸收。
-- `docs/执行/`：按日期记录每天实际完成的事。
-
-当前面试向项目总结：
-
-- `docs/执行/2026-04-19.md`
+涉及 `plan` 或 `review` 的改动，再考虑真实 LLM 验证。真实 LLM 验证前确认 `DASHSCOPE_API_KEY` 已配置。
 
 ## 下一步
 
-按照 `docs/规划/2026-04-16_修身炉规划.md`，Phase 1 的能力批次已经完成。下一步进入后续里程碑：
+Phase 1 已完成。下一阶段进入 Milestone 2：
 
-- 自动化与通知：定时运行计划/复盘，并通过 PushPlus / PushDeer 推送。
-- 本地控制台：查看状态、日志、计划和复盘。
-- 更完整的安全与审批：工具注册、审批队列、异常暂停。
+| 方向 | 目标 |
+| --- | --- |
+| 自动化与通知 | 定时运行计划/复盘，并通过 PushPlus / PushDeer 推送。 |
+| 本地控制台 | 查看状态、日志、计划和复盘。 |
+| 安全与审批 | 工具注册、审批队列、异常暂停和预算控制。 |

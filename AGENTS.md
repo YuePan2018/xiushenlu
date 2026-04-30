@@ -21,29 +21,49 @@ conda activate xiushenlu
 python app/main.py --help
 ```
 
-可用命令：
+| 命令 | 参数 | 是否调用 LLM | 作用 |
+| --- | --- | --- | --- |
+| `python app/main.py` | 无 | 是 | smoke test，测试 DashScope 连通性。 |
+| `python app/main.py plan` | 无 | 是 | 读取长期目标和今日待办，生成今日计划。 |
+| `python app/main.py plan --tasks "今天要做的事"` | `--tasks` 覆盖写入 `today_tasks.md` | 是 | 写入今日待办并生成今日计划。 |
+| `python app/main.py log "过程记录"` | 记录文本 | 否 | 追加一条今日过程记录。 |
+| `python app/main.py review` | 无 | 是 | 生成今天的晚间复盘。 |
+| `python app/main.py review --date YYYY-MM-DD` | `--date` 指定历史日期 | 是 | 生成指定日期的复盘。 |
+| `python app/main.py status` | 无 | 否 | 打印今天的 daily。 |
+| `python app/main.py cost` | 无 | 否 | 本地汇总今日和本月 token，并写入 daily。 |
 
-- `python app/main.py plan`
-- `python app/main.py plan --tasks "今天要做的事"`
-- `python app/main.py log "过程记录"`
-- `python app/main.py review`
-- `python app/main.py status`
-- `python app/main.py cost`
+## Pipeline 指令
 
-只有 `plan`、`review` 和默认 smoke test 会调用 LLM。`log`、`status`、`cost` 都是本地操作。
+| Pipeline | 输入 | Prompt/输出约束 | 写入 | 事件 |
+| --- | --- | --- | --- | --- |
+| `daily_plan` | 日期、`goals.md`、`today_tasks.md` 或 `--tasks` | 输出今日待办原文、结合长期目标的简短建议、风险提醒、收尾检查项；可用表格；不用代码块；不以询问句结尾。 | daily 的 `计划` 区块 replace | `llm_call`、`plan_generated` |
+| `nightly_review` | 日期、当天 daily、当天事件日志 | 输出“完成了什么”“改进建议”“值得肯定的行为”；重点分析安排和工程经验；没有记录时明确说明；最后给一句基于事实的表扬。 | daily 的 `复盘` 区块 replace | `llm_call`、`review_generated` |
+| `log` | 手动记录文本 | 不调用 LLM | daily 的 `记录` 区块 append | `user_log` |
+| `cost` | 本地 `llm_call` 事件 | 不调用 LLM，不做费用估算 | daily 的 `记录` 区块 append | 不新增 cost 事件 |
 
 ## 代码边界
 
-- `app/main.py`：CLI 命令入口。
-- `app/pipelines/daily_plan.py`：今日计划 pipeline。
-- `app/pipelines/nightly_review.py`：晚间复盘 pipeline。
-- `app/llm/provider.py`：LLM Provider 抽象。
-- `app/llm/qwen_agent_impl.py`：Qwen Agent Provider 实现。
-- `app/daily.py`：daily Markdown 读写。
-- `app/inbox.py`：today tasks 读写。
-- `app/logger.py`：按日 events JSON Lines 日志。
-- `app/cost.py`：本地 token 汇总。
-- `app/safety.py`：路径白名单和 protected file 检查。
+| 文件 | 职责 |
+| --- | --- |
+| `app/main.py` | CLI 命令入口，当前使用 `DashScopeProvider`。 |
+| `app/pipelines/daily_plan.py` | 今日计划 pipeline。 |
+| `app/pipelines/nightly_review.py` | 晚间复盘 pipeline。 |
+| `app/llm/provider.py` | LLM Provider 抽象和 usage 结构。 |
+| `app/llm/dashscope_impl.py` | 当前主 LLM Provider，DashScope SDK 直调。 |
+| `app/llm/qwen_agent_impl.py` | 历史/备选 `qwen_agent` 实现，当前 CLI 不使用。 |
+| `app/llm/usage.py` | 将 Provider usage 写入 `llm_call` 事件。 |
+| `app/daily.py` | daily Markdown 读写。 |
+| `app/inbox.py` | today tasks 读写。 |
+| `app/memory/goals.py` | 长期目标只读读取。 |
+| `app/logger.py` | 按日 events JSON Lines 日志。 |
+| `app/cost.py` | 本地 token 汇总。 |
+| `app/safety.py` | 路径白名单和 protected file 检查。 |
+
+当前主 LLM 路径：
+
+```text
+app/main.py -> DashScopeProvider -> dashscope.MultiModalConversation.call()
+```
 
 ## 数据规则
 
@@ -75,7 +95,7 @@ python app/main.py --help
 - `user_log`
 - `review_generated`
 
-不要重新加入 `today_tasks_updated` 或 `cost_reported`。
+不要重新加入 `today_tasks_updated`、`cost_reported` 或其他临时事件，除非先同步更新统计和文档。
 
 ## 安全规则
 
