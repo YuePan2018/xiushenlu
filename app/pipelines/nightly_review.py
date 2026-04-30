@@ -67,6 +67,10 @@ def _build_prompt(date_text: str, daily_text: str, events: list[dict[str, Any]])
 - daily记录的“##记录”标题下，没有的内容，说明没有完成。记录的内容，可能包含不是原定计划。
 - 最后基于事实，给予一句话的表扬。
 
+“记录”的标签：
+“临时：”代表临时插入的任务，不在当天任务计划内
+“经验：”代表学习和工作中产生的心得，需要在review中总结归纳。
+
 Daily 记录：
 {daily_records}
 """
