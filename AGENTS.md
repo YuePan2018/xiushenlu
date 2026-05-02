@@ -26,6 +26,7 @@ python app/main.py --help
 | `python app/main.py` | 无 | 是 | smoke test，测试 DashScope 连通性。 |
 | `python app/main.py plan` | 无 | 是 | 读取长期目标和今日待办，生成今日计划。 |
 | `python app/main.py plan --tasks "今天要做的事"` | `--tasks` 覆盖写入 `today_tasks.md` | 是 | 写入今日待办并生成今日计划。 |
+| `python app/main.py plan --add "新增任务"` | `--add` 追加一条今日任务 | 是 | 局部更新今日计划；单测已通过，真实链路仍需验收。 |
 | `python app/main.py log "过程记录"` | 记录文本 | 否 | 追加一条今日过程记录。 |
 | `python app/main.py review` | 无 | 是 | 生成今天的晚间复盘。 |
 | `python app/main.py review --date YYYY-MM-DD` | `--date` 指定历史日期 | 是 | 生成指定日期的复盘。 |
@@ -37,6 +38,7 @@ python app/main.py --help
 | Pipeline | 输入 | Prompt/输出约束 | 写入 | 事件 |
 | --- | --- | --- | --- | --- |
 | `daily_plan` | 日期、`goals.md`、`today_tasks.md` 或 `--tasks` | 输出今日待办原文、结合长期目标的简短建议、风险提醒、收尾检查项；可用表格；不用代码块；不以询问句结尾。 | daily 的 `计划` 区块 replace | `llm_call`、`plan_generated` |
+| `plan_update` | 日期、`goals.md`、`today_tasks.md`、当天 daily、`--add` 新任务 | 只输出严格 JSON，包含 `updated_today_tasks`、`updated_daily_original`、`target_heading`、`new_task_advice`；只为新增任务生成建议，不重写整份计划。 | `today_tasks.md` replace；daily 的 `计划` 区块局部更新 | `llm_call`、`plan_updated` |
 | `nightly_review` | 日期、当天 daily、当天事件日志 | 输出“完成了什么”“改进建议”“值得肯定的行为”；重点分析安排和工程经验；没有记录时明确说明；最后给一句基于事实的表扬。 | daily 的 `复盘` 区块 replace | `llm_call`、`review_generated` |
 | `log` | 手动记录文本 | 不调用 LLM | daily 的 `记录` 区块 append | `user_log` |
 | `cost` | 本地 `llm_call` 事件 | 不调用 LLM，不做费用估算 | daily 的 `记录` 区块 append | 不新增 cost 事件 |
@@ -47,6 +49,7 @@ python app/main.py --help
 | --- | --- |
 | `app/main.py` | CLI 命令入口，当前使用 `DashScopeProvider`。 |
 | `app/pipelines/daily_plan.py` | 今日计划 pipeline。 |
+| `app/pipelines/plan_update.py` | 日内计划局部更新 pipeline；已有单测，真实 LLM 链路待验收。 |
 | `app/pipelines/nightly_review.py` | 晚间复盘 pipeline。 |
 | `app/llm/provider.py` | LLM Provider 抽象和 usage 结构。 |
 | `app/llm/dashscope_impl.py` | 当前主 LLM Provider，DashScope SDK 直调。 |
@@ -88,14 +91,15 @@ app/main.py -> DashScopeProvider -> dashscope.MultiModalConversation.call()
 
 `data/user_inputs/today_tasks.md` 是当天输入，可以由用户手写，也可以通过 `python app/main.py plan --tasks "..."` 更新。
 
-当前正式事件类型只有：
+当前文档化事件类型：
 
 - `llm_call`
 - `plan_generated`
+- `plan_updated`
 - `user_log`
 - `review_generated`
 
-不要重新加入 `today_tasks_updated`、`cost_reported` 或其他临时事件，除非先同步更新统计和文档。
+不要重新加入 `today_tasks_updated`、`cost_reported` 或其他临时事件，除非先同步更新统计和文档。`plan_updated` 只对应 `plan --add` 的日内计划局部更新；在真实链路验收前，不要依赖它扩展统计口径。
 
 ## 安全规则
 
@@ -122,6 +126,7 @@ docs/执行/2026-04-19.md
 - `README.md`
 - `AGENTS.md`
 - `docs/执行/YYYY-MM-DD.md`
+- `docs/规划/2026-04-16_修身炉规划.md`
 
 ## 验证建议
 
@@ -140,6 +145,14 @@ python app/main.py cost
 ```
 
 涉及 `plan` 或 `review` 的改动，再考虑真实 LLM 验证。真实 LLM 验证前确认 `DASHSCOPE_API_KEY` 已配置。
+
+涉及 `plan --add` 或 `app/pipelines/plan_update.py` 时，优先跑：
+
+```powershell
+python -m unittest tests.test_plan_update
+```
+
+如果单测超时或失败，先不要把 `plan --add` 视为已验收能力。即使单测通过，进入自动化前仍要做一次真实 LLM 链路验收。
 
 ## 设计取舍
 

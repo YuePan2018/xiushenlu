@@ -29,27 +29,30 @@ conda activate xiushenlu
 # 1. 写入今日待办并生成计划，会调用 LLM
 python app/main.py plan --tasks "今天完成项目文档更新；整理面试讲解；晚上复盘"
 
-# 2. 过程中追加记录，不调用 LLM
+# 2. 可选：临时新增任务并局部更新今日计划，会调用 LLM
+python app/main.py plan --add "补一版 plan_update 单测"
+
+# 3. 过程中追加记录，不调用 LLM
 python app/main.py log "完成 README 和 AGENTS 的文档修正"
 python app/main.py log "补充 pipeline 参数表和模块职责表"
 
-# 3. 查看今天的 daily，不调用 LLM
+# 4. 查看今天的 daily，不调用 LLM
 python app/main.py status
 
-# 4. 根据当天 daily 生成复盘，会调用 LLM
+# 5. 根据当天 daily 生成复盘，会调用 LLM
 python app/main.py review
 
-# 5. 统计今日和本月 token，不调用 LLM
+# 6. 统计今日和本月 token，不调用 LLM
 python app/main.py cost
 ```
 
-这组命令会产生两类本地文件：
+这组命令会产生三类本地文件：
 
 | 文件 | 用途 |
 | --- | --- |
 | `data/user_inputs/today_tasks.md` | 今日待办输入。`plan --tasks "..."` 会覆盖写入它。 |
 | `data/user_records/YYYY-MM-DD.md` | 人类可读 daily，包含计划、记录、复盘和 token 统计。 |
-| `data/system_logs/YYYY-MM-DD.jsonl` | 机器可读事件流，记录 `llm_call`、`plan_generated`、`user_log`、`review_generated`。 |
+| `data/system_logs/YYYY-MM-DD.jsonl` | 机器可读事件流，记录 `llm_call`、`plan_generated`、`plan_updated`、`user_log`、`review_generated`。 |
 
 ## 命令与参数
 
@@ -58,11 +61,14 @@ python app/main.py cost
 | `python app/main.py` | 无 | 是 | smoke test，发送一句连通性 prompt | 只输出到控制台 |
 | `python app/main.py plan` | 无 | 是 | 根据长期目标和 `today_tasks.md` 生成今日计划 | 读 `goals.md` / `today_tasks.md`，写 daily 和 events |
 | `python app/main.py plan --tasks "..."` | `--tasks`：今日待办文本 | 是 | 先覆盖写入今日待办，再生成计划 | 写 `today_tasks.md`，写 daily 和 events |
+| `python app/main.py plan --add "..."` | `--add`：新增今日任务 | 是 | 追加一条今日待办，并局部更新当天计划 | 写 `today_tasks.md`，写 daily 和 `plan_updated` 事件 |
 | `python app/main.py log "..."` | 位置参数：记录内容，可多词 | 否 | 追加一条过程记录 | 写 daily 的 `记录` 区块，写 `user_log` 事件 |
 | `python app/main.py review` | 无 | 是 | 根据今天的 daily 生成晚间复盘 | 读 daily，写 daily 和 events |
 | `python app/main.py review --date YYYY-MM-DD` | `--date`：历史日期 | 是 | 对指定日期生成复盘 | 读指定日期 daily/events，写指定日期 daily/events |
 | `python app/main.py status` | 无 | 否 | 打印今天的 daily | 读 daily |
 | `python app/main.py cost` | 无 | 否 | 汇总今日和本月 token，并追加到 daily | 读 events，写 daily 的 `记录` 区块 |
+
+`plan --add` 是日内计划更新入口，目前本地单测已覆盖解析、写入和失败保护。它要求模型返回严格 JSON；如果解析失败，流程会停止写入 `today_tasks.md` 和 daily。进入自动化前，还需要完成一次真实 DashScope 链路验收。
 
 
 ## 配置
@@ -98,6 +104,7 @@ app/main.py -> app.llm.dashscope_impl.DashScopeProvider -> dashscope.MultiModalC
 | `app/llm/qwen_agent_impl.py` | 历史/备选 `qwen_agent` 实现，当前 CLI 不走这条路径。 | `qwen_agent`、`dashscope`、`provider` |
 | `app/llm/usage.py` | 把 Provider 的 `last_usage` 写成 `llm_call` 事件。 | `logger`、`provider` |
 | `app/pipelines/daily_plan.py` | 今日计划 pipeline：读 goals/tasks，构造 prompt，调用 LLM，写 daily 和事件。 | `config`、`daily`、`inbox`、`goals`、`provider`、`usage`、`logger` |
+| `app/pipelines/plan_update.py` | 日内计划更新 pipeline：读 goals/tasks/daily，追加新增任务，局部更新 daily 计划并写事件。 | `config`、`daily`、`inbox`、`goals`、`provider`、`usage`、`logger`、`safety` |
 | `app/pipelines/nightly_review.py` | 晚间复盘 pipeline：读 daily/events，构造 prompt，调用 LLM，写 daily 和事件。 | `config`、`daily`、`provider`、`usage`、`logger` |
 | `app/daily.py` | daily Markdown 路径、读取、区块替换、记录追加。 | `config`、`safety` |
 | `app/inbox.py` | `today_tasks.md` 读取和写入。 | `config`、`safety` |
@@ -137,6 +144,14 @@ python app/main.py cost
 
 涉及 `plan` 或 `review` 的改动，再考虑真实 LLM 验证。真实 LLM 验证前确认 `DASHSCOPE_API_KEY` 已配置。
 
+涉及 `plan --add` 或 `app/pipelines/plan_update.py` 时，优先跑：
+
+```powershell
+python -m unittest tests.test_plan_update
+```
+
+2026-05-02 已在 `xiushenlu` conda 环境下验证通过；真实 LLM 端到端链路仍需单独验收。
+
 ## 下一步
 
 Phase 1 已完成。下一阶段进入 Milestone 2：
@@ -146,3 +161,5 @@ Phase 1 已完成。下一阶段进入 Milestone 2：
 | 自动化与通知 | 定时运行计划/复盘，并通过 PushPlus / PushDeer 推送。 |
 | 本地控制台 | 查看状态、日志、计划和复盘。 |
 | 安全与审批 | 工具注册、审批队列、异常暂停和预算控制。 |
+
+进入自动化前，先完成 `plan --add` 的真实链路验收，避免调度器自动放大未验收的写入风险。
