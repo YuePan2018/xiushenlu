@@ -128,20 +128,34 @@ docs/执行/2026-04-19.md
 - `docs/执行/YYYY-MM-DD.md`
 - `docs/规划/2026-04-16_修身炉规划.md`
 
+## 自动化运行注意
+
+- 后续 agent 或自动化运行 Python/验证命令时，默认使用 `conda run -n xiushenlu python ...`，不要直接使用裸 `python ...`。
+- 不要假设 `conda activate xiushenlu` 会跨工具调用或跨 shell 生效；如果使用 `conda activate`，必须和实际 Python 命令放在同一条 PowerShell 调用中。
+- Windows 下 `conda run` 执行 `--help`、`status` 等中文输出命令时，如果遇到 GBK/Unicode 输出错误，优先设置 UTF-8 环境变量并加 `--no-capture-output`，例如：
+
+```powershell
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
+conda run --no-capture-output -n xiushenlu python app/main.py --help
+```
+
+- 如果 `rg` 在当前环境里被拒绝执行，改用 PowerShell 原生命令检索，例如 `Get-ChildItem` 和 `Select-String`。
+
 ## 验证建议
 
 不需要 LLM 的改动至少跑：
 
 ```powershell
-python -m compileall app
-python app/main.py --help
-python app/main.py status
+conda run -n xiushenlu python -m compileall app
+conda run --no-capture-output -n xiushenlu python app/main.py --help
+conda run --no-capture-output -n xiushenlu python app/main.py status
 ```
 
 只有改到 `app/cost.py`、事件日志统计、token usage 记录或相关展示时，才需要额外运行：
 
 ```powershell
-python app/main.py cost
+conda run --no-capture-output -n xiushenlu python app/main.py cost
 ```
 
 涉及 `plan` 或 `review` 的改动，再考虑真实 LLM 验证。真实 LLM 验证前确认 `DASHSCOPE_API_KEY` 已配置。
@@ -149,7 +163,7 @@ python app/main.py cost
 涉及 `plan --add` 或 `app/pipelines/plan_update.py` 时，优先跑：
 
 ```powershell
-python -m unittest tests.test_plan_update
+conda run -n xiushenlu python -m unittest tests.test_plan_update
 ```
 
 如果单测超时或失败，先不要把 `plan --add` 视为已验收能力。即使单测通过，进入自动化前仍要做一次真实 LLM 链路验收。
