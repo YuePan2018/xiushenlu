@@ -35,6 +35,27 @@ def summarize_token_usage(
     return {"today": today_stats, "month": month_stats}
 
 
+def format_token_report(stats: dict[str, TokenStats]) -> str:
+    today_text = format_token_stats("今日", stats["today"])
+    month_text = format_token_stats("本月", stats["month"])
+    return f"{today_text}\n\n{month_text}"
+
+
+def format_token_stats(label: str, stats: TokenStats) -> str:
+    lines = [
+        f"{label} LLM 调用：{stats.calls} 次",
+        f"输入 token：{stats.tokens_in}",
+        f"输出 token：{stats.tokens_out}",
+        f"总 token：{stats.total_tokens}",
+        f"估算调用：{stats.estimated_calls} 次",
+    ]
+    if stats.by_model:
+        lines.append("按模型：")
+        for model, total in sorted(stats.by_model.items()):
+            lines.append(f"- {model}: {total} tokens")
+    return "\n".join(lines)
+
+
 def _add_llm_events(stats: TokenStats, events: list[dict[str, Any]]) -> None:
     for event in events:
         if event.get("type") != "llm_call":

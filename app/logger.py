@@ -18,8 +18,9 @@ MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 class EventLogger:
     """Append-only JSON Lines event logger."""
 
-    def __init__(self, log_path: str | Path | None = None) -> None:
-        config = load_config()
+    def __init__(self, log_path: str | Path | None = None, config: dict[str, Any] | None = None) -> None:
+        config = config or load_config()
+        self.config = config
         self.logs_dir = resolve_project_path(config["paths"]["logs_dir"])
         self._explicit_log_path = log_path is not None
         if log_path is None:
@@ -44,7 +45,7 @@ class EventLogger:
             "summary": summary,
             "detail": detail,
         }
-        safe_append_text(self.log_path, json.dumps(event, ensure_ascii=False, default=str) + "\n")
+        safe_append_text(self.log_path, json.dumps(event, ensure_ascii=False, default=str) + "\n", self.config)
 
         return event
 
@@ -82,6 +83,6 @@ class EventLogger:
             return []
         return [
             json.loads(line)
-            for line in safe_read_text(path).splitlines()
+            for line in safe_read_text(path, self.config).splitlines()
             if line.strip()
         ]

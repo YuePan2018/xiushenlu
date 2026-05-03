@@ -4,7 +4,7 @@
 
 ## 项目定位
 
-修身炉是一个本地优先的个人执行管理助手。当前阶段不是完整自主 agent，而是一个可追踪的 CLI 执行闭环：
+修身炉是一个本地优先的个人执行管理助手。当前阶段不是完整自主 agent，而是一个可追踪的 CLI + 本地控制台执行闭环：
 
 ```text
 长期目标 + 今日待办 -> 今日计划 -> 过程记录 -> 晚间复盘 -> token 统计
@@ -21,6 +21,8 @@ conda activate xiushenlu
 python app/main.py --help
 ```
 
+日常调试控制台可直接双击 `run_main.bat`。无参数时它会启动 `python app/main.py console --host 127.0.0.1 --port 8765` 并打开网页；如果传入参数，例如 `run_main.bat status`，仍转发到 CLI。
+
 | 命令 | 参数 | 是否调用 LLM | 作用 |
 | --- | --- | --- | --- |
 | `python app/main.py` | 无 | 是 | smoke test，测试 DashScope 连通性。 |
@@ -32,6 +34,7 @@ python app/main.py --help
 | `python app/main.py review --date YYYY-MM-DD` | `--date` 指定历史日期 | 是 | 生成指定日期的复盘。 |
 | `python app/main.py status` | 无 | 否 | 打印今天的 daily。 |
 | `python app/main.py cost` | 无 | 否 | 本地汇总今日和本月 token，并写入 daily。 |
+| `python app/main.py console` | `--host`、`--port`、`--reload` | 视操作而定 | 启动本地控制台，默认 `127.0.0.1:8765`；当前只控制已有 plan/log/review 和 daily/today_tasks 展示。 |
 
 ## Pipeline 指令
 
@@ -48,6 +51,7 @@ python app/main.py --help
 | 文件 | 职责 |
 | --- | --- |
 | `app/main.py` | CLI 命令入口，当前使用 `DashScopeProvider`。 |
+| `app/console.py` | FastAPI 本地控制台，复用已有 daily、inbox、logger 和 plan/log/review pipeline；不展示 token 统计和事件日志。 |
 | `app/pipelines/daily_plan.py` | 今日计划 pipeline。 |
 | `app/pipelines/plan_update.py` | 日内计划局部更新 pipeline；已有单测，真实 LLM 链路待验收。 |
 | `app/pipelines/nightly_review.py` | 晚间复盘 pipeline。 |

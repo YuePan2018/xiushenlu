@@ -1,8 +1,8 @@
 # 修身炉
 
-修身炉是一个面向个人认知与执行管理的本地助手项目。当前版本已完成 Phase 1 的最小闭环：配置加载、DashScope 直调 LLM Provider、事件日志、计划、记录、复盘、状态查看、token 统计和基础路径安全。
+修身炉是一个面向个人认知与执行管理的本地助手项目。当前版本已完成 Phase 1 的最小闭环：配置加载、DashScope 直调 LLM Provider、事件日志、计划、记录、复盘、状态查看、token 统计和基础路径安全。当前新增了本地控制台雏形，用于在网页里调试已有 CLI 能力。
 
-它不是一个完整自主 agent，也不是后台调度系统。当前定位是一个可追踪、可审计、可逐步扩展的本地 Python CLI 执行闭环：
+它不是一个完整自主 agent，也不是后台调度系统。当前定位是一个可追踪、可审计、可逐步扩展的本地 Python 执行闭环：
 
 ```text
 长期目标 + 今日待办 -> 今日计划 -> 过程记录 -> 晚间复盘 -> token 统计
@@ -46,6 +46,14 @@ python app/main.py review
 python app/main.py cost
 ```
 
+也可以启动本地控制台调试同一组能力：
+
+```powershell
+conda run --no-capture-output -n xiushenlu python app/main.py console
+```
+
+更日常的方式是直接双击 `run_main.bat`，它会启动控制台并打开网页；如果 8765 端口已有控制台在运行，则只打开现有页面。默认地址是 `http://127.0.0.1:8765`。控制台目前只封装常用执行能力：查看 daily、查看今日待办、写入记录、生成计划、日内局部更新、生成复盘；自动化、通知、审批、工具和知识区域只预留布局。token 统计和事件日志仍由 CLI 与本地文件保留，但不在控制台展示。
+
 这组命令会产生三类本地文件：
 
 | 文件 | 用途 |
@@ -67,6 +75,7 @@ python app/main.py cost
 | `python app/main.py review --date YYYY-MM-DD` | `--date`：历史日期 | 是 | 对指定日期生成复盘 | 读指定日期 daily/events，写指定日期 daily/events |
 | `python app/main.py status` | 无 | 否 | 打印今天的 daily | 读 daily |
 | `python app/main.py cost` | 无 | 否 | 汇总今日和本月 token，并追加到 daily | 读 events，写 daily 的 `记录` 区块 |
+| `python app/main.py console` | `--host`、`--port`、`--reload` | 视操作而定 | 启动本地控制台，复用已有 pipeline 和本地读写能力 | 通过 API 间接读写 daily 和 today_tasks |
 
 `plan --add` 是日内计划更新入口，目前本地单测已覆盖解析、写入和失败保护。它要求模型返回严格 JSON；如果解析失败，流程会停止写入 `today_tasks.md` 和 daily。进入自动化前，还需要完成一次真实 DashScope 链路验收。
 
@@ -99,6 +108,7 @@ app/main.py -> app.llm.dashscope_impl.DashScopeProvider -> dashscope.MultiModalC
 | --- | --- | --- |
 | `app/main.py` | CLI 命令入口；解析参数；加载配置；组装 Provider；调用 pipeline 或本地读写函数。 | `config`、`DashScopeProvider`、`daily`、`inbox`、`logger`、`cost`、`pipelines` |
 | `app/config.py` | 读取 YAML 配置；把相对路径解析到项目根目录。 | `yaml`、`pathlib` |
+| `app/console.py` | FastAPI 本地控制台；展示 daily 和 today_tasks，并触发已有 plan/log/review 能力。 | `fastapi`、`daily`、`inbox`、`logger`、`pipelines` |
 | `app/llm/provider.py` | 定义 `LLMProvider.chat()` 抽象和 `LLMCallUsage` 结构。 | 标准库 |
 | `app/llm/dashscope_impl.py` | 当前主 LLM 实现；读取 `DASHSCOPE_API_KEY`；调用 DashScope；记录 usage。 | `dashscope`、`python-dotenv`、`provider` |
 | `app/llm/qwen_agent_impl.py` | 历史/备选 `qwen_agent` 实现，当前 CLI 不走这条路径。 | `qwen_agent`、`dashscope`、`provider` |
@@ -154,12 +164,12 @@ python -m unittest tests.test_plan_update
 
 ## 下一步
 
-Phase 1 已完成。下一阶段进入 Milestone 2：
+Phase 1 已完成。下一阶段先把本地控制台用起来，再通过控制台验收 `plan --add` 和自动化：
 
 | 方向 | 目标 |
 | --- | --- |
+| 本地控制台 | 先控制已有内容，作为调试和验收入口。 |
 | 自动化与通知 | 定时运行计划/复盘，并通过 PushPlus / PushDeer 推送。 |
-| 本地控制台 | 查看状态、日志、计划和复盘。 |
 | 安全与审批 | 工具注册、审批队列、异常暂停和预算控制。 |
 
-进入自动化前，先完成 `plan --add` 的真实链路验收，避免调度器自动放大未验收的写入风险。
+`plan --add` 的真实链路验收可以通过控制台完成，避免先写自动化调度器再排查 UI、状态和写入问题。
