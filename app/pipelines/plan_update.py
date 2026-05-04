@@ -8,7 +8,12 @@ from typing import Any
 
 from app.config import load_config
 from app.daily import daily_path, read_daily
-from app.inbox import read_today_tasks, write_today_tasks
+from app.inbox import (
+    has_leading_markdown_heading,
+    read_today_tasks,
+    remove_added_today_tasks_heading,
+    write_today_tasks,
+)
 from app.llm.provider import LLMProvider
 from app.llm.usage import append_llm_call_event
 from app.logger import EventLogger
@@ -76,12 +81,22 @@ def generate_plan_update(
     append_llm_call_event(event_logger, provider, "plan_update")
     parsed = parse_plan_update_response(raw_reply)
 
-    task_path = write_today_tasks(parsed.updated_today_tasks, cfg)
+    preserve_tasks_heading = has_leading_markdown_heading(today_tasks)
+    updated_today_tasks = remove_added_today_tasks_heading(
+        parsed.updated_today_tasks,
+        preserve_heading=preserve_tasks_heading,
+    )
+    updated_daily_original = remove_added_today_tasks_heading(
+        parsed.updated_daily_original,
+        preserve_heading=preserve_tasks_heading,
+    )
+
+    task_path = write_today_tasks(updated_today_tasks, cfg)
     daily_file = daily_path(cfg, date_text)
     updated_daily = update_daily_plan_text(
         daily_text=daily_text,
         date_text=date_text,
-        updated_daily_original=parsed.updated_daily_original,
+        updated_daily_original=updated_daily_original,
         new_task_entry=format_new_task_entry(
             new_task=task_text,
             target_heading=parsed.target_heading,
@@ -310,8 +325,8 @@ def _build_prompt(
 
 你必须只输出一个严格 JSON 对象，不要使用代码块，不要输出解释文字。
 JSON 必须包含且只需要包含这些字符串字段：
-- updated_today_tasks：完整的 today_tasks.md 新内容。保持原有风格和标题格式；判断新增任务应归入哪个已有小标题；如果没有合适小标题，新增一个同风格小标题。
-- updated_daily_original：daily 计划中“今日待办原文”小节的新内容。保持原有 daily 待办原文风格，并包含新增任务。
+- updated_today_tasks：完整的 today_tasks.md 新内容。保持原有风格和标题格式；判断新增任务应归入哪个已有小标题；如果没有合适小标题，新增一个同风格小标题。如果当前 today_tasks.md 没有一级标题，不要新增“# 今日待办”。
+- updated_daily_original：daily 计划中“今日待办原文”小节的新内容。保持原有 daily 待办原文风格，并包含新增任务。如果当前 today_tasks.md 没有一级标题，不要新增“# 今日待办”。
 - target_heading：新增任务最终归入的小标题名称，不要带序号。
 - new_task_advice：只针对新增任务的 markdown 文本，必须包含“优先级”“任务建议”“预估时间”“与原计划关系”“风险提醒”。要考虑它和原计划中其他任务的关系，但不要重写已有计划建议。
 """

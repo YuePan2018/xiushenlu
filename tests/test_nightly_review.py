@@ -103,10 +103,54 @@ class NightlyReviewTests(unittest.TestCase):
             self.assertEqual(result.today_tasks_path, today_tasks)
             self.assertEqual(result.tomorrow_plan_path, tomorrow_plan)
             self.assertIn("做了别的事", daily_file.read_text(encoding="utf-8"))
-            self.assertIn("去浙大", today_tasks.read_text(encoding="utf-8"))
+            saved_tasks = today_tasks.read_text(encoding="utf-8")
+            self.assertTrue(saved_tasks.startswith("# 今日待办"))
+            self.assertIn("去浙大", saved_tasks)
             self.assertEqual(tomorrow_plan.read_text(encoding="utf-8"), "")
             self.assertEqual([event["type"] for event in logger.events], ["llm_call", "review_generated"])
             self.assertTrue(logger.events[-1]["detail"]["rolled_over"])
+
+    def test_today_review_removes_added_heading_when_current_tasks_have_none(self) -> None:
+        with _temporary_directory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            config = _test_config(root)
+            today = date.today()
+            today_text = today.isoformat()
+            inbox = Path(config["paths"]["inbox_dir"])
+            daily_dir = Path(config["paths"]["daily_dir"])
+            inbox.mkdir(parents=True)
+            daily_dir.mkdir(parents=True)
+
+            today_tasks = inbox / "today_tasks.md"
+            tomorrow_plan = inbox / "明日计划.md"
+            daily_file = daily_dir / f"{today_text}.md"
+            today_tasks.write_text("口号：过最想要的一天！\n\n修身炉：\n1. 未完成任务\n", encoding="utf-8")
+            tomorrow_plan.write_text("去浙大\n", encoding="utf-8")
+            daily_file.write_text(
+                f"# {today_text}\n\n## 计划\n\n修身炉：\n1. 未完成任务\n\n## 记录\n\n- 10:00 做了别的事\n",
+                encoding="utf-8",
+            )
+            reply = json.dumps(
+                {
+                    "review": "完成了什么\n- 做了别的事",
+                    "next_today_tasks": "# 今日待办\n\n口号：过最想要的一天！\n\n修身炉：\n1. 未完成任务\n\n杂事：\n去浙大",
+                },
+                ensure_ascii=False,
+            )
+
+            result = generate_nightly_review(
+                FakeProvider(reply),
+                config=config,
+                target_date=today,
+                logger=FakeLogger(),  # type: ignore[arg-type]
+            )
+
+            saved_tasks = today_tasks.read_text(encoding="utf-8")
+            self.assertTrue(result.rolled_over)
+            self.assertFalse(saved_tasks.startswith("# 今日待办"))
+            self.assertIn("口号：过最想要的一天！", saved_tasks)
+            self.assertIn("去浙大", saved_tasks)
+            self.assertEqual(tomorrow_plan.read_text(encoding="utf-8"), "")
 
     def test_historical_review_does_not_roll_over_current_tasks(self) -> None:
         with _temporary_directory() as temp_dir:

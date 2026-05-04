@@ -107,7 +107,8 @@ class ConsoleTests(unittest.TestCase):
 
             self.assertEqual(response.status_code, 200)
             tasks_path = Path(response.json()["result"]["today_tasks_path"])
-            self.assertIn("学习控制台保存待办", tasks_path.read_text(encoding="utf-8"))
+            saved_tasks = tasks_path.read_text(encoding="utf-8")
+            self.assertEqual(saved_tasks, "学习控制台保存待办\n")
             self.assertEqual(provider.prompts, [])
             self.assertEqual(list(Path(config["paths"]["logs_dir"]).glob("*.jsonl")), [])
 
