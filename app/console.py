@@ -276,6 +276,19 @@ CONSOLE_HTML = f"""<!doctype html>
       margin: 0 auto;
       padding: 14px 20px;
     }}
+    .brand {{
+      flex: 1 1 auto;
+      min-width: 220px;
+    }}
+    .top-status {{
+      flex: 1 1 340px;
+      max-width: 520px;
+      border-left: 1px solid var(--line);
+      padding-left: 16px;
+    }}
+    .top-status h2 {{
+      margin-bottom: 4px;
+    }}
     h1 {{
       margin: 0;
       font-size: 22px;
@@ -296,7 +309,7 @@ CONSOLE_HTML = f"""<!doctype html>
     }}
     main {{
       display: grid;
-      grid-template-columns: minmax(320px, 420px) minmax(420px, 1fr) minmax(260px, 320px);
+      grid-template-columns: minmax(320px, 420px) minmax(420px, 1fr);
       gap: 16px;
       max-width: 1480px;
       margin: 0 auto;
@@ -514,6 +527,14 @@ CONSOLE_HTML = f"""<!doctype html>
     }}
     @media (max-width: 640px) {{
       .bar {{ align-items: flex-start; flex-direction: column; }}
+      .top-status {{
+        width: 100%;
+        max-width: none;
+        border-left: 0;
+        border-top: 1px solid var(--line);
+        padding-left: 0;
+        padding-top: 10px;
+      }}
       main {{ padding: 12px; }}
       .split, .slots {{ grid-template-columns: 1fr; }}
       button {{ width: 100%; }}
@@ -523,9 +544,13 @@ CONSOLE_HTML = f"""<!doctype html>
 <body>
   <header>
     <div class="bar">
-      <div>
+      <div class="brand">
         <h1>修身炉控制台</h1>
         <div class="meta">本机入口：{_project_file("app/console.py")}</div>
+      </div>
+      <div class="top-status">
+        <h2>运行状态</h2>
+        <div class="status" id="statusText">准备中</div>
       </div>
       <div class="row">
         <input id="dateInput" type="date" aria-label="日期">
@@ -577,16 +602,10 @@ CONSOLE_HTML = f"""<!doctype html>
       <article id="dailyText" class="daily-markdown empty" aria-live="polite">加载中...</article>
       <div class="path" id="dailyPath"></div>
     </section>
-    <div class="stack">
-      <section>
-        <h2>运行状态</h2>
-        <div class="status" id="statusText">准备中</div>
-      </section>
-      <section>
-        <h2>后续区域</h2>
-        <div class="slots" id="futureSlots"></div>
-      </section>
-    </div>
+    <section hidden>
+      <h2>后续区域</h2>
+      <div class="slots" id="futureSlots"></div>
+    </section>
   </main>
   <script src="/static/vendor/marked-16.2.1.umd.js"></script>
   <script src="/static/vendor/dompurify-3.2.6.min.js"></script>
@@ -669,7 +688,11 @@ CONSOLE_HTML = f"""<!doctype html>
     }}
 
     function renderFuture(items) {{
-      $("futureSlots").innerHTML = items.map((item) =>
+      const el = $("futureSlots");
+      if (!el) {{
+        return;
+      }}
+      el.innerHTML = items.map((item) =>
         `<div class="slot"><strong>${{escapeHtml(item.name)}}</strong><div>${{escapeHtml(item.status)}}</div></div>`
       ).join("");
     }}
@@ -701,6 +724,17 @@ CONSOLE_HTML = f"""<!doctype html>
       }}
     }}
 
+    function submitOnCtrlEnter(inputId, buttonId) {{
+      $(inputId).addEventListener("keydown", (event) => {{
+        if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {{
+          event.preventDefault();
+          if (!state.busy) {{
+            $(buttonId).click();
+          }}
+        }}
+      }});
+    }}
+
     $("refreshBtn").addEventListener("click", () => loadState());
     $("reloadTasksBtn").addEventListener("click", () => loadState());
     $("saveTasksBtn").addEventListener("click", () => runAction("保存待办", () =>
@@ -715,12 +749,14 @@ CONSOLE_HTML = f"""<!doctype html>
         body: JSON.stringify({{}}),
       }})
     ));
-    $("addBtn").addEventListener("click", () => runAction("局部更新", () =>
-      requestJson("/api/plan", {{
+    $("addBtn").addEventListener("click", () => runAction("局部更新", async () => {{
+      const data = await requestJson("/api/plan", {{
         method: "POST",
         body: JSON.stringify({{ add: $("addInput").value }}),
-      }})
-    ));
+      }});
+      $("addInput").value = "";
+      return data;
+    }}));
     $("logBtn").addEventListener("click", () => runAction("写入记录", async () => {{
       const data = await requestJson("/api/log", {{
         method: "POST",
@@ -735,6 +771,8 @@ CONSOLE_HTML = f"""<!doctype html>
         body: JSON.stringify({{ date: $("reviewDateInput").value }}),
       }})
     ));
+    submitOnCtrlEnter("logInput", "logBtn");
+    submitOnCtrlEnter("addInput", "addBtn");
     loadState();
   </script>
 </body>
