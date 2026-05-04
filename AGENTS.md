@@ -147,8 +147,6 @@ $env:PYTHONIOENCODING = "utf-8"
 conda run --no-capture-output -n xiushenlu python app/main.py --help
 ```
 
-- 如果 `rg` 在当前环境里被拒绝执行，改用 PowerShell 原生命令检索，例如 `Get-ChildItem` 和 `Select-String`。
-
 ## 验证建议
 
 不需要 LLM 的改动至少跑：
