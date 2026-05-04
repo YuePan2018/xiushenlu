@@ -536,6 +536,12 @@ CONSOLE_HTML = f"""<!doctype html>
   <main>
     <div class="stack">
       <section>
+        <h2>过程记录</h2>
+        <label for="logInput">记录内容</label>
+        <textarea id="logInput" spellcheck="false"></textarea>
+        <button id="logBtn">写入记录</button>
+      </section>
+      <section>
         <h2>今日待办</h2>
         <label for="tasksInput">today_tasks.md</label>
         <textarea id="tasksInput" spellcheck="false"></textarea>
@@ -551,12 +557,6 @@ CONSOLE_HTML = f"""<!doctype html>
         <label for="addInput">新增任务</label>
         <textarea id="addInput" spellcheck="false"></textarea>
         <button id="addBtn">局部更新计划</button>
-      </section>
-      <section>
-        <h2>过程记录</h2>
-        <label for="logInput">记录内容</label>
-        <textarea id="logInput" spellcheck="false"></textarea>
-        <button id="logBtn">写入记录</button>
       </section>
       <section>
         <h2>复盘</h2>
