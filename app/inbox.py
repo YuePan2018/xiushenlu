@@ -13,6 +13,12 @@ def today_tasks_path(config: dict[str, Any] | None = None) -> Path:
     return inbox_dir / "today_tasks.md"
 
 
+def tomorrow_plan_path(config: dict[str, Any] | None = None) -> Path:
+    cfg = config or load_config()
+    inbox_dir = resolve_project_path(cfg["paths"]["inbox_dir"])
+    return inbox_dir / "明日计划.md"
+
+
 def read_today_tasks(config: dict[str, Any] | None = None) -> str:
     cfg = config or load_config()
     path = today_tasks_path(cfg)
@@ -31,4 +37,19 @@ def write_today_tasks(tasks: str, config: dict[str, Any] | None = None) -> Path:
     if not text.lstrip().startswith("#"):
         text = f"# 今日待办\n\n{text}"
     safe_write_text(path, text.rstrip() + "\n", cfg)
+    return path
+
+
+def read_tomorrow_plan(config: dict[str, Any] | None = None) -> str:
+    cfg = config or load_config()
+    path = tomorrow_plan_path(cfg)
+    if not path.exists():
+        return ""
+    return safe_read_text(path, cfg).strip()
+
+
+def clear_tomorrow_plan(config: dict[str, Any] | None = None) -> Path:
+    cfg = config or load_config()
+    path = tomorrow_plan_path(cfg)
+    safe_write_text(path, "", cfg)
     return path

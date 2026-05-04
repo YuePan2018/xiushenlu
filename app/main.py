@@ -15,7 +15,7 @@ from app.inbox import write_today_tasks
 from app.llm.dashscope_impl import DashScopeProvider
 from app.logger import EventLogger
 from app.pipelines.daily_plan import generate_daily_plan
-from app.pipelines.nightly_review import generate_nightly_review
+from app.pipelines.nightly_review import NightlyReviewParseError, generate_nightly_review
 from app.pipelines.plan_update import PlanUpdateParseError, generate_plan_update
 
 
@@ -90,7 +90,11 @@ def run_review(date_str: str | None = None) -> int:
     config = load_config()
     provider = DashScopeProvider(config)
     target_date = _date.fromisoformat(date_str) if date_str else None
-    result = generate_nightly_review(provider, config=config, target_date=target_date)
+    try:
+        result = generate_nightly_review(provider, config=config, target_date=target_date)
+    except NightlyReviewParseError as exc:
+        print(f"复盘失败：LLM 没有返回可解析的 JSON。{exc}", file=sys.stderr)
+        return 1
     print(f"复盘已写入：{result.path}")
     print()
     print(result.review)

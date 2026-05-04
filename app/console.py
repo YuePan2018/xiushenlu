@@ -16,7 +16,7 @@ from app.llm.dashscope_impl import DashScopeProvider
 from app.llm.provider import LLMProvider
 from app.logger import EventLogger
 from app.pipelines.daily_plan import generate_daily_plan
-from app.pipelines.nightly_review import generate_nightly_review
+from app.pipelines.nightly_review import NightlyReviewParseError, generate_nightly_review
 from app.pipelines.plan_update import PlanUpdateParseError, generate_plan_update
 
 
@@ -209,7 +209,7 @@ def create_app(
 def _handle(operation: Callable[[], dict[str, Any]]) -> dict[str, Any]:
     try:
         return operation()
-    except (ValueError, PlanUpdateParseError) as exc:
+    except (ValueError, PlanUpdateParseError, NightlyReviewParseError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

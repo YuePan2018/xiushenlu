@@ -4,6 +4,7 @@ import json
 import shutil
 import unittest
 import uuid
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +30,15 @@ class FakeProvider(LLMProvider):
             estimated=False,
             raw=None,
         )
-        if "严格 JSON" in prompt:
+        if "next_today_tasks" in prompt:
+            return json.dumps(
+                {
+                    "review": "控制台测试复盘",
+                    "next_today_tasks": "# 今日待办\n\n控制台明日任务",
+                },
+                ensure_ascii=False,
+            )
+        if "updated_today_tasks" in prompt:
             return json.dumps(
                 {
                     "updated_today_tasks": "# 今日待办\n\n原任务\n新增任务",
@@ -133,6 +142,26 @@ class ConsoleTests(unittest.TestCase):
             logs = list(Path(config["paths"]["logs_dir"]).glob("*.jsonl"))
             self.assertEqual(len(logs), 1)
             self.assertIn("user_log", logs[0].read_text(encoding="utf-8"))
+
+    def test_review_endpoint_rolls_over_today_tasks(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            today = date.today().isoformat()
+            inbox_dir = Path(config["paths"]["inbox_dir"])
+            daily_dir = Path(config["paths"]["daily_dir"])
+            inbox_dir.mkdir(parents=True)
+            daily_dir.mkdir(parents=True)
+            (inbox_dir / "today_tasks.md").write_text("# 今日待办\n\n原任务\n", encoding="utf-8")
+            (inbox_dir / "明日计划.md").write_text("控制台明日任务\n", encoding="utf-8")
+            (daily_dir / f"{today}.md").write_text(f"# {today}\n\n## 记录\n\n- 控制台记录\n", encoding="utf-8")
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+
+            response = client.post("/api/review", json={"date": today})
+
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("控制台测试复盘", response.json()["state"]["daily"]["text"])
+            self.assertIn("控制台明日任务", (inbox_dir / "today_tasks.md").read_text(encoding="utf-8"))
+            self.assertEqual((inbox_dir / "明日计划.md").read_text(encoding="utf-8"), "")
 
     def test_plan_update_rejects_empty_add(self) -> None:
         with _temporary_directory() as temp_dir:
