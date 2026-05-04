@@ -34,7 +34,7 @@ python app/main.py --help
 | `python app/main.py review --date YYYY-MM-DD` | `--date` 指定历史日期 | 是 | 生成指定日期的复盘。 |
 | `python app/main.py status` | 无 | 否 | 打印今天的 daily。 |
 | `python app/main.py cost` | 无 | 否 | 本地汇总今日和本月 token，并写入 daily。 |
-| `python app/main.py console` | `--host`、`--port`、`--reload` | 视操作而定 | 启动本地控制台，默认 `127.0.0.1:8765`；当前只控制已有 plan/log/review 和 daily/today_tasks 展示。 |
+| `python app/main.py console` | `--host`、`--port`、`--reload` | 视操作而定 | 启动本地控制台，默认 `127.0.0.1:8765`；当前只控制已有 plan/log/review、daily/today_tasks 展示和待办保存。 |
 
 ## Pipeline 指令
 
@@ -51,7 +51,7 @@ python app/main.py --help
 | 文件 | 职责 |
 | --- | --- |
 | `app/main.py` | CLI 命令入口，当前使用 `DashScopeProvider`。 |
-| `app/console.py` | FastAPI 本地控制台，复用已有 daily、inbox、logger 和 plan/log/review pipeline；不展示 token 统计和事件日志。 |
+| `app/console.py` | FastAPI 本地控制台，复用已有 daily、inbox、logger 和 plan/log/review pipeline；“保存待办”只写 `today_tasks.md`，“生成计划”等价于 CLI `plan`；不展示 token 统计和事件日志。 |
 | `app/pipelines/daily_plan.py` | 今日计划 pipeline。 |
 | `app/pipelines/plan_update.py` | 日内计划局部更新 pipeline；已有单测，真实 LLM 链路待验收。 |
 | `app/pipelines/nightly_review.py` | 晚间复盘 pipeline。 |

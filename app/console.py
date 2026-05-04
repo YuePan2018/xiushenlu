@@ -23,16 +23,31 @@ ProviderFactory = Callable[[], LLMProvider]
 
 
 class PlanRequest(BaseModel):
-    tasks: str | None = None
     add: str | None = None
+
+    class Config:
+        extra = "forbid"
+
+
+class TasksRequest(BaseModel):
+    tasks: str
+
+    class Config:
+        extra = "forbid"
 
 
 class LogRequest(BaseModel):
     content: str
 
+    class Config:
+        extra = "forbid"
+
 
 class ReviewRequest(BaseModel):
     date: str | None = None
+
+    class Config:
+        extra = "forbid"
 
 
 class ConsoleService:
@@ -68,13 +83,19 @@ class ConsoleService:
             ],
         }
 
-    def generate_plan(self, request: PlanRequest) -> dict[str, Any]:
-        tasks = request.tasks.strip() if request.tasks is not None else None
-        add = request.add.strip() if request.add is not None else None
-        if tasks and add:
-            raise ValueError("tasks 和 add 不能同时提交。")
-        if request.tasks is not None and not tasks:
+    def save_tasks(self, request: TasksRequest) -> dict[str, Any]:
+        tasks = request.tasks.strip()
+        if not tasks:
             raise ValueError("今日待办不能为空。")
+        path = write_today_tasks(tasks, self.config)
+        return {
+            "message": "今日待办已保存。",
+            "result": {"today_tasks_path": str(path)},
+            "state": self.snapshot(),
+        }
+
+    def generate_plan(self, request: PlanRequest) -> dict[str, Any]:
+        add = request.add.strip() if request.add is not None else None
         if request.add is not None and not add:
             raise ValueError("新增任务不能为空。")
 
@@ -94,9 +115,7 @@ class ConsoleService:
                 "state": self.snapshot(result.date),
             }
 
-        if tasks is not None:
-            write_today_tasks(tasks, self.config)
-        result = generate_daily_plan(provider, config=self.config, tasks_text=tasks, logger=event_logger)
+        result = generate_daily_plan(provider, config=self.config, logger=event_logger)
         return {
             "message": "计划已生成。",
             "result": {
@@ -164,6 +183,10 @@ def create_app(
     @app.get("/api/state")
     def api_state(date: str | None = None) -> dict[str, Any]:
         return _handle(lambda: service.snapshot(date))
+
+    @app.post("/api/tasks")
+    def api_tasks(request: TasksRequest) -> dict[str, Any]:
+        return _handle(lambda: service.save_tasks(request))
 
     @app.post("/api/plan")
     def api_plan(request: PlanRequest) -> dict[str, Any]:
@@ -419,8 +442,9 @@ CONSOLE_HTML = f"""<!doctype html>
         <label for="tasksInput">today_tasks.md</label>
         <textarea id="tasksInput" spellcheck="false"></textarea>
         <div class="row">
+          <button class="secondary" id="saveTasksBtn">保存待办</button>
           <button id="planBtn">生成计划</button>
-          <button class="secondary" id="reloadTasksBtn">重载</button>
+          <button class="secondary" id="reloadTasksBtn">读取待办</button>
         </div>
         <div class="path" id="tasksPath"></div>
       </section>
@@ -555,10 +579,16 @@ CONSOLE_HTML = f"""<!doctype html>
 
     $("refreshBtn").addEventListener("click", () => loadState());
     $("reloadTasksBtn").addEventListener("click", () => loadState());
+    $("saveTasksBtn").addEventListener("click", () => runAction("保存待办", () =>
+      requestJson("/api/tasks", {{
+        method: "POST",
+        body: JSON.stringify({{ tasks: $("tasksInput").value }}),
+      }})
+    ));
     $("planBtn").addEventListener("click", () => runAction("生成计划", () =>
       requestJson("/api/plan", {{
         method: "POST",
-        body: JSON.stringify({{ tasks: $("tasksInput").value }}),
+        body: JSON.stringify({{}}),
       }})
     ));
     $("addBtn").addEventListener("click", () => runAction("局部更新", () =>

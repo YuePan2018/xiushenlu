@@ -37,7 +37,7 @@ def generate_daily_plan(
 
     plan = provider.chat(prompt).strip()
     daily_path = _daily_path(cfg, date_text)
-    _write_plan_section(date_text=date_text, plan=plan)
+    _write_plan_section(config=cfg, date_text=date_text, plan=plan)
 
     event_logger = logger or EventLogger()
     append_llm_call_event(event_logger, provider, "daily_plan")
@@ -88,5 +88,5 @@ def _build_prompt(date_text: str, goals: str, tasks: str) -> str:
 """
 
 
-def _write_plan_section(date_text: str, plan: str) -> None:
-    write_daily_section("计划", plan, target_date=date_text, mode="replace")
+def _write_plan_section(config: dict[str, Any], date_text: str, plan: str) -> None:
+    write_daily_section("计划", plan, config=config, target_date=date_text, mode="replace")

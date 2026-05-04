@@ -17,8 +17,10 @@ class FakeProvider(LLMProvider):
     def __init__(self, reply: str = "控制台测试计划") -> None:
         self.reply = reply
         self.last_usage: LLMCallUsage | None = None
+        self.prompts: list[str] = []
 
     def chat(self, prompt: str) -> str:
+        self.prompts.append(prompt)
         self.last_usage = LLMCallUsage(
             model="fake-model",
             tokens_in=7,
@@ -58,6 +60,38 @@ class ConsoleTests(unittest.TestCase):
             self.assertNotIn("events", data)
             self.assertNotIn("tokens", data)
 
+    def test_tasks_endpoint_writes_today_tasks_without_llm(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            provider = FakeProvider()
+            client = TestClient(create_app(config=config, provider_factory=lambda: provider))
+
+            response = client.post("/api/tasks", json={"tasks": "学习控制台保存待办"})
+
+            self.assertEqual(response.status_code, 200)
+            tasks_path = Path(response.json()["result"]["today_tasks_path"])
+            self.assertIn("学习控制台保存待办", tasks_path.read_text(encoding="utf-8"))
+            self.assertEqual(provider.prompts, [])
+            self.assertEqual(list(Path(config["paths"]["logs_dir"]).glob("*.jsonl")), [])
+
+    def test_plan_endpoint_reads_saved_today_tasks(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            inbox_dir = Path(config["paths"]["inbox_dir"])
+            memory_dir = Path(config["paths"]["memory_dir"])
+            inbox_dir.mkdir(parents=True)
+            memory_dir.mkdir(parents=True)
+            (inbox_dir / "today_tasks.md").write_text("# 今日待办\n\n本地保存的任务", encoding="utf-8")
+            provider = FakeProvider()
+            client = TestClient(create_app(config=config, provider_factory=lambda: provider))
+
+            response = client.post("/api/plan", json={})
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(len(provider.prompts), 1)
+            self.assertIn("本地保存的任务", provider.prompts[0])
+            self.assertIn("控制台测试计划", response.json()["state"]["daily"]["text"])
+
     def test_log_endpoint_writes_daily_and_event(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
@@ -72,15 +106,24 @@ class ConsoleTests(unittest.TestCase):
             self.assertEqual(len(logs), 1)
             self.assertIn("user_log", logs[0].read_text(encoding="utf-8"))
 
-    def test_plan_endpoint_rejects_two_modes(self) -> None:
+    def test_plan_update_rejects_empty_add(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
             client = TestClient(create_app(config=config, provider_factory=FakeProvider))
 
-            response = client.post("/api/plan", json={"tasks": "A", "add": "B"})
+            response = client.post("/api/plan", json={"add": "  "})
 
             self.assertEqual(response.status_code, 400)
-            self.assertIn("不能同时", response.json()["detail"])
+            self.assertIn("新增任务不能为空", response.json()["detail"])
+
+    def test_plan_endpoint_rejects_tasks_field(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+
+            response = client.post("/api/plan", json={"tasks": "旧的 plan tasks 模式"})
+
+            self.assertEqual(response.status_code, 422)
 
 
 def _test_config(root: Path) -> dict[str, Any]:

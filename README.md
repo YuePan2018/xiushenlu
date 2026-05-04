@@ -52,7 +52,9 @@ python app/main.py cost
 conda run --no-capture-output -n xiushenlu python app/main.py console
 ```
 
-更日常的方式是直接双击 `run_main.bat`，它会启动控制台并打开网页；如果 8765 端口已有控制台在运行，则只打开现有页面。默认地址是 `http://127.0.0.1:8765`。控制台目前只封装常用执行能力：查看 daily、查看今日待办、写入记录、生成计划、日内局部更新、生成复盘；自动化、通知、审批、工具和知识区域只预留布局。token 统计和事件日志仍由 CLI 与本地文件保留，但不在控制台展示。
+更日常的方式是直接双击 `run_main.bat`，它会启动控制台并打开网页；如果 8765 端口已有控制台在运行，则只打开现有页面。默认地址是 `http://127.0.0.1:8765`。控制台目前只封装常用执行能力：查看 daily、查看今日待办、保存今日待办、写入记录、生成计划、日内局部更新、生成复盘；自动化、通知、审批、工具和知识区域只预留布局。token 统计和事件日志仍由 CLI 与本地文件保留，但不在控制台展示。
+
+控制台里的“保存待办”和“生成计划”是两个独立动作：“保存待办”只写入 `data/user_inputs/today_tasks.md`，不调用 LLM；“生成计划”等价于 `python app/main.py plan`，只读取已保存的 `today_tasks.md`。
 
 这组命令会产生三类本地文件：
 
@@ -108,7 +110,7 @@ app/main.py -> app.llm.dashscope_impl.DashScopeProvider -> dashscope.MultiModalC
 | --- | --- | --- |
 | `app/main.py` | CLI 命令入口；解析参数；加载配置；组装 Provider；调用 pipeline 或本地读写函数。 | `config`、`DashScopeProvider`、`daily`、`inbox`、`logger`、`cost`、`pipelines` |
 | `app/config.py` | 读取 YAML 配置；把相对路径解析到项目根目录。 | `yaml`、`pathlib` |
-| `app/console.py` | FastAPI 本地控制台；展示 daily 和 today_tasks，并触发已有 plan/log/review 能力。 | `fastapi`、`daily`、`inbox`、`logger`、`pipelines` |
+| `app/console.py` | FastAPI 本地控制台；展示 daily 和 today_tasks，支持保存待办，并触发已有 plan/log/review 能力。 | `fastapi`、`daily`、`inbox`、`logger`、`pipelines` |
 | `app/llm/provider.py` | 定义 `LLMProvider.chat()` 抽象和 `LLMCallUsage` 结构。 | 标准库 |
 | `app/llm/dashscope_impl.py` | 当前主 LLM 实现；读取 `DASHSCOPE_API_KEY`；调用 DashScope；记录 usage。 | `dashscope`、`python-dotenv`、`provider` |
 | `app/llm/qwen_agent_impl.py` | 历史/备选 `qwen_agent` 实现，当前 CLI 不走这条路径。 | `qwen_agent`、`dashscope`、`provider` |
