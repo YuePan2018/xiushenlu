@@ -9,7 +9,6 @@ set "CONSOLE_HOST=127.0.0.1"
 set "CONSOLE_PORT=8765"
 set "CONSOLE_URL=http://%CONSOLE_HOST%:%CONSOLE_PORT%"
 set "ACTIVATED="
-set "EXISTING_PID="
 
 set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
@@ -45,21 +44,8 @@ if not defined ACTIVATED (
 )
 
 if "%~1"=="" (
-    for /f "tokens=5" %%P in ('netstat -ano ^| findstr /C:"%CONSOLE_HOST%:%CONSOLE_PORT%" ^| findstr /C:"LISTENING"') do set "EXISTING_PID=%%P"
-
-    if defined EXISTING_PID (
-        echo Xiushenlu console is already running at %CONSOLE_URL% ^(PID %EXISTING_PID%^).
-        start "" "%CONSOLE_URL%"
-        exit /b 0
-    )
-
-    echo Starting Xiushenlu console at %CONSOLE_URL%
-    echo Close this window or press Ctrl+C to stop the console.
-    echo.
-    start "" powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Start-Sleep -Seconds 2; Start-Process '%CONSOLE_URL%'"
-    python app\main.py console --host "%CONSOLE_HOST%" --port "%CONSOLE_PORT%"
-    echo.
-    pause
+    start "Xiushenlu Console" powershell -NoProfile -ExecutionPolicy Bypass -NoExit -File "%~dp0run_console.ps1" -HostAddress "%CONSOLE_HOST%" -Port "%CONSOLE_PORT%" -Url "%CONSOLE_URL%"
+    exit /b 0
 ) else (
     python app\main.py %*
 )

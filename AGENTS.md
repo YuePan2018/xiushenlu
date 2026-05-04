@@ -21,7 +21,7 @@ conda activate xiushenlu
 python app/main.py --help
 ```
 
-日常调试控制台可直接双击 `run_main.bat`。无参数时它会启动 `python app/main.py console --host 127.0.0.1 --port 8765` 并打开网页；如果传入参数，例如 `run_main.bat status`，仍转发到 CLI。
+日常调试控制台可直接双击 `run_main.bat`。无参数时它会启动本地控制台并打开网页；运行途中可在 terminal 输入 `重启` 来重启服务并重新打开网页，按 `Ctrl+C` 会停止服务并关闭窗口。如果传入参数，例如 `run_main.bat status`，仍转发到 CLI。
 
 | 命令 | 参数 | 是否调用 LLM | 作用 |
 | --- | --- | --- | --- |
