@@ -80,7 +80,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py console
 | `python app/main.py cost` | 无 | 否 | 汇总今日和本月 token，并追加到 daily | 读 events，写 daily 的 `记录` 区块 |
 | `python app/main.py console` | `--host`、`--port`、`--reload` | 视操作而定 | 启动本地控制台，复用已有 pipeline 和本地读写能力 | 通过 API 间接读写 daily 和 today_tasks |
 
-`plan --add` 是日内计划更新入口，目前本地单测已覆盖解析、写入和失败保护。它要求模型返回严格 JSON；如果解析失败，流程会停止写入 `today_tasks.md` 和 daily。进入自动化前，还需要完成一次真实 DashScope 链路验收。
+`plan --add` 是日内计划更新入口，目前本地单测已覆盖解析、写入和失败保护。它要求模型返回严格 JSON，并且必须逐字保留新增任务、只生成不超过 200 字的新任务建议；如果解析失败或内容不符合约束，流程会停止写入 `today_tasks.md` 和 daily。进入自动化前，还需要完成一次真实 DashScope 链路验收。
 
 当天 `review` 也是受控写入入口：模型必须返回严格 JSON，包含复盘正文和新的完整 `today_tasks.md`。解析失败时不会写入复盘、不会覆盖 `today_tasks.md`，也不会清空 `明日计划.md`。只有复盘日期等于今天时才触发这一步；历史日期复盘只更新对应 daily。
 

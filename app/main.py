@@ -67,7 +67,7 @@ def run_plan(tasks: str | None = None, add: str | None = None) -> int:
         try:
             result = generate_plan_update(provider, add, config=config)
         except PlanUpdateParseError as exc:
-            print(f"计划更新失败：LLM 没有返回可解析的 JSON。{exc}", file=sys.stderr)
+            print(f"计划更新失败：LLM 没有返回符合约束的 JSON。{exc}", file=sys.stderr)
             return 1
         print(f"今日待办已更新：{result.today_tasks_path}")
         print(f"计划已局部更新：{result.daily_path}")

@@ -10,20 +10,25 @@ from typing import Any
 
 from app.llm.provider import LLMCallUsage, LLMProvider
 from app.pipelines.plan_update import (
+    NEW_TASK_ADVICE_MAX_CHARS,
     PlanUpdateParseError,
+    _build_prompt,
     format_new_task_entry,
     generate_plan_update,
     parse_plan_update_response,
     update_daily_plan_text,
+    validate_plan_update_content,
 )
 
 
 class FakeProvider(LLMProvider):
     def __init__(self, reply: str) -> None:
         self.reply = reply
+        self.last_prompt: str | None = None
         self.last_usage: LLMCallUsage | None = None
 
     def chat(self, prompt: str) -> str:
+        self.last_prompt = prompt
         self.last_usage = LLMCallUsage(
             model="fake-model",
             tokens_in=10,
@@ -59,9 +64,97 @@ class PlanUpdateTests(unittest.TestCase):
         self.assertEqual(parsed.target_heading, "学习")
         self.assertIn("学习python", parsed.updated_today_tasks)
 
+    def test_build_prompt_keeps_new_task_verbatim_and_limits_advice(self) -> None:
+        prompt = _build_prompt(
+            date_text="2026-05-04",
+            goals="长期目标",
+            today_tasks="修身炉：\n1. 原任务\n2. 继续任务\n\n杂事：\n游泳或篮球\n扫地拖地",
+            daily_text=(
+                "## 计划\n\n**1. 今日待办原文**\n\n"
+                "修身炉：\n1. 原任务\n2. 继续任务\n\n杂事：\n游泳或篮球\n扫地拖地"
+            ),
+            new_task="灵感：发现了codex可以优化的一些rule，比如去除常错的命令，提示plan mode和commit",
+        )
+
+        self.assertIn("逐字插入", prompt)
+        self.assertIn("不能改写、概括或扩写", prompt)
+        self.assertIn("插入前先判断目标标题下已有任务行的主格式", prompt)
+        self.assertIn("新增项必须使用下一个编号", prompt)
+        self.assertIn("普通文本行，不加", prompt)
+        self.assertIn("只有目标分组原本就是", prompt)
+        self.assertIn("6. 灵感：优化codex规则", prompt)
+        self.assertIn("看鸡汤和英雄传记（调节今日心情）", prompt)
+        self.assertIn("不要加", prompt)
+        self.assertIn(f"不超过 {NEW_TASK_ADVICE_MAX_CHARS} 字", prompt)
+        self.assertIn("不要写“### 新增”“原文”“归入标题”", prompt)
+        self.assertIn("只用于内部归类，不会展示在 daily", prompt)
+
     def test_parse_plan_update_response_rejects_non_json(self) -> None:
         with self.assertRaises(PlanUpdateParseError):
             parse_plan_update_response("```json\n{}\n```")
+
+    def test_validate_plan_update_content_rejects_rewritten_new_task(self) -> None:
+        parsed = parse_plan_update_response(
+            json.dumps(
+                {
+                    "updated_today_tasks": "修身炉：\n- 灵感：优化codex规则（去除常错命令，增加plan mode和commit提示）",
+                    "updated_daily_original": "修身炉：\n- 灵感：优化codex规则（去除常错命令，增加plan mode和commit提示）",
+                    "target_heading": "修身炉",
+                    "new_task_advice": "- 优先级：P1",
+                },
+                ensure_ascii=False,
+            )
+        )
+
+        with self.assertRaisesRegex(PlanUpdateParseError, "verbatim"):
+            validate_plan_update_content(
+                parsed,
+                new_task="灵感：发现了codex可以优化的一些rule，比如去除常错的命令，提示plan mode和commit",
+            )
+
+    def test_validate_plan_update_content_rejects_duplicate_new_task_metadata(self) -> None:
+        new_task = "学习python"
+        parsed = parse_plan_update_response(
+            json.dumps(
+                {
+                    "updated_today_tasks": f"学习：\n{new_task}",
+                    "updated_daily_original": f"学习：\n{new_task}",
+                    "target_heading": "学习",
+                    "new_task_advice": f"### 新增：{new_task}\n\n- 优先级：P2",
+                },
+                ensure_ascii=False,
+            )
+        )
+
+        with self.assertRaisesRegex(PlanUpdateParseError, "duplicate task"):
+            validate_plan_update_content(parsed, new_task=new_task)
+
+    def test_validate_plan_update_content_rejects_long_advice(self) -> None:
+        new_task = "学习python"
+        parsed = parse_plan_update_response(
+            json.dumps(
+                {
+                    "updated_today_tasks": f"学习：\n{new_task}",
+                    "updated_daily_original": f"学习：\n{new_task}",
+                    "target_heading": "学习",
+                    "new_task_advice": "建议" * (NEW_TASK_ADVICE_MAX_CHARS + 1),
+                },
+                ensure_ascii=False,
+            )
+        )
+
+        with self.assertRaisesRegex(PlanUpdateParseError, "no longer than"):
+            validate_plan_update_content(parsed, new_task=new_task)
+
+    def test_format_new_task_entry_omits_metadata_lines(self) -> None:
+        entry = format_new_task_entry(
+            new_task="xiushenlu：刚才的update没有调好，还需要继续调试输出。",
+            new_task_advice="- 优先级：P1\n- 任务建议：先收紧展示格式。",
+        )
+
+        self.assertIn("### 新增：xiushenlu：刚才的update没有调好，还需要继续调试输出。", entry)
+        self.assertNotIn("- 原文：", entry)
+        self.assertNotIn("- 归入标题：", entry)
 
     def test_update_daily_replaces_original_without_rewriting_existing_advice(self) -> None:
         daily = """# 2026-04-30
@@ -85,7 +178,6 @@ class PlanUpdateTests(unittest.TestCase):
 """
         entry = format_new_task_entry(
             new_task="学习python",
-            target_heading="学习",
             new_task_advice="- 优先级：P2\n- 任务建议：控制在 45 分钟内。",
         )
 
@@ -128,7 +220,6 @@ class PlanUpdateTests(unittest.TestCase):
             updated_daily_original="原文\n第二个任务",
             new_task_entry=format_new_task_entry(
                 new_task="第二个任务",
-                target_heading="学习",
                 new_task_advice="- 优先级：P3",
             ),
         )
@@ -143,7 +234,6 @@ class PlanUpdateTests(unittest.TestCase):
             updated_daily_original="学习python",
             new_task_entry=format_new_task_entry(
                 new_task="学习python",
-                target_heading="学习",
                 new_task_advice="- 优先级：P2",
             ),
         )
@@ -192,6 +282,8 @@ class PlanUpdateTests(unittest.TestCase):
             self.assertIn("学习python", (inbox / "today_tasks.md").read_text(encoding="utf-8"))
             daily_text = (daily_dir / "2026-04-30.md").read_text(encoding="utf-8")
             self.assertIn("**新任务**", daily_text)
+            self.assertNotIn("- 原文：学习python", daily_text)
+            self.assertNotIn("- 归入标题：学习", daily_text)
             self.assertEqual([event["type"] for event in logger.events], ["llm_call", "plan_updated"])
 
     def test_generate_plan_update_removes_added_today_tasks_heading(self) -> None:

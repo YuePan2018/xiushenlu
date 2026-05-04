@@ -41,7 +41,7 @@ python app/main.py --help
 | Pipeline | 输入 | Prompt/输出约束 | 写入 | 事件 |
 | --- | --- | --- | --- | --- |
 | `daily_plan` | 日期、`goals.md`、`today_tasks.md` 或 `--tasks` | 输出今日待办原文、结合长期目标的简短建议、风险提醒、收尾检查项；可用表格；不用代码块；不以询问句结尾。 | daily 的 `计划` 区块 replace | `llm_call`、`plan_generated` |
-| `plan_update` | 日期、`goals.md`、`today_tasks.md`、当天 daily、`--add` 新任务 | 只输出严格 JSON，包含 `updated_today_tasks`、`updated_daily_original`、`target_heading`、`new_task_advice`；只为新增任务生成建议，不重写整份计划。 | `today_tasks.md` replace；daily 的 `计划` 区块局部更新 | `llm_call`、`plan_updated` |
+| `plan_update` | 日期、`goals.md`、`today_tasks.md`、当天 daily、`--add` 新任务 | 只输出严格 JSON，包含 `updated_today_tasks`、`updated_daily_original`、`target_heading`、`new_task_advice`；新增任务必须逐字保留，只为新增任务生成不超过 200 字的建议，不重写整份计划。 | `today_tasks.md` replace；daily 的 `计划` 区块局部更新 | `llm_call`、`plan_updated` |
 | `nightly_review` | 日期、当天 daily、当天事件日志；当天复盘额外读取 `today_tasks.md` 和 `明日计划.md` | 历史复盘输出复盘正文；当天复盘只输出严格 JSON，包含 `review`、`next_today_tasks`。`next_today_tasks` 必须保持当前待办风格，合并未完成任务和明日计划。 | daily 的 `复盘` 区块 replace；当天复盘成功后覆盖 `today_tasks.md` 并清空 `明日计划.md` | `llm_call`、`review_generated` |
 | `log` | 手动记录文本 | 不调用 LLM | daily 的 `记录` 区块 append | `user_log` |
 | `cost` | 本地 `llm_call` 事件 | 不调用 LLM，不做费用估算 | daily 的 `记录` 区块 append | 不新增 cost 事件 |
