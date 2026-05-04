@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.config import load_config, resolve_project_path
@@ -20,6 +21,7 @@ from app.pipelines.plan_update import PlanUpdateParseError, generate_plan_update
 
 
 ProviderFactory = Callable[[], LLMProvider]
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 class PlanRequest(BaseModel):
@@ -174,6 +176,7 @@ def create_app(
     factory = provider_factory or (lambda: DashScopeProvider(cfg))
     service = ConsoleService(cfg, factory)
     app = FastAPI(title="修身炉本地控制台")
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     app.state.console_service = service
 
     @app.get("/", response_class=HTMLResponse)
@@ -372,20 +375,115 @@ CONSOLE_HTML = f"""<!doctype html>
       font-size: 13px;
     }}
     .status.error {{ color: var(--danger); }}
-    pre {{
+    .daily-markdown {{
       margin: 0;
       min-height: 520px;
       max-height: calc(100vh - 168px);
       overflow: auto;
-      white-space: pre-wrap;
       word-break: break-word;
-      font-family: Consolas, "Cascadia Mono", "Microsoft YaHei UI", monospace;
       font-size: 13px;
-      line-height: 1.55;
+      line-height: 1.62;
       background: #fffcf4;
       border: 1px solid var(--line);
       border-radius: 8px;
-      padding: 12px;
+      padding: 14px;
+    }}
+    .daily-markdown.empty {{
+      color: var(--muted);
+    }}
+    .daily-markdown > :first-child {{
+      margin-top: 0;
+    }}
+    .daily-markdown > :last-child {{
+      margin-bottom: 0;
+    }}
+    .daily-markdown h1,
+    .daily-markdown h2,
+    .daily-markdown h3 {{
+      color: var(--text);
+      letter-spacing: 0;
+      line-height: 1.3;
+    }}
+    .daily-markdown h1 {{
+      margin: 0 0 14px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--line);
+      font-size: 22px;
+      font-weight: 720;
+    }}
+    .daily-markdown h2 {{
+      margin: 18px 0 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #ebe4d8;
+      font-size: 17px;
+      font-weight: 700;
+    }}
+    .daily-markdown h3 {{
+      margin: 14px 0 8px;
+      font-size: 15px;
+      font-weight: 700;
+    }}
+    .daily-markdown p,
+    .daily-markdown ul,
+    .daily-markdown ol,
+    .daily-markdown blockquote,
+    .daily-markdown table,
+    .daily-markdown pre {{
+      margin: 0 0 12px;
+    }}
+    .daily-markdown ul,
+    .daily-markdown ol {{
+      padding-left: 22px;
+    }}
+    .daily-markdown li + li {{
+      margin-top: 4px;
+    }}
+    .daily-markdown table {{
+      width: 100%;
+      border-collapse: collapse;
+      overflow-wrap: normal;
+    }}
+    .daily-markdown th,
+    .daily-markdown td {{
+      border: 1px solid var(--line);
+      padding: 7px 9px;
+      vertical-align: top;
+    }}
+    .daily-markdown th {{
+      background: var(--surface-2);
+      font-weight: 700;
+      text-align: left;
+    }}
+    .daily-markdown blockquote {{
+      border-left: 3px solid var(--accent);
+      color: var(--muted);
+      padding: 2px 0 2px 12px;
+    }}
+    .daily-markdown code {{
+      font-family: Consolas, "Cascadia Mono", "Microsoft YaHei UI", monospace;
+      font-size: 0.94em;
+      background: #f1eee7;
+      border-radius: 5px;
+      padding: 1px 5px;
+    }}
+    .daily-markdown pre {{
+      overflow: auto;
+      white-space: pre-wrap;
+      background: #f3efe6;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 10px;
+    }}
+    .daily-markdown pre code {{
+      display: block;
+      background: transparent;
+      border-radius: 0;
+      padding: 0;
+    }}
+    .daily-markdown hr {{
+      border: 0;
+      border-top: 1px solid var(--line);
+      margin: 16px 0;
     }}
     .slots {{
       display: grid;
@@ -412,7 +510,7 @@ CONSOLE_HTML = f"""<!doctype html>
     }}
     @media (max-width: 1100px) {{
       main {{ grid-template-columns: 1fr; }}
-      pre {{ max-height: none; }}
+      .daily-markdown {{ max-height: none; }}
     }}
     @media (max-width: 640px) {{
       .bar {{ align-items: flex-start; flex-direction: column; }}
@@ -476,7 +574,7 @@ CONSOLE_HTML = f"""<!doctype html>
     </div>
     <section>
       <h2>Daily</h2>
-      <pre id="dailyText">加载中...</pre>
+      <article id="dailyText" class="daily-markdown empty" aria-live="polite">加载中...</article>
       <div class="path" id="dailyPath"></div>
     </section>
     <div class="stack">
@@ -490,9 +588,18 @@ CONSOLE_HTML = f"""<!doctype html>
       </section>
     </div>
   </main>
+  <script src="/static/vendor/marked-16.2.1.umd.js"></script>
+  <script src="/static/vendor/dompurify-3.2.6.min.js"></script>
   <script>
     const state = {{ current: null, busy: false }};
     const $ = (id) => document.getElementById(id);
+
+    if (window.marked) {{
+      marked.setOptions({{
+        gfm: true,
+        breaks: false,
+      }});
+    }}
 
     function setBusy(value) {{
       state.busy = value;
@@ -537,11 +644,28 @@ CONSOLE_HTML = f"""<!doctype html>
       state.current = data;
       $("dateInput").value = data.date;
       $("reviewDateInput").value = data.date;
-      $("dailyText").textContent = data.daily.text || "今天还没有 daily 记录。";
+      renderDaily(data.daily.text);
       $("dailyPath").textContent = data.daily.path;
       $("tasksInput").value = data.tasks.text || "";
       $("tasksPath").textContent = data.tasks.path;
       renderFuture(data.future);
+    }}
+
+    function renderDaily(text) {{
+      const el = $("dailyText");
+      const markdown = String(text || "").trim();
+      if (!markdown) {{
+        el.classList.add("empty");
+        el.textContent = "今天还没有 daily 记录。";
+        return;
+      }}
+      el.classList.remove("empty");
+      if (!window.marked || !window.DOMPurify) {{
+        el.textContent = markdown;
+        return;
+      }}
+      const html = marked.parse(markdown);
+      el.innerHTML = DOMPurify.sanitize(html, {{ USE_PROFILES: {{ html: true }} }});
     }}
 
     function renderFuture(items) {{

@@ -43,6 +43,34 @@ class FakeProvider(LLMProvider):
 
 
 class ConsoleTests(unittest.TestCase):
+    def test_index_uses_local_markdown_renderer_assets(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+
+            response = client.get("/")
+
+            self.assertEqual(response.status_code, 200)
+            html = response.text
+            self.assertIn('<article id="dailyText" class="daily-markdown empty"', html)
+            self.assertIn('/static/vendor/marked-16.2.1.umd.js', html)
+            self.assertIn('/static/vendor/dompurify-3.2.6.min.js', html)
+            self.assertIn("DOMPurify.sanitize", html)
+            self.assertNotIn('<pre id="dailyText"', html)
+
+    def test_local_markdown_vendor_assets_are_served(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+
+            marked_response = client.get("/static/vendor/marked-16.2.1.umd.js")
+            purify_response = client.get("/static/vendor/dompurify-3.2.6.min.js")
+
+            self.assertEqual(marked_response.status_code, 200)
+            self.assertIn("marked v16.2.1", marked_response.text)
+            self.assertEqual(purify_response.status_code, 200)
+            self.assertIn("DOMPurify 3.2.6", purify_response.text)
+
     def test_state_returns_existing_daily_without_events_or_tokens(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
