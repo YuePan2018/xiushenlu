@@ -39,10 +39,10 @@ python app/main.py log "补充 pipeline 参数表和模块职责表"
 # 4. 查看今天的 daily，不调用 LLM
 python app/main.py status
 
-# 5. 根据当天 daily 生成复盘，会调用 LLM；当天 review 会把未完成任务和明日计划滚入 today_tasks.md
+# 5. 根据当天 daily 生成复盘，会调用 LLM；当天 review 会把未完成任务和明日计划滚入 today_tasks.md，并追加 token 统计
 python app/main.py review
 
-# 6. 统计今日和本月 token，不调用 LLM
+# 6. 手动重新统计今日和本月 token，不调用 LLM
 python app/main.py cost
 ```
 
@@ -52,7 +52,7 @@ python app/main.py cost
 conda run --no-capture-output -n xiushenlu python app/main.py console
 ```
 
-更日常的方式是直接双击 `run_main.bat`，它会启动控制台并打开网页；如果 8765 端口已有控制台在运行，则只打开现有页面。默认地址是 `http://127.0.0.1:8765`。启动窗口保持打开时，可以输入 `重启` 来重启控制台并重新打开网页；按 `Ctrl+C` 会停止控制台并关闭窗口。控制台目前只封装常用执行能力：查看 daily、查看今日待办、保存今日待办、写入记录、生成计划、日内局部更新、生成复盘；生成今天复盘时会复用 CLI 的待办滚动逻辑。自动化、通知、审批、工具和知识区域只预留布局。token 统计和事件日志仍由 CLI 与本地文件保留，但不在控制台展示。
+更日常的方式是直接双击 `run_main.bat`，它会启动控制台并打开网页；如果 8765 端口已有控制台在运行，则只打开现有页面。默认地址是 `http://127.0.0.1:8765`。启动窗口保持打开时，可以输入 `重启` 来重启控制台并重新打开网页；按 `Ctrl+C` 会停止控制台并关闭窗口。控制台目前只封装常用执行能力：查看 daily、查看今日待办、保存今日待办、写入记录、生成计划、日内局部更新、生成复盘；生成今天复盘时会复用 CLI 的待办滚动逻辑，并自动追加 token 统计。自动化、通知、审批、工具和知识区域只预留布局。token 统计和事件日志仍由 CLI 与本地文件保留，但不在控制台展示。
 
 控制台里的“保存待办”和“生成计划”是两个独立动作：“保存待办”只写入 `data/user_inputs/today_tasks.md`，不调用 LLM；“生成计划”等价于 `python app/main.py plan`，只读取已保存的 `today_tasks.md`。
 
@@ -74,15 +74,15 @@ conda run --no-capture-output -n xiushenlu python app/main.py console
 | `python app/main.py plan --tasks "..."` | `--tasks`：今日待办文本 | 是 | 先覆盖写入今日待办，再生成计划 | 写 `today_tasks.md`，写 daily 和 events |
 | `python app/main.py plan --add "..."` | `--add`：新增今日任务 | 是 | 追加一条今日待办，并局部更新当天计划 | 写 `today_tasks.md`，写 daily 和 `plan_updated` 事件 |
 | `python app/main.py log "..."` | 位置参数：记录内容，可多词 | 否 | 追加一条过程记录 | 写 daily 的 `记录` 区块，写 `user_log` 事件 |
-| `python app/main.py review` | 无 | 是 | 根据今天的 daily 生成晚间复盘，并滚动明日待办 | 读 daily/events、`today_tasks.md`、`明日计划.md`；写 daily/events、`today_tasks.md`，清空 `明日计划.md` |
+| `python app/main.py review` | 无 | 是 | 根据今天的 daily 生成晚间复盘，滚动明日待办，并追加 token 统计 | 读 daily/events、`today_tasks.md`、`明日计划.md`；写 daily/events、`today_tasks.md`，清空 `明日计划.md` |
 | `python app/main.py review --date YYYY-MM-DD` | `--date`：历史日期 | 是 | 对指定日期生成复盘，不滚动当前待办 | 读指定日期 daily/events，写指定日期 daily/events |
 | `python app/main.py status` | 无 | 否 | 打印今天的 daily | 读 daily |
-| `python app/main.py cost` | 无 | 否 | 汇总今日和本月 token，并追加到 daily | 读 events，写 daily 的 `记录` 区块 |
+| `python app/main.py cost` | 无 | 否 | 手动汇总今日和本月 token，并追加到 daily | 读 events，写 daily 的 `记录` 区块 |
 | `python app/main.py console` | `--host`、`--port`、`--reload` | 视操作而定 | 启动本地控制台，复用已有 pipeline 和本地读写能力 | 通过 API 间接读写 daily 和 today_tasks |
 
 `plan --add` 是日内计划更新入口，目前本地单测已覆盖解析、写入和失败保护。它要求模型返回严格 JSON，并且必须逐字保留新增任务、只生成不超过 200 字的新任务建议；如果解析失败或内容不符合约束，流程会停止写入 `today_tasks.md` 和 daily。进入自动化前，还需要完成一次真实 DashScope 链路验收。
 
-当天 `review` 也是受控写入入口：模型必须返回严格 JSON，包含复盘正文和新的完整 `today_tasks.md`。解析失败时不会写入复盘、不会覆盖 `today_tasks.md`，也不会清空 `明日计划.md`。只有复盘日期等于今天时才触发这一步；历史日期复盘只更新对应 daily。
+当天 `review` 也是受控写入入口：模型必须返回严格 JSON，包含复盘正文和新的完整 `today_tasks.md`。解析失败时不会写入复盘、不会覆盖 `today_tasks.md`，也不会清空 `明日计划.md`，不会追加 token 统计。只有复盘日期等于今天时才触发这一步；历史日期复盘只更新对应 daily。当天复盘成功后会自动把本次复盘 LLM 调用计入今日/本月 token 统计并追加到 daily。
 
 
 ## 配置

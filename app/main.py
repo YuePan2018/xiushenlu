@@ -9,7 +9,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import load_config
-from app.cost import format_token_report, summarize_token_usage
+from app.cost import append_token_usage_report
 from app.daily import append_record, read_daily
 from app.inbox import write_today_tasks
 from app.llm.dashscope_impl import DashScopeProvider
@@ -129,13 +129,11 @@ def run_status() -> int:
 
 def run_cost() -> int:
     config = load_config()
-    stats = summarize_token_usage()
-    report = format_token_report(stats)
-    print(report)
+    result = append_token_usage_report(config)
+    print(result.report)
 
-    path = append_record(f"token 消耗统计\n```text\n{report}\n```", config)
     print()
-    print(f"统计已写入：{path}")
+    print(f"统计已写入：{result.path}")
     return 0
 
 

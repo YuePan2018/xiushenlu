@@ -45,7 +45,10 @@ class FakeLogger:
         return event
 
     def read_events_for_date(self, date_text: str) -> list[dict[str, Any]]:
-        return []
+        return self.events
+
+    def read_events_for_month(self, month_text: str) -> list[dict[str, Any]]:
+        return self.events
 
 
 class NightlyReviewTests(unittest.TestCase):
@@ -102,7 +105,13 @@ class NightlyReviewTests(unittest.TestCase):
             self.assertTrue(result.rolled_over)
             self.assertEqual(result.today_tasks_path, today_tasks)
             self.assertEqual(result.tomorrow_plan_path, tomorrow_plan)
-            self.assertIn("做了别的事", daily_file.read_text(encoding="utf-8"))
+            daily_text = daily_file.read_text(encoding="utf-8")
+            self.assertIn("做了别的事", daily_text)
+            self.assertIn("token 消耗统计", daily_text)
+            self.assertIn("今日 LLM 调用：1 次", daily_text)
+            self.assertIn("输入 token：10", daily_text)
+            self.assertIn("输出 token：20", daily_text)
+            self.assertIn("总 token：30", daily_text)
             saved_tasks = today_tasks.read_text(encoding="utf-8")
             self.assertTrue(saved_tasks.startswith("# 今日待办"))
             self.assertIn("去浙大", saved_tasks)
@@ -176,6 +185,7 @@ class NightlyReviewTests(unittest.TestCase):
             self.assertFalse(result.rolled_over)
             self.assertIsNone(result.today_tasks_path)
             self.assertIn("历史复盘", daily_file.read_text(encoding="utf-8"))
+            self.assertNotIn("token 消耗统计", daily_file.read_text(encoding="utf-8"))
             self.assertEqual(today_tasks.read_text(encoding="utf-8"), "# 今日待办\n\n当前任务\n")
             self.assertEqual(tomorrow_plan.read_text(encoding="utf-8"), "明日输入\n")
             self.assertNotIn("严格 JSON", provider.prompts[0])
@@ -210,6 +220,7 @@ class NightlyReviewTests(unittest.TestCase):
             self.assertEqual(today_tasks.read_text(encoding="utf-8"), "# 今日待办\n\n原任务\n")
             self.assertEqual(tomorrow_plan.read_text(encoding="utf-8"), "明日任务\n")
             self.assertEqual(daily_file.read_text(encoding="utf-8"), f"# {today_text}\n\n## 记录\n\n- 原记录\n")
+            self.assertNotIn("token 消耗统计", daily_file.read_text(encoding="utf-8"))
             self.assertEqual([event["type"] for event in logger.events], ["llm_call"])
 
 

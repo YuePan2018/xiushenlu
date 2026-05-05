@@ -160,7 +160,12 @@ class ConsoleTests(unittest.TestCase):
             response = client.post("/api/review", json={"date": today})
 
             self.assertEqual(response.status_code, 200)
-            self.assertIn("控制台测试复盘", response.json()["state"]["daily"]["text"])
+            daily_text = response.json()["state"]["daily"]["text"]
+            self.assertIn("控制台测试复盘", daily_text)
+            self.assertIn("token 消耗统计", daily_text)
+            self.assertIn("今日 LLM 调用：1 次", daily_text)
+            self.assertIn("输入 token：7", daily_text)
+            self.assertIn("输出 token：11", daily_text)
             self.assertIn("控制台明日任务", (inbox_dir / "today_tasks.md").read_text(encoding="utf-8"))
             self.assertEqual((inbox_dir / "明日计划.md").read_text(encoding="utf-8"), "")
 

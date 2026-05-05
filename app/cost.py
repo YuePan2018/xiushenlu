@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
-
-from app.logger import EventLogger
+from pathlib import Path
 from typing import Any
+
+from app.config import load_config
+from app.daily import append_record
+from app.logger import EventLogger
 
 
 @dataclass
@@ -15,6 +18,12 @@ class TokenStats:
     total_tokens: int = 0
     estimated_calls: int = 0
     by_model: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class TokenUsageReportResult:
+    path: Path
+    report: str
 
 
 def summarize_token_usage(
@@ -39,6 +48,20 @@ def format_token_report(stats: dict[str, TokenStats]) -> str:
     today_text = format_token_stats("今日", stats["today"])
     month_text = format_token_stats("本月", stats["month"])
     return f"{today_text}\n\n{month_text}"
+
+
+def append_token_usage_report(
+    config: dict[str, Any] | None = None,
+    logger: EventLogger | None = None,
+    target_date: date | None = None,
+) -> TokenUsageReportResult:
+    cfg = config or load_config()
+    current_date = target_date or date.today()
+    event_logger = logger or EventLogger(config=cfg)
+    stats = summarize_token_usage(event_logger, current_date)
+    report = format_token_report(stats)
+    path = append_record(f"token 消耗统计\n```text\n{report}\n```", cfg, current_date)
+    return TokenUsageReportResult(path=path, report=report)
 
 
 def format_token_stats(label: str, stats: TokenStats) -> str:

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import load_config
+from app.cost import append_token_usage_report
 from app.daily import daily_path, read_daily, write_daily_section
 from app.inbox import (
     clear_tomorrow_plan,
@@ -56,7 +57,7 @@ def generate_nightly_review(
     current_date = target_date or today
     date_text = current_date.isoformat()
     day_text = read_daily(cfg, date_text)
-    event_logger = logger or EventLogger()
+    event_logger = logger or EventLogger(config=cfg)
     events = _events_for_date(event_logger, date_text)
     rolled_over = current_date == today
 
@@ -82,6 +83,7 @@ def generate_nightly_review(
         path = write_daily_section("复盘", review, cfg, date_text, mode="replace")
         next_tasks_path = write_today_tasks(next_today_tasks, cfg)
         next_tomorrow_plan_path = clear_tomorrow_plan(cfg)
+        append_token_usage_report(cfg, event_logger, current_date)
     else:
         prompt = _build_prompt(date_text, day_text, events)
         review = provider.chat(prompt).strip()
