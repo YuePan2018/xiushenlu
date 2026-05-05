@@ -112,6 +112,7 @@ app/main.py -> DashScopeProvider -> dashscope.MultiModalConversation.call()
 
 - 文件读写应优先使用 `app.safety.safe_read_text`、`safe_write_text`、`safe_append_text` 或已封装好的模块。
 - 不要绕过 `app/safety.py` 直接写 `data/` 下的运行文件。
+- 受保护路径：`docs/`、`data/memory/`。任何 agent 在创建、修改、移动、删除这些路径下的文件前，必须先说明拟改文件、修改原因和预计改法，并获得用户明确同意；未获同意时只能读取和分析。
 - 不要让 LLM 输出直接变成 shell 命令。
 - 不要自动读取浏览器、聊天软件、密钥、cookie 或项目外敏感目录。
 - 不要自动删除文件；后续需要清理时优先移动到 `data/quarantine/`。
