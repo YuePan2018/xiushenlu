@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -12,6 +13,9 @@ from app.llm.provider import LLMProvider
 from app.llm.usage import append_llm_call_event
 from app.logger import EventLogger
 from app.memory.goals import read_goals
+
+
+_NUMBERED_BOLD_HEADING_RE = re.compile(r"^\*\*\d+\.\s+[^*]+?\*\*$")
 
 
 @dataclass(frozen=True)
@@ -35,7 +39,7 @@ def generate_daily_plan(
     tasks = tasks_text if tasks_text is not None else read_today_tasks(cfg)
     prompt = _build_prompt(date_text=date_text, goals=goals, tasks=tasks)
 
-    plan = provider.chat(prompt).strip()
+    plan = _normalize_markdown_section_spacing(provider.chat(prompt).strip())
     daily_path = _daily_path(cfg, date_text)
     _write_plan_section(config=cfg, date_text=date_text, plan=plan)
 
@@ -86,6 +90,19 @@ def _build_prompt(date_text: str, goals: str, tasks: str) -> str:
 今日待办：
 {tasks_text}
 """
+
+
+def _normalize_markdown_section_spacing(plan: str) -> str:
+    lines = plan.splitlines()
+    normalized: list[str] = []
+
+    for index, line in enumerate(lines):
+        normalized.append(line)
+        next_line = lines[index + 1] if index + 1 < len(lines) else ""
+        if _NUMBERED_BOLD_HEADING_RE.match(line.strip()) and next_line.strip():
+            normalized.append("")
+
+    return "\n".join(normalized).strip()
 
 
 def _write_plan_section(config: dict[str, Any], date_text: str, plan: str) -> None:
