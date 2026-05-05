@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import load_config
-from app.daily import append_record
+from app.daily import write_daily_section
 from app.logger import EventLogger
 
 
@@ -45,9 +45,16 @@ def summarize_token_usage(
 
 
 def format_token_report(stats: dict[str, TokenStats]) -> str:
-    today_text = format_token_stats("今日", stats["today"])
-    month_text = format_token_stats("本月", stats["month"])
-    return f"{today_text}\n\n{month_text}"
+    today_stats = stats["today"]
+    month_stats = stats["month"]
+    return "\n".join(
+        [
+            f"今日 LLM 调用：{today_stats.calls} 次",
+            f"今日 token 数：{today_stats.total_tokens}",
+            f"本月 LLM 调用：{month_stats.calls} 次",
+            f"本月 token 数：{month_stats.total_tokens}",
+        ]
+    )
 
 
 def append_token_usage_report(
@@ -60,23 +67,8 @@ def append_token_usage_report(
     event_logger = logger or EventLogger(config=cfg)
     stats = summarize_token_usage(event_logger, current_date)
     report = format_token_report(stats)
-    path = append_record(f"token 消耗统计\n```text\n{report}\n```", cfg, current_date)
+    path = write_daily_section("token 消耗统计", f"```text\n{report}\n```", cfg, current_date)
     return TokenUsageReportResult(path=path, report=report)
-
-
-def format_token_stats(label: str, stats: TokenStats) -> str:
-    lines = [
-        f"{label} LLM 调用：{stats.calls} 次",
-        f"输入 token：{stats.tokens_in}",
-        f"输出 token：{stats.tokens_out}",
-        f"总 token：{stats.total_tokens}",
-        f"估算调用：{stats.estimated_calls} 次",
-    ]
-    if stats.by_model:
-        lines.append("按模型：")
-        for model, total in sorted(stats.by_model.items()):
-            lines.append(f"- {model}: {total} tokens")
-    return "\n".join(lines)
 
 
 def _add_llm_events(stats: TokenStats, events: list[dict[str, Any]]) -> None:

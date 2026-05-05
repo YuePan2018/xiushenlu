@@ -30,11 +30,11 @@ python app/main.py --help
 | `python app/main.py plan --tasks "今天要做的事"` | `--tasks` 覆盖写入 `today_tasks.md` | 是 | 写入今日待办并生成今日计划。 |
 | `python app/main.py plan --add "新增任务"` | `--add` 追加一条今日任务 | 是 | 局部更新今日计划；单测已通过，真实链路仍需验收。 |
 | `python app/main.py log "过程记录"` | 记录文本 | 否 | 追加一条今日过程记录。 |
-| `python app/main.py review` | 无 | 是 | 生成今天的晚间复盘，并把未完成任务和 `明日计划.md` 滚动覆盖到 `today_tasks.md`，成功后清空 `明日计划.md`。 |
+| `python app/main.py review` | 无 | 是 | 生成今天的晚间复盘，并把未完成任务和 `明日计划.md` 滚动覆盖到 `today_tasks.md`，成功后清空 `明日计划.md` 并更新 token 消耗统计。 |
 | `python app/main.py review --date YYYY-MM-DD` | `--date` 指定历史日期 | 是 | 生成指定日期的复盘；历史日期不滚动当前待办，不清空 `明日计划.md`。 |
 | `python app/main.py status` | 无 | 否 | 打印今天的 daily。 |
-| `python app/main.py cost` | 无 | 否 | 本地汇总今日和本月 token，并写入 daily。 |
-| `python app/main.py console` | `--host`、`--port`、`--reload` | 视操作而定 | 启动本地控制台，默认 `127.0.0.1:8765`；当前只控制已有 plan/log/review、daily/today_tasks 展示和待办保存。 |
+| `python app/main.py cost` | 无 | 否 | 本地汇总今日和本月 token，并覆盖 daily 的 `token 消耗统计` 区块。 |
+| `python app/main.py console` | `--host`、`--port`、`--reload` | 视操作而定 | 启动本地控制台，默认 `127.0.0.1:8765`；当前只控制已有 plan/log/review、手动 token 统计、daily/today_tasks 展示和待办保存。 |
 
 ## Pipeline 指令
 
@@ -44,7 +44,7 @@ python app/main.py --help
 | `plan_update` | 日期、`goals.md`、`today_tasks.md`、当天 daily、`--add` 新任务 | 只输出严格 JSON，包含 `updated_today_tasks`、`updated_daily_original`、`target_heading`、`new_task_advice`；新增任务必须逐字保留，只为新增任务生成不超过 200 字的建议，不重写整份计划。 | `today_tasks.md` replace；daily 的 `计划` 区块局部更新 | `llm_call`、`plan_updated` |
 | `nightly_review` | 日期、当天 daily、当天事件日志；当天复盘额外读取 `today_tasks.md` 和 `明日计划.md` | 历史复盘输出复盘正文；当天复盘只输出严格 JSON，包含 `review`、`next_today_tasks`。`next_today_tasks` 必须保持当前待办风格，合并未完成任务和明日计划。 | daily 的 `复盘` 区块 replace；当天复盘成功后覆盖 `today_tasks.md` 并清空 `明日计划.md` | `llm_call`、`review_generated` |
 | `log` | 手动记录文本 | 不调用 LLM | daily 的 `记录` 区块 append | `user_log` |
-| `cost` | 本地 `llm_call` 事件 | 不调用 LLM，不做费用估算 | daily 的 `记录` 区块 append | 不新增 cost 事件 |
+| `cost` | 本地 `llm_call` 事件 | 不调用 LLM，不做费用估算 | daily 的 `token 消耗统计` 区块 replace | 不新增 cost 事件 |
 
 ## 代码边界
 

@@ -62,10 +62,13 @@ class ConsoleTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             html = response.text
             self.assertIn('<article id="dailyText" class="daily-markdown empty"', html)
+            self.assertIn("<h2>更新计划</h2>", html)
+            self.assertIn('id="tokenBtn">token</button>', html)
             self.assertIn('/static/vendor/marked-16.2.1.umd.js', html)
             self.assertIn('/static/vendor/dompurify-3.2.6.min.js', html)
             self.assertIn("DOMPurify.sanitize", html)
             self.assertNotIn('<pre id="dailyText"', html)
+            self.assertNotIn("<h2>日内更新</h2>", html)
 
     def test_local_markdown_vendor_assets_are_served(self) -> None:
         with _temporary_directory() as temp_dir:
@@ -164,10 +167,43 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn("控制台测试复盘", daily_text)
             self.assertIn("token 消耗统计", daily_text)
             self.assertIn("今日 LLM 调用：1 次", daily_text)
-            self.assertIn("输入 token：7", daily_text)
-            self.assertIn("输出 token：11", daily_text)
+            self.assertIn("今日 token 数：18", daily_text)
+            self.assertIn("本月 LLM 调用：1 次", daily_text)
+            self.assertIn("本月 token 数：18", daily_text)
+            self.assertNotIn("输入 token", daily_text)
+            self.assertNotIn("输出 token", daily_text)
             self.assertIn("控制台明日任务", (inbox_dir / "today_tasks.md").read_text(encoding="utf-8"))
             self.assertEqual((inbox_dir / "明日计划.md").read_text(encoding="utf-8"), "")
+
+    def test_cost_endpoint_updates_token_section_once(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            inbox_dir = Path(config["paths"]["inbox_dir"])
+            memory_dir = Path(config["paths"]["memory_dir"])
+            inbox_dir.mkdir(parents=True)
+            memory_dir.mkdir(parents=True)
+            (inbox_dir / "today_tasks.md").write_text("# 今日待办\n\n统计 token", encoding="utf-8")
+            provider = FakeProvider()
+            client = TestClient(create_app(config=config, provider_factory=lambda: provider))
+
+            plan_response = client.post("/api/plan", json={})
+            self.assertEqual(plan_response.status_code, 200)
+
+            first_response = client.post("/api/cost", json={})
+            second_response = client.post("/api/cost", json={})
+
+            self.assertEqual(first_response.status_code, 200)
+            self.assertEqual(second_response.status_code, 200)
+            data = second_response.json()
+            self.assertEqual(data["message"], "token 统计已更新。")
+            daily_text = data["state"]["daily"]["text"]
+            self.assertEqual(daily_text.count("## token 消耗统计"), 1)
+            self.assertIn("今日 LLM 调用：1 次", daily_text)
+            self.assertIn("今日 token 数：18", daily_text)
+            self.assertIn("本月 LLM 调用：1 次", daily_text)
+            self.assertIn("本月 token 数：18", daily_text)
+            self.assertNotIn("输入 token", daily_text)
+            self.assertNotIn("输出 token", daily_text)
 
     def test_plan_update_rejects_empty_add(self) -> None:
         with _temporary_directory() as temp_dir:

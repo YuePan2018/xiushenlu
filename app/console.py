@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.config import load_config, resolve_project_path
+from app.cost import append_token_usage_report
 from app.daily import append_record, daily_path, read_daily
 from app.inbox import read_today_tasks, today_tasks_path, write_today_tasks
 from app.llm.dashscope_impl import DashScopeProvider
@@ -46,6 +47,13 @@ class LogRequest(BaseModel):
 
 
 class ReviewRequest(BaseModel):
+    date: str | None = None
+
+    class Config:
+        extra = "forbid"
+
+
+class CostRequest(BaseModel):
     date: str | None = None
 
     class Config:
@@ -167,6 +175,23 @@ class ConsoleService:
             "state": self.snapshot(result.date),
         }
 
+    def report_tokens(self, request: CostRequest) -> dict[str, Any]:
+        target_date = _parse_date(request.date) if request.date else date.today()
+        result = append_token_usage_report(
+            self.config,
+            EventLogger(config=self.config),
+            target_date,
+        )
+        return {
+            "message": "token 统计已更新。",
+            "result": {
+                "date": target_date.isoformat(),
+                "daily_path": str(result.path),
+                "report": result.report,
+            },
+            "state": self.snapshot(target_date.isoformat()),
+        }
+
 
 def create_app(
     config: dict[str, Any] | None = None,
@@ -202,6 +227,10 @@ def create_app(
     @app.post("/api/review")
     def api_review(request: ReviewRequest) -> dict[str, Any]:
         return _handle(lambda: service.generate_review(request))
+
+    @app.post("/api/cost")
+    def api_cost(request: CostRequest) -> dict[str, Any]:
+        return _handle(lambda: service.report_tokens(request))
 
     return app
 
@@ -567,7 +596,7 @@ CONSOLE_HTML = f"""<!doctype html>
         <button id="logBtn">写入记录</button>
       </section>
       <section>
-        <h2>日内更新</h2>
+        <h2>更新计划</h2>
         <label for="addInput">新增任务</label>
         <textarea id="addInput" spellcheck="false"></textarea>
         <button id="addBtn">局部更新计划</button>
@@ -592,7 +621,10 @@ CONSOLE_HTML = f"""<!doctype html>
           </div>
           <div>
             <label>&nbsp;</label>
-            <button id="reviewBtn">生成复盘</button>
+            <div class="row">
+              <button id="reviewBtn">生成复盘</button>
+              <button class="secondary" id="tokenBtn">token</button>
+            </div>
           </div>
         </div>
       </section>
@@ -767,6 +799,12 @@ CONSOLE_HTML = f"""<!doctype html>
     }}));
     $("reviewBtn").addEventListener("click", () => runAction("生成复盘", () =>
       requestJson("/api/review", {{
+        method: "POST",
+        body: JSON.stringify({{ date: $("reviewDateInput").value }}),
+      }})
+    ));
+    $("tokenBtn").addEventListener("click", () => runAction("token 统计", () =>
+      requestJson("/api/cost", {{
         method: "POST",
         body: JSON.stringify({{ date: $("reviewDateInput").value }}),
       }})
