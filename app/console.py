@@ -567,6 +567,12 @@ CONSOLE_HTML = f"""<!doctype html>
         <button id="logBtn">写入记录</button>
       </section>
       <section>
+        <h2>日内更新</h2>
+        <label for="addInput">新增任务</label>
+        <textarea id="addInput" spellcheck="false"></textarea>
+        <button id="addBtn">局部更新计划</button>
+      </section>
+      <section>
         <h2>今日待办</h2>
         <label for="tasksInput">today_tasks.md</label>
         <textarea id="tasksInput" spellcheck="false"></textarea>
@@ -576,12 +582,6 @@ CONSOLE_HTML = f"""<!doctype html>
           <button class="secondary" id="reloadTasksBtn">读取待办</button>
         </div>
         <div class="path" id="tasksPath"></div>
-      </section>
-      <section>
-        <h2>日内更新</h2>
-        <label for="addInput">新增任务</label>
-        <textarea id="addInput" spellcheck="false"></textarea>
-        <button id="addBtn">局部更新计划</button>
       </section>
       <section>
         <h2>复盘</h2>
