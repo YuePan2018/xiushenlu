@@ -508,12 +508,53 @@ CONSOLE_HTML = f"""<!doctype html>
       margin: 0 auto;
       padding: 16px 20px 28px;
     }}
-    section {{
+    section,
+    details.panel {{
       background: var(--surface);
       border: 1px solid var(--line);
       border-radius: 8px;
       box-shadow: var(--shadow);
       padding: 14px;
+    }}
+    details.panel summary {{
+      list-style: none;
+    }}
+    details.panel summary::-webkit-details-marker {{
+      display: none;
+    }}
+    .collapsible-summary {{
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      cursor: pointer;
+      user-select: none;
+    }}
+    .collapsible-summary:focus-visible {{
+      border-radius: 7px;
+      outline: 3px solid rgba(47, 111, 94, 0.18);
+      outline-offset: 5px;
+    }}
+    .collapsible-summary::before {{
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-right: 2px solid var(--muted);
+      border-bottom: 2px solid var(--muted);
+      transform: rotate(-45deg);
+      transition: transform 0.14s ease;
+      flex: 0 0 auto;
+    }}
+    details.panel[open] .collapsible-summary::before {{
+      transform: rotate(45deg);
+    }}
+    .panel-title {{
+      margin: 0;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }}
+    .collapsible-body {{
+      margin-top: 12px;
     }}
     .stack {{ display: grid; gap: 14px; align-content: start; }}
     .row {{
@@ -754,46 +795,62 @@ CONSOLE_HTML = f"""<!doctype html>
   </header>
   <main>
     <div class="stack">
-      <section>
-        <h2>过程记录</h2>
-        <label for="logInput">记录内容</label>
-        <textarea id="logInput" spellcheck="false"></textarea>
-        <button id="logBtn">写入记录</button>
-      </section>
-      <section>
-        <h2>更新计划</h2>
-        <label for="addInput">新增任务</label>
-        <textarea id="addInput" spellcheck="false"></textarea>
-        <button id="addBtn">局部更新计划</button>
-      </section>
-      <section>
-        <h2>今日待办</h2>
-        <label for="tasksInput">today_tasks.md</label>
-        <textarea id="tasksInput" spellcheck="false"></textarea>
-        <div class="row">
-          <button class="secondary" id="saveTasksBtn">保存待办</button>
-          <button id="planBtn">生成计划</button>
-          <button class="secondary" id="reloadTasksBtn">读取待办</button>
-          <button class="secondary" id="openTasksBtn">打开文件</button>
+      <details class="panel">
+        <summary class="collapsible-summary">
+          <span class="panel-title">过程记录</span>
+        </summary>
+        <div class="collapsible-body">
+          <label for="logInput">记录内容</label>
+          <textarea id="logInput" spellcheck="false"></textarea>
+          <button id="logBtn">写入记录</button>
         </div>
-        <div class="path" id="tasksPath"></div>
-      </section>
-      <section>
-        <h2>复盘</h2>
-        <div class="split">
-          <div>
-            <label for="reviewDateInput">复盘日期</label>
-            <input id="reviewDateInput" type="date">
+      </details>
+      <details class="panel">
+        <summary class="collapsible-summary">
+          <span class="panel-title">更新计划</span>
+        </summary>
+        <div class="collapsible-body">
+          <label for="addInput">新增任务</label>
+          <textarea id="addInput" spellcheck="false"></textarea>
+          <button id="addBtn">局部更新计划</button>
+        </div>
+      </details>
+      <details class="panel">
+        <summary class="collapsible-summary">
+          <span class="panel-title">今日待办</span>
+        </summary>
+        <div class="collapsible-body">
+          <label for="tasksInput">today_tasks.md</label>
+          <textarea id="tasksInput" spellcheck="false"></textarea>
+          <div class="row">
+            <button class="secondary" id="saveTasksBtn">保存待办</button>
+            <button id="planBtn">生成计划</button>
+            <button class="secondary" id="reloadTasksBtn">读取待办</button>
+            <button class="secondary" id="openTasksBtn">打开文件</button>
           </div>
-          <div>
-            <label>&nbsp;</label>
-            <div class="row">
-              <button id="reviewBtn">生成复盘</button>
-              <button class="secondary" id="tokenBtn">token</button>
+          <div class="path" id="tasksPath"></div>
+        </div>
+      </details>
+      <details class="panel">
+        <summary class="collapsible-summary">
+          <span class="panel-title">复盘</span>
+        </summary>
+        <div class="collapsible-body">
+          <div class="split">
+            <div>
+              <label for="reviewDateInput">复盘日期</label>
+              <input id="reviewDateInput" type="date">
+            </div>
+            <div>
+              <label>&nbsp;</label>
+              <div class="row">
+                <button id="reviewBtn">生成复盘</button>
+                <button class="secondary" id="tokenBtn">token</button>
+              </div>
             </div>
           </div>
         </div>
-      </section>
+      </details>
     </div>
     <section>
       <h2>Daily</h2>
