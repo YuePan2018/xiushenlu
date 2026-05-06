@@ -39,7 +39,8 @@ def generate_daily_plan(
     tasks = tasks_text if tasks_text is not None else read_today_tasks(cfg)
     prompt = _build_prompt(date_text=date_text, goals=goals, tasks=tasks)
 
-    plan = _normalize_markdown_section_spacing(provider.chat(prompt).strip())
+    plan_advice = _normalize_markdown_section_spacing(provider.chat(prompt).strip())
+    plan = _build_plan(tasks=tasks, plan_advice=plan_advice)
     daily_path = _daily_path(cfg, date_text)
     _write_plan_section(config=cfg, date_text=date_text, plan=plan)
 
@@ -73,13 +74,14 @@ def _build_prompt(date_text: str, goals: str, tasks: str) -> str:
 请根据长期目标和今日待办，为 {date_text} 生成一份当天计划
 
 输出结构（严格按此顺序）：
-1. 今日待办原文（逐字复制，但可以重新标序号和调整格式）
-2. 根据长期目标，对各任务给出简短建议（优先级、注意事项，预估时间）注意事项每条一句话，不给具体步骤。
+1. 根据长期目标，对各任务给出简短建议（优先级、注意事项，预估时间）注意事项每条一句话，不给具体步骤。
 预估时要考虑我会用codex辅助工作。如果工作总时间超出6小时（工作外的杂事不算入时间），要给出提示，并且建议6h能做完哪几个任务。
-3. 风险提醒
-4. 收尾检查项
+2. 风险提醒
+3. 收尾检查项
 
 其他要求：
+- 不要输出“今日待办原文”；这部分由程序直接写入
+- 今日待办只用于分析，不要复制、改写、重排今日待办原文
 - 如果长期目标或今日待办看起来还只是模板或为空，提醒用户补充
 - 输出采用markdown格式，可以包含表格。但不要用```markdown，标题不可使用#和##。
 - 不以询问句结尾
@@ -90,6 +92,19 @@ def _build_prompt(date_text: str, goals: str, tasks: str) -> str:
 今日待办：
 {tasks_text}
 """
+
+
+def _build_plan(tasks: str, plan_advice: str) -> str:
+    original_tasks = _format_original_tasks_section(tasks)
+    advice_text = plan_advice.strip()
+    if not advice_text:
+        return original_tasks
+    return f"{original_tasks}\n\n{advice_text}".strip()
+
+
+def _format_original_tasks_section(tasks: str) -> str:
+    tasks_text = tasks.strip() or "（尚未填写今日待办）"
+    return f"1. 今日待办原文\n\n{tasks_text}"
 
 
 def _normalize_markdown_section_spacing(plan: str) -> str:
