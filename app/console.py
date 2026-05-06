@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from datetime import date
 from pathlib import Path
 from typing import Any, Callable
@@ -12,7 +15,7 @@ from pydantic import BaseModel
 from app.config import load_config, resolve_project_path
 from app.cost import append_token_usage_report
 from app.daily import append_record, daily_path, read_daily
-from app.inbox import read_today_tasks, today_tasks_path, write_today_tasks
+from app.inbox import ensure_today_tasks_file, read_today_tasks, today_tasks_path, write_today_tasks
 from app.llm.dashscope_impl import DashScopeProvider
 from app.llm.provider import LLMProvider
 from app.logger import EventLogger
@@ -100,6 +103,15 @@ class ConsoleService:
         path = write_today_tasks(tasks, self.config)
         return {
             "message": "今日待办已保存。",
+            "result": {"today_tasks_path": str(path)},
+            "state": self.snapshot(),
+        }
+
+    def open_today_tasks_file(self) -> dict[str, Any]:
+        path = ensure_today_tasks_file(self.config)
+        _open_path_with_default_app(path)
+        return {
+            "message": "已请求系统打开 today_tasks.md。",
             "result": {"today_tasks_path": str(path)},
             "state": self.snapshot(),
         }
@@ -216,6 +228,10 @@ def create_app(
     def api_tasks(request: TasksRequest) -> dict[str, Any]:
         return _handle(lambda: service.save_tasks(request))
 
+    @app.post("/api/tasks/open")
+    def api_open_tasks() -> dict[str, Any]:
+        return _handle(service.open_today_tasks_file)
+
     @app.post("/api/plan")
     def api_plan(request: PlanRequest) -> dict[str, Any]:
         return _handle(lambda: service.generate_plan(request))
@@ -256,6 +272,19 @@ def _parse_date(value: str | None) -> date:
 
 def _project_file(path: str) -> str:
     return str(resolve_project_path(Path(path)))
+
+
+def _open_path_with_default_app(path: Path) -> None:
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(str(path))  # type: ignore[attr-defined]
+            return
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return
+        subprocess.Popen(["xdg-open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError as exc:
+        raise RuntimeError(f"无法打开文件：{exc}") from exc
 
 
 CONSOLE_HTML = f"""<!doctype html>
@@ -609,6 +638,7 @@ CONSOLE_HTML = f"""<!doctype html>
           <button class="secondary" id="saveTasksBtn">保存待办</button>
           <button id="planBtn">生成计划</button>
           <button class="secondary" id="reloadTasksBtn">读取待办</button>
+          <button class="secondary" id="openTasksBtn">打开文件</button>
         </div>
         <div class="path" id="tasksPath"></div>
       </section>
@@ -769,6 +799,11 @@ CONSOLE_HTML = f"""<!doctype html>
 
     $("refreshBtn").addEventListener("click", () => loadState());
     $("reloadTasksBtn").addEventListener("click", () => loadState());
+    $("openTasksBtn").addEventListener("click", () => runAction("打开文件", () =>
+      requestJson("/api/tasks/open", {{
+        method: "POST",
+      }})
+    ));
     $("saveTasksBtn").addEventListener("click", () => runAction("保存待办", () =>
       requestJson("/api/tasks", {{
         method: "POST",

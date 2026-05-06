@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import load_config, resolve_project_path
-from app.safety import safe_read_text, safe_write_text
+from app.safety import safe_read_text, safe_write_text, validate_path
 
 
 TODAY_TASKS_HEADING = "# 今日待办"
@@ -14,6 +14,14 @@ def today_tasks_path(config: dict[str, Any] | None = None) -> Path:
     cfg = config or load_config()
     inbox_dir = resolve_project_path(cfg["paths"]["inbox_dir"])
     return inbox_dir / "today_tasks.md"
+
+
+def ensure_today_tasks_file(config: dict[str, Any] | None = None) -> Path:
+    cfg = config or load_config()
+    path = validate_path(today_tasks_path(cfg), cfg, for_write=True)
+    if not path.exists():
+        safe_write_text(path, "", cfg)
+    return path
 
 
 def tomorrow_plan_path(config: dict[str, Any] | None = None) -> Path:

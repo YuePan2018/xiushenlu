@@ -7,6 +7,7 @@ import uuid
 from datetime import date
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -64,6 +65,8 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn('<article id="dailyText" class="daily-markdown empty"', html)
             self.assertIn("<h2>更新计划</h2>", html)
             self.assertIn('id="tokenBtn">token</button>', html)
+            self.assertIn('id="openTasksBtn">打开文件</button>', html)
+            self.assertIn('/api/tasks/open', html)
             self.assertIn('/static/vendor/marked-16.2.1.umd.js', html)
             self.assertIn('/static/vendor/dompurify-3.2.6.min.js', html)
             self.assertIn("DOMPurify.sanitize", html)
@@ -114,6 +117,20 @@ class ConsoleTests(unittest.TestCase):
             self.assertEqual(saved_tasks, "学习控制台保存待办\n")
             self.assertEqual(provider.prompts, [])
             self.assertEqual(list(Path(config["paths"]["logs_dir"]).glob("*.jsonl")), [])
+
+    def test_open_tasks_endpoint_ensures_file_and_uses_default_app(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+
+            with patch("app.console._open_path_with_default_app") as open_path:
+                response = client.post("/api/tasks/open")
+
+            self.assertEqual(response.status_code, 200)
+            tasks_path = Path(response.json()["result"]["today_tasks_path"])
+            self.assertTrue(tasks_path.exists())
+            self.assertEqual(tasks_path.read_text(encoding="utf-8"), "")
+            open_path.assert_called_once_with(tasks_path)
 
     def test_plan_endpoint_reads_saved_today_tasks(self) -> None:
         with _temporary_directory() as temp_dir:
