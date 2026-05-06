@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from app.config import load_config, resolve_project_path
 from app.daily import write_daily_section
@@ -31,6 +31,7 @@ def generate_daily_plan(
     target_date: date | None = None,
     tasks_text: str | None = None,
     logger: EventLogger | None = None,
+    cancel_check: Callable[[], None] | None = None,
 ) -> DailyPlanResult:
     cfg = config or load_config()
     current_date = target_date or date.today()
@@ -40,6 +41,8 @@ def generate_daily_plan(
     prompt = _build_prompt(date_text=date_text, goals=goals, tasks=tasks)
 
     plan_advice = _normalize_markdown_section_spacing(provider.chat(prompt).strip())
+    if cancel_check is not None:
+        cancel_check()
     plan = _build_plan(tasks=tasks, plan_advice=plan_advice)
     daily_path = _daily_path(cfg, date_text)
     _write_plan_section(config=cfg, date_text=date_text, plan=plan)

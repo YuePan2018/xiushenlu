@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from app.config import load_config
 from app.cost import append_token_usage_report
@@ -51,6 +51,7 @@ def generate_nightly_review(
     config: dict[str, Any] | None = None,
     target_date: date | None = None,
     logger: EventLogger | None = None,
+    cancel_check: Callable[[], None] | None = None,
 ) -> NightlyReviewResult:
     cfg = config or load_config()
     today = date.today()
@@ -72,6 +73,8 @@ def generate_nightly_review(
             tomorrow_plan=tomorrow_plan,
         )
         raw_reply = provider.chat(prompt).strip()
+        if cancel_check is not None:
+            cancel_check()
         append_llm_call_event(event_logger, provider, "nightly_review")
         parsed = parse_nightly_review_response(raw_reply)
         review = parsed.review
@@ -87,6 +90,8 @@ def generate_nightly_review(
     else:
         prompt = _build_prompt(date_text, day_text, events)
         review = provider.chat(prompt).strip()
+        if cancel_check is not None:
+            cancel_check()
         append_llm_call_event(event_logger, provider, "nightly_review")
 
         path = write_daily_section("复盘", review, cfg, date_text, mode="replace")

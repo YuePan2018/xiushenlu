@@ -3,9 +3,12 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
+from threading import Lock
 from typing import Any, Callable
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -26,6 +29,90 @@ from app.pipelines.plan_update import PlanUpdateParseError, generate_plan_update
 
 ProviderFactory = Callable[[], LLMProvider]
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+class OperationCancelled(RuntimeError):
+    """Raised when a stopped console operation returns after the user cancelled it."""
+
+
+@dataclass(frozen=True)
+class OperationToken:
+    id: str
+    label: str
+
+
+@dataclass
+class OperationState:
+    id: str
+    label: str
+    started_at: str
+    cancel_requested: bool = False
+
+
+class OperationManager:
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._active: OperationState | None = None
+
+    def begin(self, label: str) -> OperationToken:
+        with self._lock:
+            if self._active is not None:
+                raise RuntimeError(f"已有操作正在运行：{self._active.label}")
+            state = OperationState(
+                id=uuid4().hex,
+                label=label,
+                started_at=datetime.now().isoformat(timespec="seconds"),
+            )
+            self._active = state
+            return OperationToken(id=state.id, label=label)
+
+    def finish(self, token: OperationToken) -> None:
+        with self._lock:
+            if self._active is not None and self._active.id == token.id:
+                self._active = None
+
+    def stop(self) -> dict[str, Any]:
+        with self._lock:
+            if self._active is None:
+                return {
+                    "message": "当前没有正在运行的 LLM 操作。",
+                    "operation": self._snapshot_locked(),
+                }
+            self._active.cancel_requested = True
+            return {
+                "message": f"已请求停止：{self._active.label}。",
+                "operation": self._snapshot_locked(),
+            }
+
+    def check_cancelled(self, token: OperationToken) -> None:
+        with self._lock:
+            if (
+                self._active is not None
+                and self._active.id == token.id
+                and self._active.cancel_requested
+            ):
+                raise OperationCancelled("操作已停止，LLM 返回结果已丢弃。")
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            return self._snapshot_locked()
+
+    def _snapshot_locked(self) -> dict[str, Any]:
+        if self._active is None:
+            return {
+                "active": False,
+                "id": None,
+                "label": None,
+                "started_at": None,
+                "cancel_requested": False,
+            }
+        return {
+            "active": True,
+            "id": self._active.id,
+            "label": self._active.label,
+            "started_at": self._active.started_at,
+            "cancel_requested": self._active.cancel_requested,
+        }
 
 
 class PlanRequest(BaseModel):
@@ -67,6 +154,7 @@ class ConsoleService:
     def __init__(self, config: dict[str, Any], provider_factory: ProviderFactory) -> None:
         self.config = config
         self.provider_factory = provider_factory
+        self.operations = OperationManager()
 
     def snapshot(self, date_text: str | None = None) -> dict[str, Any]:
         target_date = _parse_date(date_text) if date_text else date.today()
@@ -121,10 +209,28 @@ class ConsoleService:
         if request.add is not None and not add:
             raise ValueError("新增任务不能为空。")
 
+        label = "局部更新计划" if add is not None else "生成计划"
+        token = self.operations.begin(label)
+        try:
+            return self._generate_plan_locked(add, token)
+        finally:
+            self.operations.finish(token)
+
+    def _generate_plan_locked(
+        self,
+        add: str | None,
+        token: OperationToken,
+    ) -> dict[str, Any]:
         provider = self.provider_factory()
         event_logger = EventLogger(config=self.config)
         if add is not None:
-            result = generate_plan_update(provider, add, config=self.config, logger=event_logger)
+            result = generate_plan_update(
+                provider,
+                add,
+                config=self.config,
+                logger=event_logger,
+                cancel_check=lambda: self.operations.check_cancelled(token),
+            )
             return {
                 "message": "计划已局部更新。",
                 "result": {
@@ -137,7 +243,12 @@ class ConsoleService:
                 "state": self.snapshot(result.date),
             }
 
-        result = generate_daily_plan(provider, config=self.config, logger=event_logger)
+        result = generate_daily_plan(
+            provider,
+            config=self.config,
+            logger=event_logger,
+            cancel_check=lambda: self.operations.check_cancelled(token),
+        )
         return {
             "message": "计划已生成。",
             "result": {
@@ -169,6 +280,13 @@ class ConsoleService:
         }
 
     def generate_review(self, request: ReviewRequest) -> dict[str, Any]:
+        token = self.operations.begin("生成复盘")
+        try:
+            return self._generate_review_locked(request, token)
+        finally:
+            self.operations.finish(token)
+
+    def _generate_review_locked(self, request: ReviewRequest, token: OperationToken) -> dict[str, Any]:
         target_date = _parse_date(request.date) if request.date else None
         provider = self.provider_factory()
         result = generate_nightly_review(
@@ -176,6 +294,7 @@ class ConsoleService:
             config=self.config,
             target_date=target_date,
             logger=EventLogger(config=self.config),
+            cancel_check=lambda: self.operations.check_cancelled(token),
         )
         return {
             "message": "复盘已生成。",
@@ -204,6 +323,12 @@ class ConsoleService:
             "state": self.snapshot(target_date.isoformat()),
         }
 
+    def operation_snapshot(self) -> dict[str, Any]:
+        return self.operations.snapshot()
+
+    def stop_operation(self) -> dict[str, Any]:
+        return self.operations.stop()
+
 
 def create_app(
     config: dict[str, Any] | None = None,
@@ -223,6 +348,14 @@ def create_app(
     @app.get("/api/state")
     def api_state(date: str | None = None) -> dict[str, Any]:
         return _handle(lambda: service.snapshot(date))
+
+    @app.get("/api/operation")
+    def api_operation() -> dict[str, Any]:
+        return _handle(service.operation_snapshot)
+
+    @app.post("/api/operation/stop")
+    def api_stop_operation() -> dict[str, Any]:
+        return _handle(service.stop_operation)
 
     @app.post("/api/tasks")
     def api_tasks(request: TasksRequest) -> dict[str, Any]:
@@ -254,6 +387,8 @@ def create_app(
 def _handle(operation: Callable[[], dict[str, Any]]) -> dict[str, Any]:
     try:
         return operation()
+    except OperationCancelled as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (ValueError, PlanUpdateParseError, NightlyReviewParseError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -613,6 +748,7 @@ CONSOLE_HTML = f"""<!doctype html>
       <div class="row">
         <input id="dateInput" type="date" aria-label="日期">
         <button class="secondary" id="refreshBtn">刷新</button>
+        <button class="warn" id="stopBtn" hidden>停止</button>
       </div>
     </div>
   </header>
@@ -672,8 +808,15 @@ CONSOLE_HTML = f"""<!doctype html>
   <script src="/static/vendor/marked-16.2.1.umd.js"></script>
   <script src="/static/vendor/dompurify-3.2.6.min.js"></script>
   <script>
-    const state = {{ current: null, busy: false }};
+    const state = {{
+      current: null,
+      busy: false,
+      operation: {{ active: false, cancel_requested: false }},
+      actionController: null,
+      operationPoller: null,
+    }};
     const $ = (id) => document.getElementById(id);
+    const llmButtonIds = ["planBtn", "addBtn", "reviewBtn"];
 
     if (window.marked) {{
       marked.setOptions({{
@@ -684,8 +827,33 @@ CONSOLE_HTML = f"""<!doctype html>
 
     function setBusy(value) {{
       state.busy = value;
+      updateControls();
+    }}
+
+    function setOperation(operation) {{
+      state.operation = operation || {{ active: false, cancel_requested: false }};
+      updateControls();
+      if (state.operation.active) {{
+        startOperationPolling();
+      }} else {{
+        stopOperationPolling();
+      }}
+    }}
+
+    function updateControls() {{
+      const operationActive = Boolean(state.operation && state.operation.active);
+      const cancelRequested = Boolean(state.operation && state.operation.cancel_requested);
       for (const button of document.querySelectorAll("button")) {{
-        button.disabled = value;
+        if (button.id === "stopBtn") {{
+          button.hidden = !operationActive;
+          button.disabled = !operationActive || cancelRequested;
+          continue;
+        }}
+        if (llmButtonIds.includes(button.id)) {{
+          button.disabled = state.busy || operationActive;
+          continue;
+        }}
+        button.disabled = state.busy;
       }}
     }}
 
@@ -702,9 +870,17 @@ CONSOLE_HTML = f"""<!doctype html>
       }});
       const body = await response.json().catch(() => ({{ detail: response.statusText }}));
       if (!response.ok) {{
-        throw new Error(body.detail || response.statusText);
+        const error = new Error(body.detail || response.statusText);
+        error.status = response.status;
+        throw error;
       }}
       return body;
+    }}
+
+    async function loadOperation() {{
+      const operation = await requestJson("/api/operation");
+      setOperation(operation);
+      return operation;
     }}
 
     async function loadState(dateValue = $("dateInput").value) {{
@@ -786,11 +962,89 @@ CONSOLE_HTML = f"""<!doctype html>
       }}
     }}
 
+    async function runLongAction(label, operation) {{
+      if (state.operation.active) {{
+        setStatus(`已有操作正在运行：${{state.operation.label || "LLM 操作"}}`, true);
+        return;
+      }}
+      const controller = new AbortController();
+      state.actionController = controller;
+      setOperation({{
+        active: true,
+        id: null,
+        label,
+        started_at: null,
+        cancel_requested: false,
+      }});
+      setBusy(true);
+      setStatus(`${{label}}中...`);
+      try {{
+        const data = await operation(controller.signal);
+        if (data.state) {{
+          renderState(data.state);
+        }} else {{
+          await loadState();
+        }}
+        setStatus(data.message || `${{label}}完成`);
+      }} catch (error) {{
+        if (error.name === "AbortError") {{
+          setStatus("已请求停止，等待后端丢弃 LLM 返回结果。");
+        }} else if (error.status === 409) {{
+          setStatus(error.message);
+        }} else {{
+          setStatus(error.message, true);
+        }}
+      }} finally {{
+        state.actionController = null;
+        setBusy(false);
+        await loadOperation().catch(() => null);
+      }}
+    }}
+
+    async function stopCurrentOperation() {{
+      if (state.actionController) {{
+        state.actionController.abort();
+      }}
+      try {{
+        const data = await requestJson("/api/operation/stop", {{
+          method: "POST",
+        }});
+        setOperation(data.operation);
+        setStatus(data.message || "已请求停止。");
+      }} catch (error) {{
+        setStatus(error.message, true);
+      }}
+    }}
+
+    function startOperationPolling() {{
+      if (state.operationPoller) {{
+        return;
+      }}
+      state.operationPoller = window.setInterval(async () => {{
+        try {{
+          const operation = await loadOperation();
+          if (!operation.active) {{
+            await loadState();
+          }}
+        }} catch (error) {{
+          stopOperationPolling();
+        }}
+      }}, 2000);
+    }}
+
+    function stopOperationPolling() {{
+      if (!state.operationPoller) {{
+        return;
+      }}
+      window.clearInterval(state.operationPoller);
+      state.operationPoller = null;
+    }}
+
     function submitOnCtrlEnter(inputId, buttonId) {{
       $(inputId).addEventListener("keydown", (event) => {{
         if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {{
           event.preventDefault();
-          if (!state.busy) {{
+          if (!$(buttonId).disabled) {{
             $(buttonId).click();
           }}
         }}
@@ -798,6 +1052,7 @@ CONSOLE_HTML = f"""<!doctype html>
     }}
 
     $("refreshBtn").addEventListener("click", () => loadState());
+    $("stopBtn").addEventListener("click", () => stopCurrentOperation());
     $("reloadTasksBtn").addEventListener("click", () => loadState());
     $("openTasksBtn").addEventListener("click", () => runAction("打开文件", () =>
       requestJson("/api/tasks/open", {{
@@ -810,15 +1065,17 @@ CONSOLE_HTML = f"""<!doctype html>
         body: JSON.stringify({{ tasks: $("tasksInput").value }}),
       }})
     ));
-    $("planBtn").addEventListener("click", () => runAction("生成计划", () =>
+    $("planBtn").addEventListener("click", () => runLongAction("生成计划", (signal) =>
       requestJson("/api/plan", {{
         method: "POST",
+        signal,
         body: JSON.stringify({{}}),
       }})
     ));
-    $("addBtn").addEventListener("click", () => runAction("局部更新", async () => {{
+    $("addBtn").addEventListener("click", () => runLongAction("局部更新", async (signal) => {{
       const data = await requestJson("/api/plan", {{
         method: "POST",
+        signal,
         body: JSON.stringify({{ add: $("addInput").value }}),
       }});
       $("addInput").value = "";
@@ -832,9 +1089,10 @@ CONSOLE_HTML = f"""<!doctype html>
       $("logInput").value = "";
       return data;
     }}));
-    $("reviewBtn").addEventListener("click", () => runAction("生成复盘", () =>
+    $("reviewBtn").addEventListener("click", () => runLongAction("生成复盘", (signal) =>
       requestJson("/api/review", {{
         method: "POST",
+        signal,
         body: JSON.stringify({{ date: $("reviewDateInput").value }}),
       }})
     ));
@@ -847,6 +1105,7 @@ CONSOLE_HTML = f"""<!doctype html>
     submitOnCtrlEnter("logInput", "logBtn");
     submitOnCtrlEnter("addInput", "addBtn");
     loadState();
+    loadOperation().catch(() => null);
   </script>
 </body>
 </html>

@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from app.config import load_config
 from app.daily import daily_path, read_daily
@@ -58,6 +58,7 @@ def generate_plan_update(
     config: dict[str, Any] | None = None,
     target_date: date | None = None,
     logger: EventLogger | None = None,
+    cancel_check: Callable[[], None] | None = None,
 ) -> PlanUpdateResult:
     task_text = new_task.strip()
     if not task_text:
@@ -78,6 +79,8 @@ def generate_plan_update(
     )
 
     raw_reply = provider.chat(prompt).strip()
+    if cancel_check is not None:
+        cancel_check()
     event_logger = logger or EventLogger()
     append_llm_call_event(event_logger, provider, "plan_update")
     parsed = parse_plan_update_response(raw_reply)

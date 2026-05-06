@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import shutil
+import threading
 import unittest
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -52,6 +54,19 @@ class FakeProvider(LLMProvider):
         return self.reply
 
 
+class BlockingProvider(FakeProvider):
+    def __init__(self, started: threading.Event, release: threading.Event) -> None:
+        super().__init__("慢速计划")
+        self.started = started
+        self.release = release
+
+    def chat(self, prompt: str) -> str:
+        self.started.set()
+        if not self.release.wait(timeout=5):
+            raise RuntimeError("测试 provider 等待超时。")
+        return super().chat(prompt)
+
+
 class ConsoleTests(unittest.TestCase):
     def test_index_uses_local_markdown_renderer_assets(self) -> None:
         with _temporary_directory() as temp_dir:
@@ -66,7 +81,10 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn("<h2>更新计划</h2>", html)
             self.assertIn('id="tokenBtn">token</button>', html)
             self.assertIn('id="openTasksBtn">打开文件</button>', html)
+            self.assertIn('id="stopBtn"', html)
+            self.assertIn("AbortController", html)
             self.assertIn('/api/tasks/open', html)
+            self.assertIn('/api/operation/stop', html)
             self.assertIn('/static/vendor/marked-16.2.1.umd.js', html)
             self.assertIn('/static/vendor/dompurify-3.2.6.min.js', html)
             self.assertIn("DOMPurify.sanitize", html)
@@ -131,6 +149,55 @@ class ConsoleTests(unittest.TestCase):
             self.assertTrue(tasks_path.exists())
             self.assertEqual(tasks_path.read_text(encoding="utf-8"), "")
             open_path.assert_called_once_with(tasks_path)
+
+    def test_operation_stop_without_active_operation_is_friendly(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+
+            state_response = client.get("/api/operation")
+            stop_response = client.post("/api/operation/stop")
+
+            self.assertEqual(state_response.status_code, 200)
+            self.assertFalse(state_response.json()["active"])
+            self.assertEqual(stop_response.status_code, 200)
+            self.assertIn("当前没有正在运行", stop_response.json()["message"])
+            self.assertFalse(stop_response.json()["operation"]["active"])
+
+    def test_stopped_plan_discards_late_llm_result_without_writes(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            inbox_dir = Path(config["paths"]["inbox_dir"])
+            inbox_dir.mkdir(parents=True)
+            (inbox_dir / "today_tasks.md").write_text("# 今日待办\n\n不要落盘", encoding="utf-8")
+            started = threading.Event()
+            release = threading.Event()
+            provider = BlockingProvider(started, release)
+            client = TestClient(create_app(config=config, provider_factory=lambda: provider))
+
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(lambda: client.post("/api/plan", json={}))
+                self.assertTrue(started.wait(timeout=5))
+
+                operation_response = client.get("/api/operation")
+                stop_response = client.post("/api/operation/stop")
+                release.set()
+                plan_response = future.result(timeout=5)
+
+            self.assertEqual(operation_response.status_code, 200)
+            self.assertTrue(operation_response.json()["active"])
+            self.assertEqual(operation_response.json()["label"], "生成计划")
+            self.assertEqual(stop_response.status_code, 200)
+            self.assertTrue(stop_response.json()["operation"]["cancel_requested"])
+            self.assertEqual(plan_response.status_code, 409)
+            self.assertIn("LLM 返回结果已丢弃", plan_response.json()["detail"])
+            self.assertEqual(list(Path(config["paths"]["daily_dir"]).glob("*.md")), [])
+            self.assertEqual(list(Path(config["paths"]["logs_dir"]).glob("*.jsonl")), [])
+            self.assertEqual((inbox_dir / "today_tasks.md").read_text(encoding="utf-8"), "# 今日待办\n\n不要落盘")
+
+            final_operation = client.get("/api/operation")
+            self.assertEqual(final_operation.status_code, 200)
+            self.assertFalse(final_operation.json()["active"])
 
     def test_plan_endpoint_reads_saved_today_tasks(self) -> None:
         with _temporary_directory() as temp_dir:
