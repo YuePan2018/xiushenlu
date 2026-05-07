@@ -12,7 +12,6 @@ from app.daily import daily_path, read_daily, write_daily_section
 from app.inbox import (
     clear_tomorrow_plan,
     has_leading_markdown_heading,
-    read_today_tasks,
     read_tomorrow_plan,
     remove_added_today_tasks_heading,
     write_today_tasks,
@@ -63,13 +62,11 @@ def generate_nightly_review(
     rolled_over = current_date == today
 
     if rolled_over:
-        today_tasks = read_today_tasks(cfg)
         tomorrow_plan = read_tomorrow_plan(cfg)
+        daily_context = _build_daily_review_context(day_text)
         prompt = _build_rollover_prompt(
             date_text=date_text,
-            daily_text=day_text,
-            events=events,
-            today_tasks=today_tasks,
+            daily_context=daily_context,
             tomorrow_plan=tomorrow_plan,
         )
         raw_reply = provider.chat(prompt).strip()
@@ -80,7 +77,7 @@ def generate_nightly_review(
         review = parsed.review
         next_today_tasks = remove_added_today_tasks_heading(
             parsed.next_today_tasks,
-            preserve_heading=has_leading_markdown_heading(today_tasks),
+            preserve_heading=has_leading_markdown_heading(daily_context.today_tasks),
         )
 
         path = write_daily_section("复盘", review, cfg, date_text, mode="replace")
@@ -88,7 +85,7 @@ def generate_nightly_review(
         next_tomorrow_plan_path = clear_tomorrow_plan(cfg)
         append_token_usage_report(cfg, event_logger, current_date)
     else:
-        prompt = _build_prompt(date_text, day_text, events)
+        prompt = _build_prompt(date_text, _build_daily_review_context(day_text))
         review = provider.chat(prompt).strip()
         if cancel_check is not None:
             cancel_check()
@@ -151,9 +148,17 @@ def _events_for_date(logger: EventLogger, date_text: str) -> list[dict[str, Any]
     return logger.read_events_for_date(date_text)
 
 
-def _build_prompt(date_text: str, daily_text: str, events: list[dict[str, Any]]) -> str:
-    daily_records = daily_text.strip() or "（今天还没有 daily 记录）"
-    event_records = _format_events(events)
+@dataclass(frozen=True)
+class DailyReviewContext:
+    today_tasks: str
+    records: str
+    plan_notes: str
+
+
+def _build_prompt(date_text: str, daily_context: DailyReviewContext) -> str:
+    today_tasks = daily_context.today_tasks.strip() or "（daily 的“今日待办原文”为空）"
+    records = daily_context.records.strip() or "（今天还没有记录）"
+    plan_notes = daily_context.plan_notes.strip() or "（没有额外计划建议）"
     return f"""你是一个帮助用户复盘学习和工作的个人执行助手。
 
 请根据 {date_text} 的 daily 记录，生成review。
@@ -168,59 +173,137 @@ def _build_prompt(date_text: str, daily_text: str, events: list[dict[str, Any]])
 “临时：”代表临时插入的任务，不在当天任务计划内
 “经验：”代表学习和工作中产生的心得，需要在review中总结归纳。
 
-Daily 记录：
-{daily_records}
+今日待办原文（来自 daily 的当天快照）：
+{today_tasks}
 
-事件日志：
-{event_records}
+今日记录（完成证据只看这里）：
+{records}
+
+计划建议（只作为理解当天安排的辅助，不作为完成证据）：
+{plan_notes}
 """
 
 
 def _build_rollover_prompt(
     date_text: str,
-    daily_text: str,
-    events: list[dict[str, Any]],
-    today_tasks: str,
+    daily_context: DailyReviewContext,
     tomorrow_plan: str,
 ) -> str:
-    daily_records = daily_text.strip() or "（今天还没有 daily 记录）"
-    event_records = _format_events(events)
-    today_tasks_text = today_tasks.strip() or "（当前 today_tasks.md 为空）"
+    today_tasks_text = daily_context.today_tasks.strip() or "（daily 的“今日待办原文”为空）"
+    records_text = daily_context.records.strip() or "（今天还没有记录）"
+    plan_notes_text = daily_context.plan_notes.strip() or "（没有额外计划建议）"
     tomorrow_plan_text = tomorrow_plan.strip() or "（明日计划.md 为空）"
     return f"""你是一个帮助用户复盘学习和工作的个人执行助手。
 
-请根据 {date_text} 的 daily 记录生成晚间复盘，并为明天滚动生成完整的 today_tasks.md 内容。
+请根据 {date_text} 的 daily 当天快照生成晚间复盘，并为明天滚动生成完整的 today_tasks.md 内容。
 
 你必须只输出一个严格 JSON 对象，不要使用代码块，不要输出解释文字。
 JSON 必须包含且只需要包含这些字符串字段：
 - review：晚间复盘正文。输出“完成了什么”“改进建议”“值得肯定的行为”三部分；重点分析学习工作的安排和工程经验；最后基于事实给一句话表扬。
-- next_today_tasks：新的完整 today_tasks.md 内容。保持当前待办文件的风格，包括一级标题是否存在、口号、中文小标题、列表/编号习惯；如果当前 today_tasks.md 没有一级标题，不要新增“# 今日待办”；根据 daily 的计划与记录判断今天未完成任务，优先按原小标题归类；再叠加“明日计划.md”的内容；去掉明显重复项。
+- next_today_tasks：新的完整 today_tasks.md 内容。保持“今日待办原文”的风格，包括一级标题是否存在、口号、中文小标题、列表/编号习惯；如果“今日待办原文”没有一级标题，不要新增“# 今日待办”；根据今日待办原文与今日记录判断今天未完成任务，优先按原小标题归类；再叠加“明日计划.md”的内容；去掉明显重复项。
 
 判断未完成任务的规则：
 - 记录中没有出现完成证据的计划任务，视为未完成。
 - 只记录了开始、研究、优化中但没有明确完成的任务，视为未完成。
 - 临时任务不要自动滚入明天，除非它在记录中仍明显待完成。
 - 如果今天没有未完成任务且明日计划也为空，next_today_tasks 仍输出完整 today_tasks.md，至少保留原有标题/无标题状态和口号风格。
+- 生成 review 时不要引用“明日计划.md”；明日计划只允许用于生成 next_today_tasks。
 
-当前 today_tasks.md：
+今日待办原文（来自 daily 的当天快照，不读取当前 today_tasks.md）：
 {today_tasks_text}
 
-明日计划.md：
+今日记录（完成证据只看这里）：
+{records_text}
+
+计划建议（只作为理解当天安排的辅助，不作为完成证据）：
+{plan_notes_text}
+
+明日计划.md（只用于 next_today_tasks，不用于 review）：
 {tomorrow_plan_text}
-
-Daily 记录：
-{daily_records}
-
-事件日志：
-{event_records}
 """
 
 
-def _format_event(event: dict[str, Any]) -> str:
-    return f"- {event.get('ts', '')} [{event.get('type', '')}] {event.get('summary', '')}"
+def _build_daily_review_context(daily_text: str) -> DailyReviewContext:
+    plan_section = _extract_level2_section(daily_text, "计划")
+    today_tasks, plan_notes = _split_plan_original_tasks(plan_section)
+    records = _extract_level2_section(daily_text, "记录")
+    return DailyReviewContext(
+        today_tasks=today_tasks,
+        records=_remove_generated_at(records),
+        plan_notes=plan_notes,
+    )
 
 
-def _format_events(events: list[dict[str, Any]]) -> str:
-    if not events:
-        return "（当天没有事件日志）"
-    return "\n".join(_format_event(event) for event in events)
+def _extract_level2_section(text: str, title: str) -> str:
+    heading = f"## {title}"
+    lines = text.splitlines(keepends=True)
+    start: int | None = None
+    start_line_index: int | None = None
+    offset = 0
+
+    for index, line in enumerate(lines):
+        if line.strip() == heading:
+            start = offset + len(line)
+            start_line_index = index + 1
+            break
+        offset += len(line)
+
+    if start is None or start_line_index is None:
+        return ""
+
+    end = len(text)
+    offset = start
+    for line in lines[start_line_index:]:
+        if line.startswith("## "):
+            end = offset
+            break
+        offset += len(line)
+
+    return text[start:end].strip()
+
+
+def _split_plan_original_tasks(plan_section: str) -> tuple[str, str]:
+    lines = _remove_generated_at(plan_section).splitlines()
+    heading_index = _find_original_tasks_heading(lines)
+    if heading_index is None:
+        return "", "\n".join(lines).strip()
+
+    start = heading_index + 1
+    while start < len(lines) and not lines[start].strip():
+        start += 1
+
+    end = start
+    while end < len(lines):
+        if _looks_like_plan_notes_heading(lines[end]):
+            break
+        end += 1
+
+    today_tasks = "\n".join(lines[start:end]).strip()
+    plan_notes = "\n".join(lines[end:]).strip()
+    return today_tasks, plan_notes
+
+
+def _find_original_tasks_heading(lines: list[str]) -> int | None:
+    for index, line in enumerate(lines):
+        if "今日待办原文" in line:
+            return index
+    return None
+
+
+def _looks_like_plan_notes_heading(line: str) -> bool:
+    text = line.strip().strip("*").strip("#").strip()
+    if not text or len(text) > 80:
+        return False
+    keywords = ("计划建议", "任务建议", "根据长期目标", "风险提醒", "收尾检查", "新任务")
+    return any(keyword in text for keyword in keywords)
+
+
+def _remove_generated_at(text: str) -> str:
+    kept = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("生成时间：", "更新时间：")):
+            continue
+        kept.append(line)
+    return "\n".join(kept).strip()
+

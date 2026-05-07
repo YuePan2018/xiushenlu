@@ -11,6 +11,7 @@ from typing import Any
 from app.llm.provider import LLMCallUsage, LLMProvider
 from app.pipelines.nightly_review import (
     NightlyReviewParseError,
+    _build_daily_review_context,
     generate_nightly_review,
     parse_nightly_review_response,
 )
@@ -66,6 +67,31 @@ class NightlyReviewTests(unittest.TestCase):
         self.assertIn("完成复盘", parsed.review)
         self.assertIn("规划下一进度", parsed.next_today_tasks)
 
+    def test_daily_review_context_uses_original_tasks_snapshot(self) -> None:
+        daily_text = (
+            "# 2026-05-07\n\n"
+            "## 计划\n\n"
+            "生成时间：2026-05-07 10:00:00\n\n"
+            "1. 今日待办原文\n\n"
+            "# 今日待办\n\n"
+            "xiushenlu：\n"
+            "1. 修复重复 review\n\n"
+            "1. 根据长期目标，对各任务给出简短建议\n"
+            "- 先保证状态语义正确。\n\n"
+            "## 记录\n\n"
+            "- 10:22:55 修复bug：review会改today_tasks\n\n"
+            "## 复盘\n\n"
+            "旧复盘不应进入上下文\n"
+        )
+
+        context = _build_daily_review_context(daily_text)
+
+        self.assertIn("修复重复 review", context.today_tasks)
+        self.assertNotIn("根据长期目标", context.today_tasks)
+        self.assertIn("根据长期目标", context.plan_notes)
+        self.assertIn("review会改today_tasks", context.records)
+        self.assertNotIn("旧复盘不应进入上下文", context.records)
+
     def test_today_review_rolls_over_tasks_and_clears_tomorrow_plan(self) -> None:
         with _temporary_directory() as temp_dir:
             root = Path(temp_dir).resolve()
@@ -80,10 +106,22 @@ class NightlyReviewTests(unittest.TestCase):
             today_tasks = inbox / "today_tasks.md"
             tomorrow_plan = inbox / "明日计划.md"
             daily_file = daily_dir / f"{today_text}.md"
-            today_tasks.write_text("# 今日待办\n\n修身炉：\n1. 未完成任务\n", encoding="utf-8")
+            today_tasks.write_text("# 今日待办\n\n已经滚动的明日槽\n", encoding="utf-8")
             tomorrow_plan.write_text("去浙大\n", encoding="utf-8")
             daily_file.write_text(
-                f"# {today_text}\n\n## 计划\n\n修身炉：\n1. 未完成任务\n\n## 记录\n\n- 10:00 做了别的事\n",
+                f"# {today_text}\n\n"
+                "## 计划\n\n"
+                "生成时间：2026-05-07 08:00:00\n\n"
+                "1. 今日待办原文\n\n"
+                "# 今日待办\n\n"
+                "修身炉：\n"
+                "1. 未完成任务\n\n"
+                "2. 风险提醒\n\n"
+                "- 注意收口。\n\n"
+                "## 记录\n\n"
+                "- 10:00 做了别的事\n\n"
+                "## 复盘\n\n"
+                "旧复盘不应再次喂给 LLM\n",
                 encoding="utf-8",
             )
             reply = json.dumps(
@@ -94,9 +132,10 @@ class NightlyReviewTests(unittest.TestCase):
                 ensure_ascii=False,
             )
             logger = FakeLogger()
+            provider = FakeProvider(reply)
 
             result = generate_nightly_review(
-                FakeProvider(reply),
+                provider,
                 config=config,
                 target_date=today,
                 logger=logger,  # type: ignore[arg-type]
@@ -120,6 +159,11 @@ class NightlyReviewTests(unittest.TestCase):
             self.assertEqual(tomorrow_plan.read_text(encoding="utf-8"), "")
             self.assertEqual([event["type"] for event in logger.events], ["llm_call", "review_generated"])
             self.assertTrue(logger.events[-1]["detail"]["rolled_over"])
+            self.assertEqual(len(provider.prompts), 1)
+            self.assertIn("未完成任务", provider.prompts[0])
+            self.assertIn("去浙大", provider.prompts[0])
+            self.assertNotIn("已经滚动的明日槽", provider.prompts[0])
+            self.assertNotIn("旧复盘不应再次喂给 LLM", provider.prompts[0])
 
     def test_today_review_removes_added_heading_when_current_tasks_have_none(self) -> None:
         with _temporary_directory() as temp_dir:
@@ -135,10 +179,19 @@ class NightlyReviewTests(unittest.TestCase):
             today_tasks = inbox / "today_tasks.md"
             tomorrow_plan = inbox / "明日计划.md"
             daily_file = daily_dir / f"{today_text}.md"
-            today_tasks.write_text("口号：过最想要的一天！\n\n修身炉：\n1. 未完成任务\n", encoding="utf-8")
+            today_tasks.write_text("# 今日待办\n\n已经滚动的明日槽\n", encoding="utf-8")
             tomorrow_plan.write_text("去浙大\n", encoding="utf-8")
             daily_file.write_text(
-                f"# {today_text}\n\n## 计划\n\n修身炉：\n1. 未完成任务\n\n## 记录\n\n- 10:00 做了别的事\n",
+                f"# {today_text}\n\n"
+                "## 计划\n\n"
+                "1. 今日待办原文\n\n"
+                "口号：过最想要的一天！\n\n"
+                "修身炉：\n"
+                "1. 未完成任务\n\n"
+                "2. 风险提醒\n\n"
+                "- 注意收口。\n\n"
+                "## 记录\n\n"
+                "- 10:00 做了别的事\n",
                 encoding="utf-8",
             )
             reply = json.dumps(
@@ -208,7 +261,18 @@ class NightlyReviewTests(unittest.TestCase):
             daily_file = daily_dir / f"{today_text}.md"
             today_tasks.write_text("# 今日待办\n\n原任务\n", encoding="utf-8")
             tomorrow_plan.write_text("明日任务\n", encoding="utf-8")
-            daily_file.write_text(f"# {today_text}\n\n## 记录\n\n- 原记录\n", encoding="utf-8")
+            original_daily_text = (
+                f"# {today_text}\n\n"
+                "## 计划\n\n"
+                "1. 今日待办原文\n\n"
+                "# 今日待办\n\n"
+                "原任务\n\n"
+                "2. 风险提醒\n\n"
+                "- 注意收口。\n\n"
+                "## 记录\n\n"
+                "- 原记录\n"
+            )
+            daily_file.write_text(original_daily_text, encoding="utf-8")
             logger = FakeLogger()
 
             with self.assertRaises(NightlyReviewParseError):
@@ -221,7 +285,7 @@ class NightlyReviewTests(unittest.TestCase):
 
             self.assertEqual(today_tasks.read_text(encoding="utf-8"), "# 今日待办\n\n原任务\n")
             self.assertEqual(tomorrow_plan.read_text(encoding="utf-8"), "明日任务\n")
-            self.assertEqual(daily_file.read_text(encoding="utf-8"), f"# {today_text}\n\n## 记录\n\n- 原记录\n")
+            self.assertEqual(daily_file.read_text(encoding="utf-8"), original_daily_text)
             self.assertNotIn("token 消耗统计", daily_file.read_text(encoding="utf-8"))
             self.assertEqual([event["type"] for event in logger.events], ["llm_call"])
 
