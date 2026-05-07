@@ -28,7 +28,7 @@ python app/main.py --help
 | `python app/main.py` | 无 | 是 | smoke test，测试 DashScope 连通性。 |
 | `python app/main.py plan` | 无 | 是 | 读取长期目标和今日待办，生成今日计划。 |
 | `python app/main.py plan --tasks "今天要做的事"` | `--tasks` 覆盖写入 `today_tasks.md` | 是 | 写入今日待办并生成今日计划。 |
-| `python app/main.py plan --add "新增任务"` | `--add` 追加一条今日任务 | 是 | 局部更新今日计划；单测已通过，真实链路仍需验收。 |
+| `python app/main.py plan --add "新增任务"` | `--add` 追加一条今日任务 | 是 | 局部更新今日计划；单测和真实链路已通过。 |
 | `python app/main.py log "过程记录"` | 记录文本 | 否 | 追加一条今日过程记录。 |
 | `python app/main.py review` | 无 | 是 | 生成今天的晚间复盘，并把未完成任务和 `明日计划.md` 滚动覆盖到 `today_tasks.md`，成功后清空 `明日计划.md` 并更新 token 消耗统计。 |
 | `python app/main.py review --date YYYY-MM-DD` | `--date` 指定历史日期 | 是 | 生成指定日期的复盘；历史日期不滚动当前待办，不清空 `明日计划.md`。 |
@@ -41,8 +41,8 @@ python app/main.py --help
 | Pipeline | 输入 | Prompt/输出约束 | 写入 | 事件 |
 | --- | --- | --- | --- | --- |
 | `daily_plan` | 日期、`goals.md`、`today_tasks.md` 或 `--tasks` | 程序直接拼接今日待办原文；LLM 只输出结合长期目标的简短建议、风险提醒、收尾检查项；可用表格；不用代码块；不以询问句结尾。 | daily 的 `计划` 区块 replace | `llm_call`、`plan_generated` |
-| `plan_update` | 日期、`goals.md`、`today_tasks.md`、当天 daily、`--add` 新任务 | 只输出严格 JSON，包含 `updated_today_tasks`、`updated_daily_original`、`target_heading`、`new_task_advice`；新增任务必须逐字保留，只为新增任务生成不超过 200 字的建议，不重写整份计划。 | `today_tasks.md` replace；daily 的 `计划` 区块局部更新 | `llm_call`、`plan_updated` |
-| `nightly_review` | 日期、当天 daily、当天事件日志；当天复盘额外读取 `today_tasks.md` 和 `明日计划.md` | 历史复盘输出复盘正文；当天复盘只输出严格 JSON，包含 `review`、`next_today_tasks`。`next_today_tasks` 必须保持当前待办风格，合并未完成任务和明日计划。 | daily 的 `复盘` 区块 replace；当天复盘成功后覆盖 `today_tasks.md` 并清空 `明日计划.md` | `llm_call`、`review_generated` |
+| `plan_update` | 日期、`goals.md`、`today_tasks.md`、当天 daily、`--add` 新任务 | 只输出严格 JSON，包含 `updated_today_tasks`、`updated_daily_original`、`target_heading`、`new_task_advice`；新增任务必须逐字保留；`updated_today_tasks` 和 `updated_daily_original` 不输出 Markdown 标题行；只为新增任务生成不超过 200 字的建议，不重写整份计划。 | `today_tasks.md` replace；daily 的 `计划` 区块局部更新 | `llm_call`、`plan_updated` |
+| `nightly_review` | 日期、当天 daily；当天复盘额外读取 `明日计划.md`；事件日志只用于事件详情统计 | 历史复盘输出复盘正文；当天复盘从 daily 的 `今日待办原文` 和 `记录` 提取事实，不再读取当前 `today_tasks.md` 作为当天任务；只输出严格 JSON，包含 `review`、`next_today_tasks`。`review` 不引用 `明日计划.md`；`next_today_tasks` 保持当前待办风格、合并未完成任务和明日计划，且不输出 Markdown 标题行。 | daily 的 `复盘` 区块 replace；当天复盘成功后覆盖 `today_tasks.md` 并清空 `明日计划.md` | `llm_call`、`review_generated` |
 | `log` | 手动记录文本 | 不调用 LLM | daily 的 `记录` 区块 append | `user_log` |
 | `cost` | 本地 `llm_call` 事件 | 不调用 LLM，不做费用估算 | daily 的 `token 消耗统计` 区块 replace | 不新增 cost 事件 |
 
@@ -53,8 +53,8 @@ python app/main.py --help
 | `app/main.py` | CLI 命令入口，当前使用 `DashScopeProvider`。 |
 | `app/console.py` | FastAPI 本地控制台，复用已有 daily、inbox、logger 和 plan/log/review pipeline；“保存待办”只写 `today_tasks.md`，“生成计划”等价于 CLI `plan`；支持打开待办文件和停止当前 LLM 操作；不展示 token 统计和事件日志。 |
 | `app/pipelines/daily_plan.py` | 今日计划 pipeline；今日待办原文由代码拼接，LLM 只生成建议、风险和检查项。 |
-| `app/pipelines/plan_update.py` | 日内计划局部更新 pipeline；已有单测，真实 LLM 链路待验收。 |
-| `app/pipelines/nightly_review.py` | 晚间复盘 pipeline；当天复盘还负责待办滚动。 |
+| `app/pipelines/plan_update.py` | 日内计划局部更新 pipeline；单测和真实 LLM 链路已验收。 |
+| `app/pipelines/nightly_review.py` | 晚间复盘 pipeline；当天复盘基于 daily 的任务快照和记录生成复盘，并负责待办滚动。 |
 | `app/llm/provider.py` | LLM Provider 抽象和 usage 结构。 |
 | `app/llm/dashscope_impl.py` | 当前主 LLM Provider，DashScope SDK 直调。 |
 | `app/llm/qwen_agent_impl.py` | 历史/备选 `qwen_agent` 实现，当前 CLI 不使用。 |
@@ -94,7 +94,7 @@ app/main.py -> DashScopeProvider -> dashscope.MultiModalConversation.call()
 
 `data/memory/goals.md` 是用户维护的长期目标权威来源。普通 pipeline 只能读取它，不能自动改写它。
 
-`data/user_inputs/today_tasks.md` 是当天输入，可以由用户手写，也可以通过 `python app/main.py plan --tasks "..."` 更新；当天 `review` 成功时也会用未完成任务叠加 `data/user_inputs/明日计划.md` 后覆盖它。
+`data/user_inputs/today_tasks.md` 是当前待办输入槽，可以由用户手写，也可以通过 `python app/main.py plan --tasks "..."` 更新；当天 `review` 成功时会用未完成任务叠加 `data/user_inputs/明日计划.md` 后覆盖它。因此重复复盘不能再把当前 `today_tasks.md` 当作当天事实，必须使用 daily 的 `今日待办原文` 快照。
 
 `data/user_inputs/明日计划.md` 是明日计划暂存。当天 `review` 成功滚动后会清空它；`review --date YYYY-MM-DD` 复盘历史日期时不得清空或改写它。
 

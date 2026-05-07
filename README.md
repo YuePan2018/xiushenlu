@@ -39,7 +39,7 @@ python app/main.py log "补充 pipeline 参数表和模块职责表"
 # 4. 查看今天的 daily，不调用 LLM
 python app/main.py status
 
-# 5. 根据当天 daily 生成复盘，会调用 LLM；当天 review 会把未完成任务和明日计划滚入 today_tasks.md，并更新 token 统计
+# 5. 根据 daily 里的当天任务快照和记录生成复盘，会调用 LLM；当天 review 会把未完成任务和明日计划滚入 today_tasks.md，并更新 token 统计
 python app/main.py review
 
 # 6. 手动重新统计今日和本月 token，不调用 LLM
@@ -62,7 +62,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py console
 
 | 文件 | 用途 |
 | --- | --- |
-| `data/user_inputs/today_tasks.md` | 今日待办输入。`plan --tasks "..."` 会覆盖写入它；当天 `review` 成功后也会用未完成任务和明日计划覆盖它。 |
+| `data/user_inputs/today_tasks.md` | 当前待办输入槽。`plan --tasks "..."` 会覆盖写入它；当天 `review` 成功后也会用未完成任务和明日计划覆盖它。复盘判断当天完成情况时不再读取当前文件，而是使用 daily 的 `今日待办原文` 快照。 |
 | `data/user_inputs/明日计划.md` | 明日计划暂存。当天 `review` 成功滚动后会清空它；历史 `review --date` 不会改动它。 |
 | `data/user_records/YYYY-MM-DD.md` | 人类可读 daily，包含计划、记录、复盘和 token 统计。 |
 | `data/system_logs/YYYY-MM-DD.jsonl` | 机器可读事件流，记录 `llm_call`、`plan_generated`、`plan_updated`、`user_log`、`review_generated`。 |
@@ -76,15 +76,15 @@ conda run --no-capture-output -n xiushenlu python app/main.py console
 | `python app/main.py plan --tasks "..."` | `--tasks`：今日待办文本 | 是 | 先覆盖写入今日待办，再生成计划 | 写 `today_tasks.md`，写 daily 和 events |
 | `python app/main.py plan --add "..."` | `--add`：新增今日任务 | 是 | 追加一条今日待办，并局部更新当天计划 | 写 `today_tasks.md`，写 daily 和 `plan_updated` 事件 |
 | `python app/main.py log "..."` | 位置参数：记录内容，可多词 | 否 | 追加一条过程记录 | 写 daily 的 `记录` 区块，写 `user_log` 事件 |
-| `python app/main.py review` | 无 | 是 | 根据今天的 daily 生成晚间复盘，滚动明日待办，并更新 token 统计 | 读 daily/events、`today_tasks.md`、`明日计划.md`；写 daily/events、`today_tasks.md`，清空 `明日计划.md` |
+| `python app/main.py review` | 无 | 是 | 根据今天 daily 的任务快照和记录生成晚间复盘，滚动明日待办，并更新 token 统计 | 读 daily、`明日计划.md` 和 events 统计；写 daily/events、`today_tasks.md`，清空 `明日计划.md` |
 | `python app/main.py review --date YYYY-MM-DD` | `--date`：历史日期 | 是 | 对指定日期生成复盘，不滚动当前待办 | 读指定日期 daily/events，写指定日期 daily/events |
 | `python app/main.py status` | 无 | 否 | 打印今天的 daily | 读 daily |
 | `python app/main.py cost` | 无 | 否 | 手动汇总今日和本月 token，并覆盖 daily 的 token 统计区块 | 读 events，写 daily 的 `token 消耗统计` 区块 |
 | `python app/main.py console` | `--host`、`--port`、`--reload` | 视操作而定 | 启动本地控制台，复用已有 pipeline、本地读写和停止当前 LLM 操作能力 | 通过 API 间接读写 daily 和 today_tasks |
 
-`plan --add` 是日内计划更新入口，目前本地单测已覆盖解析、写入和失败保护。它要求模型返回严格 JSON，并且必须逐字保留新增任务、只生成不超过 200 字的新任务建议；如果解析失败或内容不符合约束，流程会停止写入 `today_tasks.md` 和 daily。进入自动化前，还需要完成一次真实 DashScope 链路验收。
+`plan --add` 是日内计划更新入口，目前本地单测和真实 DashScope 链路已覆盖解析、写入和失败保护。它要求模型返回严格 JSON，并且必须逐字保留新增任务、只生成不超过 200 字的新任务建议；如果解析失败或内容不符合约束，流程会停止写入 `today_tasks.md` 和 daily。
 
-当天 `review` 也是受控写入入口：模型必须返回严格 JSON，包含复盘正文和新的完整 `today_tasks.md`。解析失败时不会写入复盘、不会覆盖 `today_tasks.md`，也不会清空 `明日计划.md`，不会更新 token 统计。只有复盘日期等于今天时才触发这一步；历史日期复盘只更新对应 daily。当天复盘成功后会自动把本次复盘 LLM 调用计入今日/本月 token 统计，并覆盖 daily 里的 `token 消耗统计` 区块。
+当天 `review` 也是受控写入入口：模型必须返回严格 JSON，包含复盘正文和新的完整 `today_tasks.md`。当天复盘的事实来源是 daily 里按日期固化的 `今日待办原文` 和 `记录`，不是当前 `today_tasks.md`；`明日计划.md` 只允许用于生成新的 `today_tasks.md`，不用于复盘正文。解析失败时不会写入复盘、不会覆盖 `today_tasks.md`，也不会清空 `明日计划.md`，不会更新 token 统计。只有复盘日期等于今天时才触发这一步；历史日期复盘只更新对应 daily。当天复盘成功后会自动把本次复盘 LLM 调用计入今日/本月 token 统计，并覆盖 daily 里的 `token 消耗统计` 区块。
 
 
 ## 配置
@@ -122,7 +122,7 @@ app/main.py -> app.llm.dashscope_impl.DashScopeProvider -> dashscope.MultiModalC
 | `app/llm/usage.py` | 把 Provider 的 `last_usage` 写成 `llm_call` 事件。 | `logger`、`provider` |
 | `app/pipelines/daily_plan.py` | 今日计划 pipeline：读 goals/tasks，由代码拼接今日待办原文，调用 LLM 生成建议/风险/检查项，写 daily 和事件。 | `config`、`daily`、`inbox`、`goals`、`provider`、`usage`、`logger` |
 | `app/pipelines/plan_update.py` | 日内计划更新 pipeline：读 goals/tasks/daily，追加新增任务，局部更新 daily 计划并写事件。 | `config`、`daily`、`inbox`、`goals`、`provider`、`usage`、`logger`、`safety` |
-| `app/pipelines/nightly_review.py` | 晚间复盘 pipeline：读 daily/events，构造 prompt，调用 LLM，写 daily 和事件；当天复盘还会滚动 `today_tasks.md` 并清空 `明日计划.md`。 | `config`、`daily`、`inbox`、`provider`、`usage`、`logger` |
+| `app/pipelines/nightly_review.py` | 晚间复盘 pipeline：从 daily 提取当天任务快照和记录，构造 prompt，调用 LLM，写 daily 和事件；当天复盘还会读取 `明日计划.md` 用于滚动 `today_tasks.md`，并在成功后清空它。 | `config`、`daily`、`inbox`、`provider`、`usage`、`logger` |
 | `app/daily.py` | daily Markdown 路径、读取、区块替换、记录追加。 | `config`、`safety` |
 | `app/inbox.py` | `today_tasks.md` 和 `明日计划.md` 的路径、读取、写入/清空封装。 | `config`、`safety` |
 | `app/memory/goals.py` | 长期目标只读读取。 | `config`、`safety` |
