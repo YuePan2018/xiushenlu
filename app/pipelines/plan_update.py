@@ -8,12 +8,7 @@ from typing import Any, Callable
 
 from app.config import load_config
 from app.daily import daily_path, read_daily
-from app.inbox import (
-    has_leading_markdown_heading,
-    read_today_tasks,
-    remove_added_today_tasks_heading,
-    write_today_tasks,
-)
+from app.inbox import read_today_tasks, write_today_tasks
 from app.llm.provider import LLMProvider
 from app.llm.usage import append_llm_call_event
 from app.logger import EventLogger
@@ -86,22 +81,12 @@ def generate_plan_update(
     parsed = parse_plan_update_response(raw_reply)
     validate_plan_update_content(parsed, new_task=task_text)
 
-    preserve_tasks_heading = has_leading_markdown_heading(today_tasks)
-    updated_today_tasks = remove_added_today_tasks_heading(
-        parsed.updated_today_tasks,
-        preserve_heading=preserve_tasks_heading,
-    )
-    updated_daily_original = remove_added_today_tasks_heading(
-        parsed.updated_daily_original,
-        preserve_heading=preserve_tasks_heading,
-    )
-
-    task_path = write_today_tasks(updated_today_tasks, cfg)
+    task_path = write_today_tasks(parsed.updated_today_tasks, cfg)
     daily_file = daily_path(cfg, date_text)
     updated_daily = update_daily_plan_text(
         daily_text=daily_text,
         date_text=date_text,
-        updated_daily_original=updated_daily_original,
+        updated_daily_original=parsed.updated_daily_original,
         new_task_entry=format_new_task_entry(
             new_task=task_text,
             new_task_advice=parsed.new_task_advice,
@@ -356,12 +341,13 @@ def _build_prompt(
 
 硬性规则：
 - 新增任务必须逐字使用“{new_task}”，不要改成短标题、括号解释或“灵感：优化...”这类摘要。
-- 保留已有内容的原文、顺序、标题层级和列表风格；插入前先判断目标标题下已有任务行的主格式，再按同一格式追加。
+- 保留已有内容的原文、顺序、中文分组和列表风格；插入前先判断目标分组下已有任务行的主格式，再按同一格式追加。
+- `updated_today_tasks` 和 `updated_daily_original` 都不要包含任何 Markdown 标题行；禁止输出 `# 今日待办`、`#今日待办`、`## ...` 或任何以 `#` 开头的标题行。
 - 如果目标分组主要使用“1. 2. 3.”编号列表，新增项必须使用下一个编号，例如“6. 新增任务”，不要改成“- 新增任务”。
 - 如果目标分组主要是普通文本行，新增项也必须是普通文本行，不加“-”，不加编号。
 - 只有目标分组原本就是“-”列表时，新增项才允许使用“-”。
-- `updated_today_tasks` 是完整的新 today_tasks.md；只允许增加这一个新增任务，除必要编号外不要改动旧内容。
-- `updated_daily_original` 只填写 daily “今日待办原文”小节的新内容，风格跟原小节一致，并包含逐字新增任务；不要包含计划建议。
+- `updated_today_tasks` 是完整的新 today_tasks.md；只允许增加这一个新增任务，除必要编号外不要改动旧内容，不要添加 Markdown 标题。
+- `updated_daily_original` 只填写 daily “今日待办原文”小节的新内容，风格跟原小节一致，并包含逐字新增任务；不要包含计划建议，不要添加 Markdown 标题。
 - `target_heading` 只用于内部归类，不会展示在 daily；不要把它写进 `new_task_advice`。
 - `new_task_advice` 只写建议正文，不要写“### 新增”“原文”“归入标题”等标题或元数据；daily 的“新任务”区只会展示“### 新增：原始任务”和建议正文；总字数不超过 {NEW_TASK_ADVICE_MAX_CHARS} 字。
 

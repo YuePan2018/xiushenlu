@@ -11,9 +11,7 @@ from app.cost import append_token_usage_report
 from app.daily import daily_path, read_daily, write_daily_section
 from app.inbox import (
     clear_tomorrow_plan,
-    has_leading_markdown_heading,
     read_tomorrow_plan,
-    remove_added_today_tasks_heading,
     write_today_tasks,
 )
 from app.llm.provider import LLMProvider
@@ -75,10 +73,7 @@ def generate_nightly_review(
         append_llm_call_event(event_logger, provider, "nightly_review")
         parsed = parse_nightly_review_response(raw_reply)
         review = parsed.review
-        next_today_tasks = remove_added_today_tasks_heading(
-            parsed.next_today_tasks,
-            preserve_heading=has_leading_markdown_heading(daily_context.today_tasks),
-        )
+        next_today_tasks = parsed.next_today_tasks
 
         path = write_daily_section("复盘", review, cfg, date_text, mode="replace")
         next_tasks_path = write_today_tasks(next_today_tasks, cfg)
@@ -200,13 +195,13 @@ def _build_rollover_prompt(
 你必须只输出一个严格 JSON 对象，不要使用代码块，不要输出解释文字。
 JSON 必须包含且只需要包含这些字符串字段：
 - review：晚间复盘正文。输出“完成了什么”“改进建议”“值得肯定的行为”三部分；重点分析学习工作的安排和工程经验；最后基于事实给一句话表扬。
-- next_today_tasks：新的完整 today_tasks.md 内容。保持“今日待办原文”的风格，包括一级标题是否存在、口号、中文小标题、列表/编号习惯；如果“今日待办原文”没有一级标题，不要新增“# 今日待办”；根据今日待办原文与今日记录判断今天未完成任务，优先按原小标题归类；再叠加“明日计划.md”的内容；去掉明显重复项。
+- next_today_tasks：新的完整 today_tasks.md 内容。保持“今日待办原文”的口号、中文分组、列表/编号习惯；不要输出任何 Markdown 标题行，禁止输出 `# 今日待办`、`#今日待办`、`## ...` 或任何以 `#` 开头的标题行；根据今日待办原文与今日记录判断今天未完成任务，优先按原小标题归类；再叠加“明日计划.md”的内容；去掉明显重复项。
 
 判断未完成任务的规则：
 - 记录中没有出现完成证据的计划任务，视为未完成。
 - 只记录了开始、研究、优化中但没有明确完成的任务，视为未完成。
 - 临时任务不要自动滚入明天，除非它在记录中仍明显待完成。
-- 如果今天没有未完成任务且明日计划也为空，next_today_tasks 仍输出完整 today_tasks.md，至少保留原有标题/无标题状态和口号风格。
+- 如果今天没有未完成任务且明日计划也为空，next_today_tasks 仍输出完整 today_tasks.md，至少保留原有口号和中文分组风格，但不要输出 Markdown 标题。
 - 生成 review 时不要引用“明日计划.md”；明日计划只允许用于生成 next_today_tasks。
 
 今日待办原文（来自 daily 的当天快照，不读取当前 today_tasks.md）：
@@ -306,4 +301,3 @@ def _remove_generated_at(text: str) -> str:
             continue
         kept.append(line)
     return "\n".join(kept).strip()
-

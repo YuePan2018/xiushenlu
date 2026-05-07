@@ -162,10 +162,12 @@ class NightlyReviewTests(unittest.TestCase):
             self.assertEqual(len(provider.prompts), 1)
             self.assertIn("未完成任务", provider.prompts[0])
             self.assertIn("去浙大", provider.prompts[0])
+            self.assertIn("不要输出任何 Markdown 标题行", provider.prompts[0])
+            self.assertIn("禁止输出 `# 今日待办`、`#今日待办`、`## ...`", provider.prompts[0])
             self.assertNotIn("已经滚动的明日槽", provider.prompts[0])
             self.assertNotIn("旧复盘不应再次喂给 LLM", provider.prompts[0])
 
-    def test_today_review_removes_added_heading_when_current_tasks_have_none(self) -> None:
+    def test_today_review_writes_next_tasks_without_heading_cleanup(self) -> None:
         with _temporary_directory() as temp_dir:
             root = Path(temp_dir).resolve()
             config = _test_config(root)
@@ -211,7 +213,8 @@ class NightlyReviewTests(unittest.TestCase):
 
             saved_tasks = today_tasks.read_text(encoding="utf-8")
             self.assertTrue(result.rolled_over)
-            self.assertFalse(saved_tasks.startswith("# 今日待办"))
+            self.assertTrue(saved_tasks.startswith("# 今日待办"))
+            self.assertEqual(saved_tasks, "# 今日待办\n\n口号：过最想要的一天！\n\n修身炉：\n1. 未完成任务\n\n杂事：\n去浙大\n")
             self.assertIn("口号：过最想要的一天！", saved_tasks)
             self.assertIn("去浙大", saved_tasks)
             self.assertEqual(tomorrow_plan.read_text(encoding="utf-8"), "")

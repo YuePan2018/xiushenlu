@@ -78,7 +78,9 @@ class PlanUpdateTests(unittest.TestCase):
 
         self.assertIn("逐字插入", prompt)
         self.assertIn("不能改写、概括或扩写", prompt)
-        self.assertIn("插入前先判断目标标题下已有任务行的主格式", prompt)
+        self.assertIn("插入前先判断目标分组下已有任务行的主格式", prompt)
+        self.assertIn("都不要包含任何 Markdown 标题行", prompt)
+        self.assertIn("禁止输出 `# 今日待办`、`#今日待办`、`## ...`", prompt)
         self.assertIn("新增项必须使用下一个编号", prompt)
         self.assertIn("普通文本行，不加", prompt)
         self.assertIn("只有目标分组原本就是", prompt)
@@ -285,49 +287,6 @@ class PlanUpdateTests(unittest.TestCase):
             self.assertNotIn("- 原文：学习python", daily_text)
             self.assertNotIn("- 归入标题：学习", daily_text)
             self.assertEqual([event["type"] for event in logger.events], ["llm_call", "plan_updated"])
-
-    def test_generate_plan_update_removes_added_today_tasks_heading(self) -> None:
-        with _temporary_directory() as temp_dir:
-            config = _test_config(Path(temp_dir))
-            inbox = Path(config["paths"]["inbox_dir"])
-            daily_dir = Path(config["paths"]["daily_dir"])
-            inbox.mkdir(parents=True)
-            daily_dir.mkdir(parents=True)
-            today_tasks = inbox / "today_tasks.md"
-            daily_file = daily_dir / "2026-04-30.md"
-            today_tasks.write_text(
-                "口号：过最想要的一天！\n\n学习：\n视频：Pencil + Codex 实现 AI 日程助理 App\n",
-                encoding="utf-8",
-            )
-            daily_file.write_text(
-                "# 2026-04-30\n\n## 计划\n\n**1. 今日待办原文**\n\n口号：过最想要的一天！\n\n学习：\n视频\n\n**2. 计划建议**\n\n已有建议\n",
-                encoding="utf-8",
-            )
-            reply = json.dumps(
-                {
-                    "updated_today_tasks": "# 今日待办\n\n口号：过最想要的一天！\n\n学习：\n视频：Pencil + Codex 实现 AI 日程助理 App\n学习python",
-                    "updated_daily_original": "# 今日待办\n\n口号：过最想要的一天！\n\n学习：\n视频\n学习python",
-                    "target_heading": "学习",
-                    "new_task_advice": "- 优先级：P2\n- 任务建议：先完成当前视频，再补 python。",
-                },
-                ensure_ascii=False,
-            )
-
-            generate_plan_update(
-                FakeProvider(reply),
-                "学习python",
-                config=config,
-                target_date=date(2026, 4, 30),
-                logger=FakeLogger(),  # type: ignore[arg-type]
-            )
-
-            saved_tasks = today_tasks.read_text(encoding="utf-8")
-            self.assertFalse(saved_tasks.startswith("# 今日待办"))
-            self.assertIn("口号：过最想要的一天！", saved_tasks)
-            self.assertIn("学习python", saved_tasks)
-            daily_text = daily_file.read_text(encoding="utf-8")
-            self.assertNotIn("**1. 今日待办原文**\n\n# 今日待办", daily_text)
-            self.assertIn("**1. 今日待办原文**\n\n口号：过最想要的一天！", daily_text)
 
     def test_generate_plan_update_does_not_write_files_on_parse_error(self) -> None:
         with _temporary_directory() as temp_dir:
