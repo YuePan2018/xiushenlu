@@ -473,6 +473,19 @@ CONSOLE_HTML = f"""<!doctype html>
       flex: 1 1 auto;
       min-width: 220px;
     }}
+    .slogan {{
+      flex: 1 1 260px;
+      max-width: 420px;
+      border-left: 1px solid var(--line);
+      padding-left: 16px;
+    }}
+    .slogan h2 {{
+      margin-bottom: 6px;
+    }}
+    .slogan input {{
+      min-height: 36px;
+      padding: 7px 10px;
+    }}
     .top-status {{
       flex: 1 1 340px;
       max-width: 520px;
@@ -769,6 +782,14 @@ CONSOLE_HTML = f"""<!doctype html>
         padding-left: 0;
         padding-top: 10px;
       }}
+      .slogan {{
+        width: 100%;
+        max-width: none;
+        border-left: 0;
+        border-top: 1px solid var(--line);
+        padding-left: 0;
+        padding-top: 10px;
+      }}
       main {{ padding: 12px; }}
       .split, .slots {{ grid-template-columns: 1fr; }}
       button {{ width: 100%; }}
@@ -781,6 +802,10 @@ CONSOLE_HTML = f"""<!doctype html>
       <div class="brand">
         <h1>修身炉控制台</h1>
         <div class="meta">本机入口：{_project_file("app/console.py")}</div>
+      </div>
+      <div class="slogan">
+        <h2>口号</h2>
+        <input id="sloganInput" type="text" autocomplete="off">
       </div>
       <div class="top-status">
         <h2>运行状态</h2>
@@ -874,6 +899,7 @@ CONSOLE_HTML = f"""<!doctype html>
     }};
     const $ = (id) => document.getElementById(id);
     const llmButtonIds = ["planBtn", "addBtn", "reviewBtn"];
+    const sloganStorageKey = "xiushenlu.console.slogan";
 
     if (window.marked) {{
       marked.setOptions({{
@@ -1108,8 +1134,17 @@ CONSOLE_HTML = f"""<!doctype html>
       }});
     }}
 
+    function loadSlogan() {{
+      $("sloganInput").value = window.localStorage.getItem(sloganStorageKey) || "";
+    }}
+
+    function saveSlogan() {{
+      window.localStorage.setItem(sloganStorageKey, $("sloganInput").value);
+    }}
+
     $("refreshBtn").addEventListener("click", () => loadState());
     $("stopBtn").addEventListener("click", () => stopCurrentOperation());
+    $("sloganInput").addEventListener("input", saveSlogan);
     $("reloadTasksBtn").addEventListener("click", () => loadState());
     $("openTasksBtn").addEventListener("click", () => runAction("打开文件", () =>
       requestJson("/api/tasks/open", {{
@@ -1161,6 +1196,7 @@ CONSOLE_HTML = f"""<!doctype html>
     ));
     submitOnCtrlEnter("logInput", "logBtn");
     submitOnCtrlEnter("addInput", "addBtn");
+    loadSlogan();
     loadState();
     loadOperation().catch(() => null);
   </script>

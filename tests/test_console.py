@@ -78,7 +78,10 @@ class ConsoleTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             html = response.text
             self.assertIn('<article id="dailyText" class="daily-markdown empty"', html)
-            self.assertIn("<h2>更新计划</h2>", html)
+            self.assertIn('<span class="panel-title">更新计划</span>', html)
+            self.assertIn("<h2>口号</h2>", html)
+            self.assertIn('id="sloganInput"', html)
+            self.assertIn("xiushenlu.console.slogan", html)
             self.assertIn('id="tokenBtn">token</button>', html)
             self.assertIn('id="openTasksBtn">打开文件</button>', html)
             self.assertIn('id="stopBtn"', html)
