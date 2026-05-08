@@ -12,22 +12,15 @@
 
 ## Demo 流程
 
-日常可以直接双击 `run_main.bat` 启动本地控制台。也可以在项目根目录用 CLI 跑完整闭环：
+日常先双击 `run_main.bat` 打开本地控制台，然后按一天的节奏使用：
 
-```powershell
-conda run --no-capture-output -n xiushenlu python app/main.py plan --tasks "今天完成项目文档更新；整理学习资料；晚上复盘"
-conda run --no-capture-output -n xiushenlu python app/main.py plan --add "临时补一条资料导入想法"
-conda run --no-capture-output -n xiushenlu python app/main.py log "整理了 README 的项目首页"
-conda run --no-capture-output -n xiushenlu python app/main.py status
-conda run --no-capture-output -n xiushenlu python app/main.py review
-conda run --no-capture-output -n xiushenlu python app/main.py cost
-```
-
-这条流程对应：
-
-```text
-今日待办 -> 计划 -> 日内更新 -> 过程记录 -> 查看 daily -> 晚间复盘 -> token 统计
-```
+1. 写今日待办：把今天要做的事放进输入槽，作为当天资料和行动的起点。
+2. 生成计划：助手结合长期目标，给出当天建议、风险提醒和收尾检查。
+3. 记录过程：执行中随手写下进展、想法、卡点和临时材料。
+4. 日内调整：临时新增任务时，只局部更新今日计划，不重写整份 daily。
+5. 查看 daily：随时回看今天的计划、记录、复盘和 token 统计。
+6. 晚间复盘：根据当天任务快照和过程记录生成复盘，并把未完成事项滚动到明天。
+7. 统计消耗：汇总本地 LLM token 使用情况，避免后台调用失控。
 
 ## Milestone
 
