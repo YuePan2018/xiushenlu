@@ -2,7 +2,7 @@
 
 修身炉是一个本地优先的知识成长助手。
 
-它的目标不是替我自动做所有事，而是和我一起消化知识、积累资料、运用知识，并把这些过程变成可追踪、可复用、可继续升级的个人知识系统。
+目标是和我一起消化知识、积累资料、运用知识，并把这些过程变成可追踪、可复用、可继续升级的个人知识系统。
 
 ```text
 资料进入 -> 消化整理 -> 知识沉淀 -> 运用反馈 -> 再次升级
@@ -10,26 +10,24 @@
 
 当前版本已经具备基础 daily 闭环：今日计划、过程记录、日内更新、晚间复盘、待办滚动、本地控制台和 token 统计。后续所有 pipeline、post、工具、通知、自动化和审批能力，都会围绕“积累资料并用回知识”这条主线展开。
 
-## 项目特点
+## Demo 流程
 
-| 特点 | 说明 |
-| --- | --- |
-| 本地优先 | 个人资料、运行记录和 daily 默认留在本机，`data/` 下真实数据不提交到 Git。 |
-| 固定 pipeline | 由代码控制计划、记录、复盘等流程，LLM 负责总结、整理、建议和草稿。 |
-| daily 记录 | 用 Markdown 记录每日计划、过程事实、复盘和 token 统计，方便人直接回看。 |
-| 知识沉淀 | 将学习资料、项目过程、agent 协作记录和表达草稿逐步整理为可复用知识。 |
-| 安全边界 | 路径白名单、受保护文件、禁止自动读取敏感目录和禁止自动发布是默认约束。 |
-| 工具服务知识 | 工具、post、通知和自动化不是目的，而是帮助积累、加工、调用和验证知识。 |
+日常可以直接双击 `run_main.bat` 启动本地控制台。也可以在项目根目录用 CLI 跑完整闭环：
 
-## 当前能力
+```powershell
+conda run --no-capture-output -n xiushenlu python app/main.py plan --tasks "今天完成项目文档更新；整理学习资料；晚上复盘"
+conda run --no-capture-output -n xiushenlu python app/main.py plan --add "临时补一条资料导入想法"
+conda run --no-capture-output -n xiushenlu python app/main.py log "整理了 README 的项目首页"
+conda run --no-capture-output -n xiushenlu python app/main.py status
+conda run --no-capture-output -n xiushenlu python app/main.py review
+conda run --no-capture-output -n xiushenlu python app/main.py cost
+```
 
-- `plan`：根据长期目标和今日待办生成当天行动建议。
-- `plan --add`：记录日内新增任务，并局部更新计划。
-- `log`：追加过程记录，不调用 LLM。
-- `review`：根据当天任务快照和过程记录生成复盘，并滚动明日待办。
-- `status`：查看当天 daily。
-- `cost`：汇总本地 token 使用情况。
-- `console`：启动本地控制台，封装常用 daily、待办、计划、记录、复盘和停止操作。
+这条流程对应：
+
+```text
+今日待办 -> 计划 -> 日内更新 -> 过程记录 -> 查看 daily -> 晚间复盘 -> token 统计
+```
 
 ## Milestone
 
