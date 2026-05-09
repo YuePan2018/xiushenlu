@@ -241,7 +241,7 @@ class PlanUpdateTests(unittest.TestCase):
         )
 
         self.assertIn("## 计划", updated)
-        self.assertIn("**1. 今日待办原文**", updated)
+        self.assertIn("**今日待办原文**", updated)
         self.assertIn("**新任务**", updated)
         self.assertIn("## 记录", updated)
         self.assertLess(updated.index("## 计划"), updated.index("## 记录"))

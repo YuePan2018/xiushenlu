@@ -229,7 +229,7 @@ def _find_level2_section(text: str, title: str) -> tuple[int, int] | None:
 def _minimal_plan_section(updated_daily_original: str, new_task_entry: str) -> str:
     return (
         "## 计划\n\n"
-        "**1. 今日待办原文**\n\n"
+        "**今日待办原文**\n\n"
         f"{updated_daily_original.strip()}\n\n"
         "**新任务**\n\n"
         f"{new_task_entry.strip()}"
@@ -251,7 +251,7 @@ def _replace_daily_original(plan_section: str, updated_daily_original: str) -> s
     heading_index = _find_daily_original_heading(lines)
     if heading_index is None:
         insert_at = _daily_original_insert_index(lines)
-        block = ["**1. 今日待办原文**", "", updated_daily_original.strip(), ""]
+        block = ["**今日待办原文**", "", updated_daily_original.strip(), ""]
         return "\n".join(lines[:insert_at] + block + lines[insert_at:]).rstrip()
 
     end_index = _find_next_plan_subsection(lines, heading_index + 1)

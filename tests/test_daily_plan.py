@@ -23,7 +23,7 @@ class DailyPlanTests(unittest.TestCase):
 
         self.assertEqual(
             plan,
-            "1. 今日待办原文\n\n"
+            "**今日待办原文**\n\n"
             "# 今日待办\n\n"
             "口号：过最想要的一天！\n\n"
             "xiushenlu：\n"
@@ -39,7 +39,7 @@ class DailyPlanTests(unittest.TestCase):
     def test_build_plan_uses_empty_tasks_placeholder(self) -> None:
         plan = _build_plan("  ", "2. 建议")
 
-        self.assertEqual(plan, "1. 今日待办原文\n\n（尚未填写今日待办）\n\n2. 建议")
+        self.assertEqual(plan, "**今日待办原文**\n\n（尚未填写今日待办）\n\n2. 建议")
 
     def test_build_prompt_tells_llm_not_to_copy_original_tasks(self) -> None:
         prompt = _build_prompt("2026-05-06", "长期目标", "# 今日待办\n\n任务")

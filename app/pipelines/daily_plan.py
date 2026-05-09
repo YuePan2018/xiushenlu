@@ -107,7 +107,7 @@ def _build_plan(tasks: str, plan_advice: str) -> str:
 
 def _format_original_tasks_section(tasks: str) -> str:
     tasks_text = tasks.strip() or "（尚未填写今日待办）"
-    return f"1. 今日待办原文\n\n{tasks_text}"
+    return f"**今日待办原文**\n\n{tasks_text}"
 
 
 def _normalize_markdown_section_spacing(plan: str) -> str:
