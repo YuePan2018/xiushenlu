@@ -842,7 +842,7 @@ CONSOLE_HTML = f"""<!doctype html>
       </details>
       <details class="panel">
         <summary class="collapsible-summary">
-          <span class="panel-title">今日待办</span>
+          <span class="panel-title">生成计划</span>
         </summary>
         <div class="collapsible-body">
           <label for="tasksInput">today_tasks.md</label>
