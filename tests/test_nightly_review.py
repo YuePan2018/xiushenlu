@@ -72,7 +72,7 @@ class NightlyReviewTests(unittest.TestCase):
             "# 2026-05-07\n\n"
             "## 计划\n\n"
             "生成时间：2026-05-07 10:00:00\n\n"
-            "1. 今日待办原文\n\n"
+            "**今日待办**\n\n"
             "# 今日待办\n\n"
             "xiushenlu：\n"
             "1. 修复重复 review\n\n"

@@ -229,7 +229,7 @@ def _find_level2_section(text: str, title: str) -> tuple[int, int] | None:
 def _minimal_plan_section(updated_daily_original: str, new_task_entry: str) -> str:
     return (
         "## 计划\n\n"
-        "**今日待办原文**\n\n"
+        "**今日待办**\n\n"
         f"{updated_daily_original.strip()}\n\n"
         "**新任务**\n\n"
         f"{new_task_entry.strip()}"
@@ -251,11 +251,11 @@ def _replace_daily_original(plan_section: str, updated_daily_original: str) -> s
     heading_index = _find_daily_original_heading(lines)
     if heading_index is None:
         insert_at = _daily_original_insert_index(lines)
-        block = ["**今日待办原文**", "", updated_daily_original.strip(), ""]
+        block = ["**今日待办**", "", updated_daily_original.strip(), ""]
         return "\n".join(lines[:insert_at] + block + lines[insert_at:]).rstrip()
 
     end_index = _find_next_plan_subsection(lines, heading_index + 1)
-    block = [lines[heading_index].rstrip(), "", updated_daily_original.strip(), ""]
+    block = ["**今日待办**", "", updated_daily_original.strip(), ""]
     if end_index is None:
         return "\n".join(lines[:heading_index] + block).rstrip()
     return "\n".join(lines[:heading_index] + block + lines[end_index:]).rstrip()
@@ -269,9 +269,15 @@ def _append_new_task_entry(plan_section: str, new_task_entry: str) -> str:
 
 def _find_daily_original_heading(lines: list[str]) -> int | None:
     for index, line in enumerate(lines):
-        if "今日待办原文" in line:
+        if _is_today_tasks_heading(line):
             return index
     return None
+
+
+def _is_today_tasks_heading(line: str) -> bool:
+    text = line.strip().strip("*").strip("#").strip()
+    text = text.removeprefix("1.").strip()
+    return text in {"今日待办", "今日待办原文"}
 
 
 def _daily_original_insert_index(lines: list[str]) -> int:
@@ -296,7 +302,16 @@ def _looks_like_plan_subsection(line: str) -> bool:
     text = line.strip().strip("*").strip("#").strip()
     if len(text) > 80:
         return False
-    keywords = ("计划建议", "任务建议", "根据长期目标", "风险提醒", "收尾检查")
+    keywords = (
+        "计划建议",
+        "任务建议",
+        "根据长期目标",
+        "风险提醒",
+        "收尾检查",
+        "时间块安排",
+        "调度风险",
+        "晚间收口",
+    )
     return any(keyword in text for keyword in keywords)
 
 
@@ -322,7 +337,7 @@ def _build_prompt(
 
 你的任务：
 1. 把“新增任务”逐字插入 today_tasks.md，不能改写、概括或扩写。
-2. 同步更新 daily 里的“今日待办原文”小节，只更新待办原文，不重写原有计划建议。
+2. 同步更新 daily 里的“今日待办”小节，只更新待办快照，不重写原有计划建议。
 3. 只为这一个新增任务生成一段不超过 {NEW_TASK_ADVICE_MAX_CHARS} 字的建议。
 
 日期：{date_text}
@@ -347,7 +362,7 @@ def _build_prompt(
 - 如果目标分组主要是普通文本行，新增项也必须是普通文本行，不加“-”，不加编号。
 - 只有目标分组原本就是“-”列表时，新增项才允许使用“-”。
 - `updated_today_tasks` 是完整的新 today_tasks.md；只允许增加这一个新增任务，除必要编号外不要改动旧内容，不要添加 Markdown 标题。
-- `updated_daily_original` 只填写 daily “今日待办原文”小节的新内容，风格跟原小节一致，并包含逐字新增任务；不要包含计划建议，不要添加 Markdown 标题。
+- `updated_daily_original` 只填写 daily “今日待办”小节的新内容，风格跟原小节一致，并包含逐字新增任务；不要包含计划建议，不要添加 Markdown 标题。
 - `target_heading` 只用于内部归类，不会展示在 daily；不要把它写进 `new_task_advice`。
 - `new_task_advice` 只写建议正文，不要写“### 新增”“原文”“归入标题”等标题或元数据；daily 的“新任务”区只会展示“### 新增：原始任务”和建议正文；总字数不超过 {NEW_TASK_ADVICE_MAX_CHARS} 字。
 
@@ -358,7 +373,7 @@ def _build_prompt(
 你必须只输出一个严格 JSON 对象，不要使用代码块，不要输出解释文字。
 JSON 必须包含且只需要包含这些字符串字段：
 - updated_today_tasks：字符串，完整的新 today_tasks.md。
-- updated_daily_original：字符串，daily “今日待办原文”小节的新内容。
+- updated_daily_original：字符串，daily “今日待办”小节的新内容。
 - target_heading：字符串，新增任务最终归入的小标题名称，不要带序号。
 - new_task_advice：字符串，只针对新增任务的 markdown 建议，必须包含“优先级”“任务建议”“预估时间”“与原计划关系”“风险提醒”。
 """

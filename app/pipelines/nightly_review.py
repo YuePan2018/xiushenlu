@@ -151,7 +151,7 @@ class DailyReviewContext:
 
 
 def _build_prompt(date_text: str, daily_context: DailyReviewContext) -> str:
-    today_tasks = daily_context.today_tasks.strip() or "（daily 的“今日待办原文”为空）"
+    today_tasks = daily_context.today_tasks.strip() or "（daily 的“今日待办”为空）"
     records = daily_context.records.strip() or "（今天还没有记录）"
     plan_notes = daily_context.plan_notes.strip() or "（没有额外计划建议）"
     return f"""你是一个帮助用户复盘学习和工作的个人执行助手。
@@ -168,7 +168,7 @@ def _build_prompt(date_text: str, daily_context: DailyReviewContext) -> str:
 “临时：”代表临时插入的任务，不在当天任务计划内
 “经验：”代表学习和工作中产生的心得，需要在review中总结归纳。
 
-今日待办原文（来自 daily 的当天快照）：
+今日待办（来自 daily 的当天快照）：
 {today_tasks}
 
 今日记录（完成证据只看这里）：
@@ -184,7 +184,7 @@ def _build_rollover_prompt(
     daily_context: DailyReviewContext,
     tomorrow_plan: str,
 ) -> str:
-    today_tasks_text = daily_context.today_tasks.strip() or "（daily 的“今日待办原文”为空）"
+    today_tasks_text = daily_context.today_tasks.strip() or "（daily 的“今日待办”为空）"
     records_text = daily_context.records.strip() or "（今天还没有记录）"
     plan_notes_text = daily_context.plan_notes.strip() or "（没有额外计划建议）"
     tomorrow_plan_text = tomorrow_plan.strip() or "（明日计划.md 为空）"
@@ -195,7 +195,7 @@ def _build_rollover_prompt(
 你必须只输出一个严格 JSON 对象，不要使用代码块，不要输出解释文字。
 JSON 必须包含且只需要包含这些字符串字段：
 - review：晚间复盘正文。输出“完成了什么”“改进建议”“值得肯定的行为”三部分；重点分析学习工作的安排和工程经验；最后基于事实给一句话表扬。
-- next_today_tasks：新的完整 today_tasks.md 内容。保持“今日待办原文”的口号、中文分组、列表/编号习惯；不要输出任何 Markdown 标题行，禁止输出 `# 今日待办`、`#今日待办`、`## ...` 或任何以 `#` 开头的标题行；根据今日待办原文与今日记录判断今天未完成任务，优先按原小标题归类；再叠加“明日计划.md”的内容；去掉明显重复项。
+- next_today_tasks：新的完整 today_tasks.md 内容。保持“今日待办”的口号、中文分组、列表/编号习惯；不要输出任何 Markdown 标题行，禁止输出 `# 今日待办`、`#今日待办`、`## ...` 或任何以 `#` 开头的标题行；根据今日待办与今日记录判断今天未完成任务，优先按原小标题归类；再叠加“明日计划.md”的内容；去掉明显重复项。
 
 判断未完成任务的规则：
 - 记录中没有出现完成证据的计划任务，视为未完成。
@@ -204,7 +204,7 @@ JSON 必须包含且只需要包含这些字符串字段：
 - 如果今天没有未完成任务且明日计划也为空，next_today_tasks 仍输出完整 today_tasks.md，至少保留原有口号和中文分组风格，但不要输出 Markdown 标题。
 - 生成 review 时不要引用“明日计划.md”；明日计划只允许用于生成 next_today_tasks。
 
-今日待办原文（来自 daily 的当天快照，不读取当前 today_tasks.md）：
+今日待办（来自 daily 的当天快照，不读取当前 today_tasks.md）：
 {today_tasks_text}
 
 今日记录（完成证据只看这里）：
@@ -280,9 +280,15 @@ def _split_plan_original_tasks(plan_section: str) -> tuple[str, str]:
 
 def _find_original_tasks_heading(lines: list[str]) -> int | None:
     for index, line in enumerate(lines):
-        if "今日待办原文" in line:
+        if _is_today_tasks_heading(line):
             return index
     return None
+
+
+def _is_today_tasks_heading(line: str) -> bool:
+    text = line.strip().strip("*").strip("#").strip()
+    text = text.removeprefix("1.").strip()
+    return text in {"今日待办", "今日待办原文"}
 
 
 def _looks_like_plan_notes_heading(line: str) -> bool:

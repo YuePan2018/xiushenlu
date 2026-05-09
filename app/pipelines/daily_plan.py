@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -13,9 +12,6 @@ from app.llm.provider import LLMProvider
 from app.llm.usage import append_llm_call_event
 from app.logger import EventLogger
 from app.memory.goals import read_goals
-
-
-_NUMBERED_BOLD_HEADING_RE = re.compile(r"^\*\*\d+\.\s+[^*]+?\*\*$")
 
 
 @dataclass(frozen=True)
@@ -40,10 +36,10 @@ def generate_daily_plan(
     tasks = tasks_text if tasks_text is not None else read_today_tasks(cfg)
     prompt = _build_prompt(date_text=date_text, goals=goals, tasks=tasks)
 
-    plan_advice = _normalize_markdown_section_spacing(provider.chat(prompt).strip())
+    plan_schedule = provider.chat(prompt).strip()
     if cancel_check is not None:
         cancel_check()
-    plan = _build_plan(tasks=tasks, plan_advice=plan_advice)
+    plan = _build_plan(tasks=tasks, plan_schedule=plan_schedule)
     daily_path = _daily_path(cfg, date_text)
     _write_plan_section(config=cfg, date_text=date_text, plan=plan)
 
@@ -72,22 +68,22 @@ def _daily_path(config: dict[str, Any], date_text: str) -> Path:
 def _build_prompt(date_text: str, goals: str, tasks: str) -> str:
     goals_text = goals.strip() or "（尚未填写长期目标）"
     tasks_text = tasks.strip() or "（尚未填写今日待办）"
-    return f"""你是一个帮助用户稳定推进学习和工作的个人执行助手。
+    return f"""你是一个帮助用户安排当天时间的个人执行助手。
 
-请根据长期目标和今日待办，为 {date_text} 生成一份当天计划
+请根据长期目标和今日待办，为 {date_text} 生成一份当天时间安排。
 
-输出结构（严格按此顺序）：
-1. 根据长期目标，对各任务给出简短建议（优先级、注意事项，预估时间）注意事项每条一句话，不给具体步骤。
-预估时要考虑我会用codex辅助工作。如果工作总时间超出6小时（工作外的杂事不算入时间），要给出提示，并且建议6h能做完哪几个任务。
-2. 风险提醒
-3. 收尾检查项
+输出结构：
+1. 只输出“时间安排”一段，不要输出风险提醒、收尾检查、注意事项、保底完成标准、对应执行内容或具体技术步骤。
+2. 时间安排用 markdown 表格，表头固定为：任务｜优先级｜预估时间。
+3. “任务”列只写短任务名，不复制长段今日待办原文。
+4. 预估时要考虑用户会用 Codex 辅助工作。如果工作总时间超出6小时（工作外的杂事不算入时间），在表格后用一句话提示超时，并说明6小时内优先做哪几个任务。
 
 其他要求：
-- 不要输出“今日待办原文”；这部分由程序直接写入
-- 今日待办只用于分析，不要复制、改写、重排今日待办原文
-- 如果长期目标或今日待办看起来还只是模板或为空，提醒用户补充
-- 输出采用markdown格式，可以包含表格。但不要用```markdown，标题不可使用#和##。
-- 不以询问句结尾
+- 不要输出“今日待办”原文；这部分由程序直接写入。
+- 今日待办只用于分析，不要复制、改写、重排今日待办原文。
+- 如果长期目标或今日待办看起来还只是模板或为空，在表格后用一句话提醒用户补充。
+- 输出采用 markdown 格式，但不要用```markdown，标题不可使用#和##。
+- 不以询问句结尾。
 
 长期目标：
 {goals_text}
@@ -97,30 +93,17 @@ def _build_prompt(date_text: str, goals: str, tasks: str) -> str:
 """
 
 
-def _build_plan(tasks: str, plan_advice: str) -> str:
-    original_tasks = _format_original_tasks_section(tasks)
-    advice_text = plan_advice.strip()
-    if not advice_text:
-        return original_tasks
-    return f"{original_tasks}\n\n{advice_text}".strip()
+def _build_plan(tasks: str, plan_schedule: str) -> str:
+    today_tasks = _format_today_tasks_section(tasks)
+    schedule_text = plan_schedule.strip()
+    if not schedule_text:
+        return today_tasks
+    return f"{today_tasks}\n\n{schedule_text}".strip()
 
 
-def _format_original_tasks_section(tasks: str) -> str:
+def _format_today_tasks_section(tasks: str) -> str:
     tasks_text = tasks.strip() or "（尚未填写今日待办）"
-    return f"**今日待办原文**\n\n{tasks_text}"
-
-
-def _normalize_markdown_section_spacing(plan: str) -> str:
-    lines = plan.splitlines()
-    normalized: list[str] = []
-
-    for index, line in enumerate(lines):
-        normalized.append(line)
-        next_line = lines[index + 1] if index + 1 < len(lines) else ""
-        if _NUMBERED_BOLD_HEADING_RE.match(line.strip()) and next_line.strip():
-            normalized.append("")
-
-    return "\n".join(normalized).strip()
+    return f"**今日待办**\n\n{tasks_text}"
 
 
 def _write_plan_section(config: dict[str, Any], date_text: str, plan: str) -> None:

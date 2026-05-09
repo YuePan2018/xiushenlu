@@ -70,7 +70,7 @@ class PlanUpdateTests(unittest.TestCase):
             goals="长期目标",
             today_tasks="修身炉：\n1. 原任务\n2. 继续任务\n\n杂事：\n游泳或篮球\n扫地拖地",
             daily_text=(
-                "## 计划\n\n**1. 今日待办原文**\n\n"
+                "## 计划\n\n**今日待办**\n\n"
                 "修身炉：\n1. 原任务\n2. 继续任务\n\n杂事：\n游泳或篮球\n扫地拖地"
             ),
             new_task="灵感：发现了codex可以优化的一些rule，比如去除常错的命令，提示plan mode和commit",
@@ -165,7 +165,7 @@ class PlanUpdateTests(unittest.TestCase):
 
 生成时间：2026-04-30 11:02:58
 
-**1. 今日待办原文**
+**今日待办**
 
 **学习：**
 视频：Pencil + Codex 实现 AI 日程助理 App
@@ -201,7 +201,7 @@ class PlanUpdateTests(unittest.TestCase):
 
 ## 计划
 
-**1. 今日待办原文**
+**今日待办**
 
 原文
 
@@ -241,7 +241,7 @@ class PlanUpdateTests(unittest.TestCase):
         )
 
         self.assertIn("## 计划", updated)
-        self.assertIn("**今日待办原文**", updated)
+        self.assertIn("**今日待办**", updated)
         self.assertIn("**新任务**", updated)
         self.assertIn("## 记录", updated)
         self.assertLess(updated.index("## 计划"), updated.index("## 记录"))
@@ -258,7 +258,7 @@ class PlanUpdateTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (daily_dir / "2026-04-30.md").write_text(
-                "# 2026-04-30\n\n## 计划\n\n**1. 今日待办原文**\n\n**学习：**\n视频\n\n**2. 计划建议**\n\n已有建议\n",
+                "# 2026-04-30\n\n## 计划\n\n**今日待办**\n\n**学习：**\n视频\n\n**2. 计划建议**\n\n已有建议\n",
                 encoding="utf-8",
             )
             reply = json.dumps(
