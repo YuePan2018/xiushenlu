@@ -7,6 +7,7 @@ from typing import Any
 
 import dashscope
 from dotenv import load_dotenv
+from dashscope import Generation
 
 from app.llm.provider import LLMCallUsage, LLMProvider
 
@@ -48,25 +49,37 @@ class DashScopeProvider(LLMProvider):
             raise ValueError("Prompt must not be empty.")
 
         messages = [
-            {"role": "system", "content": [{"text": self._system_prompt}]},
-            {"role": "user", "content": [{"text": prompt}]},
+            {"role": "system", "content": self._system_prompt},
+            {"role": "user", "content": prompt},
         ]
 
-        response = dashscope.MultiModalConversation.call(
-            api_key=self._api_key,
-            model=self.model,
-            messages=messages,
-        )
+        if self._uses_generation_api():
+            response = Generation.call(
+                api_key=self._api_key,
+                model=self.model,
+                messages=messages,
+                result_format="message",
+                enable_thinking=True,
+            )
+        else:
+            response = dashscope.MultiModalConversation.call(
+                api_key=self._api_key,
+                model=self.model,
+                messages=messages,
+            )
 
         reply = _extract_reply(response)
         self.last_usage = self._build_usage(prompt, reply, response)
         return reply
 
+    def _uses_generation_api(self) -> bool:
+        return self.model.lower().startswith("glm-")
+
     def _build_usage(self, prompt: str, reply: str, response: Any) -> LLMCallUsage:
         try:
             usage = response.usage
-            tokens_in = int(getattr(usage, "input_tokens", 0) or 0)
-            tokens_out = int(getattr(usage, "output_tokens", 0) or 0)
+            tokens_in = _first_int(usage, "input_tokens", "prompt_tokens") or 0
+            tokens_out = _first_int(usage, "output_tokens", "completion_tokens") or 0
             return LLMCallUsage(
                 model=self.model,
                 tokens_in=tokens_in,
@@ -99,14 +112,44 @@ def _extract_reply(response: Any) -> str:
         output = response.output
         choices = output.choices
         message = choices[0].message
-        content = message.content
-        reply = content[0]["text"]
+        reply = _content_to_text(message.content)
     except (AttributeError, IndexError, KeyError, TypeError) as exc:
         raise RuntimeError(_format_response_error(response)) from exc
 
     if not isinstance(reply, str) or not reply.strip():
         raise RuntimeError(_format_response_error(response))
     return reply
+
+
+def _content_to_text(content: Any) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(_content_to_text(item) for item in content)
+    if isinstance(content, Mapping):
+        if "text" in content:
+            return _content_to_text(content["text"])
+        if "content" in content:
+            return _content_to_text(content["content"])
+    return str(content)
+
+
+def _first_int(source: Any, *keys: str) -> int | None:
+    if not isinstance(source, Mapping):
+        source = getattr(source, "__dict__", None)
+    if not isinstance(source, Mapping):
+        return None
+    for key in keys:
+        value = source.get(key)
+        if value is None:
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 def _format_response_error(response: Any) -> str:

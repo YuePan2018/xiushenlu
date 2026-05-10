@@ -42,7 +42,7 @@ class DashScopeProviderTests(unittest.TestCase):
         )
 
         with patch.dict(os.environ, {"DASHSCOPE_API_KEY": "test-key"}):
-            with patch("app.llm.dashscope_impl.dashscope.MultiModalConversation.call", return_value=response):
+            with patch("app.llm.dashscope_impl.dashscope.MultiModalConversation.call", return_value=response) as call:
                 provider = DashScopeProvider(_test_config())
 
                 reply = provider.chat("生成计划")
@@ -50,6 +50,45 @@ class DashScopeProviderTests(unittest.TestCase):
         self.assertEqual(reply, "计划正文")
         self.assertIsNotNone(provider.last_usage)
         self.assertEqual(provider.last_usage.total_tokens, 8)
+        messages = call.call_args.kwargs["messages"]
+        self.assertEqual(messages[0]["content"], "测试系统提示词")
+        self.assertEqual(messages[1]["content"], "生成计划")
+
+    def test_glm_model_uses_generation_api(self) -> None:
+        response = SimpleNamespace(
+            output=SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            reasoning_content="思考内容",
+                            content="GLM 回复",
+                        )
+                    )
+                ]
+            ),
+            usage={"input_tokens": 4, "output_tokens": 6},
+            status_code=200,
+        )
+
+        with patch.dict(os.environ, {"DASHSCOPE_API_KEY": "test-key"}):
+            with patch("app.llm.dashscope_impl.Generation.call", return_value=response) as call:
+                provider = DashScopeProvider(_glm_config())
+
+                reply = provider.chat("你是谁？")
+
+        self.assertEqual(reply, "GLM 回复")
+        self.assertEqual(provider.last_usage.total_tokens, 10)
+        kwargs = call.call_args.kwargs
+        self.assertEqual(kwargs["model"], "glm-5.1")
+        self.assertEqual(kwargs["result_format"], "message")
+        self.assertTrue(kwargs["enable_thinking"])
+        self.assertEqual(
+            kwargs["messages"],
+            [
+                {"role": "system", "content": "测试系统提示词"},
+                {"role": "user", "content": "你是谁？"},
+            ],
+        )
 
 
 def _test_config() -> dict[str, object]:
@@ -62,6 +101,12 @@ def _test_config() -> dict[str, object]:
             "system_prompt": "测试系统提示词",
         },
     }
+
+
+def _glm_config() -> dict[str, object]:
+    config = _test_config()
+    config["llm"]["model"] = "glm-5.1"
+    return config
 
 
 if __name__ == "__main__":
