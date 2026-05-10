@@ -37,6 +37,7 @@ class DashScopeProvider(LLMProvider):
         if not model:
             raise ValueError("Config key 'llm.model' is required.")
         self.model = str(model)
+        self._enable_thinking = _optional_bool(llm_config.get("enable_thinking"))
         self._api_key = api_key
         self._system_prompt = str(
             assistant_config.get("system_prompt", "你是一个帮助用户记录、计划和复盘的个人执行助手。")
@@ -58,19 +59,21 @@ class DashScopeProvider(LLMProvider):
         self.last_usage = None
         self.last_response_seconds = None
         started_at = time.perf_counter()
+        call_kwargs = self._thinking_kwargs()
         if self._uses_generation_api():
             response = Generation.call(
                 api_key=self._api_key,
                 model=self.model,
                 messages=messages,
                 result_format="message",
-                enable_thinking=True,
+                **call_kwargs,
             )
         else:
             response = dashscope.MultiModalConversation.call(
                 api_key=self._api_key,
                 model=self.model,
                 messages=messages,
+                **call_kwargs,
             )
         response_seconds = time.perf_counter() - started_at
         self.last_response_seconds = response_seconds
@@ -81,6 +84,11 @@ class DashScopeProvider(LLMProvider):
 
     def _uses_generation_api(self) -> bool:
         return self.model.lower().startswith("glm-")
+
+    def _thinking_kwargs(self) -> dict[str, bool]:
+        if self._enable_thinking is None:
+            return {}
+        return {"enable_thinking": self._enable_thinking}
 
     def _build_usage(
         self,
@@ -165,6 +173,20 @@ def _first_int(source: Any, *keys: str) -> int | None:
         except (TypeError, ValueError):
             continue
     return None
+
+
+def _optional_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    raise ValueError("Config key 'llm.enable_thinking' must be a boolean.")
 
 
 def _format_response_error(response: Any) -> str:

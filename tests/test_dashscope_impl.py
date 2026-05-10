@@ -84,7 +84,7 @@ class DashScopeProviderTests(unittest.TestCase):
         kwargs = call.call_args.kwargs
         self.assertEqual(kwargs["model"], "glm-5.1")
         self.assertEqual(kwargs["result_format"], "message")
-        self.assertTrue(kwargs["enable_thinking"])
+        self.assertFalse(kwargs["enable_thinking"])
         self.assertEqual(
             kwargs["messages"],
             [
@@ -92,6 +92,29 @@ class DashScopeProviderTests(unittest.TestCase):
                 {"role": "user", "content": "你是谁？"},
             ],
         )
+
+    def test_qwen_model_can_disable_thinking(self) -> None:
+        response = SimpleNamespace(
+            output=SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content=[{"text": "Flash 回复"}])
+                    )
+                ]
+            ),
+            usage={"input_tokens": 4, "output_tokens": 6},
+        )
+
+        with patch.dict(os.environ, {"DASHSCOPE_API_KEY": "test-key"}):
+            with patch("app.llm.dashscope_impl.dashscope.MultiModalConversation.call", return_value=response) as call:
+                provider = DashScopeProvider(_qwen_no_thinking_config())
+
+                reply = provider.chat("生成计划")
+
+        self.assertEqual(reply, "Flash 回复")
+        kwargs = call.call_args.kwargs
+        self.assertEqual(kwargs["model"], "qwen3.6-flash")
+        self.assertFalse(kwargs["enable_thinking"])
 
 
 def _test_config() -> dict[str, object]:
@@ -109,6 +132,14 @@ def _test_config() -> dict[str, object]:
 def _glm_config() -> dict[str, object]:
     config = _test_config()
     config["llm"]["model"] = "glm-5.1"
+    config["llm"]["enable_thinking"] = False
+    return config
+
+
+def _qwen_no_thinking_config() -> dict[str, object]:
+    config = _test_config()
+    config["llm"]["model"] = "qwen3.6-flash"
+    config["llm"]["enable_thinking"] = False
     return config
 
 
