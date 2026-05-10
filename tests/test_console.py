@@ -67,6 +67,11 @@ class BlockingProvider(FakeProvider):
         return super().chat(prompt)
 
 
+class ErrorProvider(FakeProvider):
+    def chat(self, prompt: str) -> str:
+        raise RuntimeError("DashScope 调用失败或返回为空：code=InvalidApiKey")
+
+
 class ConsoleTests(unittest.TestCase):
     def test_index_uses_local_markdown_renderer_assets(self) -> None:
         with _temporary_directory() as temp_dir:
@@ -219,6 +224,19 @@ class ConsoleTests(unittest.TestCase):
             self.assertEqual(len(provider.prompts), 1)
             self.assertIn("本地保存的任务", provider.prompts[0])
             self.assertIn("控制台测试计划", response.json()["state"]["daily"]["text"])
+
+    def test_plan_endpoint_returns_provider_error_without_500(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            inbox_dir = Path(config["paths"]["inbox_dir"])
+            inbox_dir.mkdir(parents=True)
+            (inbox_dir / "today_tasks.md").write_text("# 今日待办\n\n触发模型错误", encoding="utf-8")
+            client = TestClient(create_app(config=config, provider_factory=ErrorProvider))
+
+            response = client.post("/api/plan", json={})
+
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("DashScope 调用失败", response.json()["detail"])
 
     def test_log_endpoint_writes_daily_and_event(self) -> None:
         with _temporary_directory() as temp_dir:

@@ -88,7 +88,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py console
 | 配置段 | 含义 |
 | --- | --- |
 | `llm.provider` | 当前为 `dashscope`。 |
-| `llm.model` | 当前默认 `qwen3.5-plus`。 |
+| `llm.model` | 当前默认 `qwen3.6-plus`。 |
 | `llm.api_key_env` | 默认 `DASHSCOPE_API_KEY`，也可通过项目根目录 `.env` 加载。 |
 | `assistant.system_prompt` | Provider 发送给模型的 system prompt。 |
 | `paths.*` | daily、inbox、memory、logs、state、quarantine 等目录。 |

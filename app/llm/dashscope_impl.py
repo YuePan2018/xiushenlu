@@ -58,7 +58,7 @@ class DashScopeProvider(LLMProvider):
             messages=messages,
         )
 
-        reply = response.output.choices[0].message.content[0]["text"]
+        reply = _extract_reply(response)
         self.last_usage = self._build_usage(prompt, reply, response)
         return reply
 
@@ -92,3 +92,33 @@ def _estimate_tokens(text: str) -> int:
     if not text:
         return 0
     return max(1, math.ceil(len(text) / 4))
+
+
+def _extract_reply(response: Any) -> str:
+    try:
+        output = response.output
+        choices = output.choices
+        message = choices[0].message
+        content = message.content
+        reply = content[0]["text"]
+    except (AttributeError, IndexError, KeyError, TypeError) as exc:
+        raise RuntimeError(_format_response_error(response)) from exc
+
+    if not isinstance(reply, str) or not reply.strip():
+        raise RuntimeError(_format_response_error(response))
+    return reply
+
+
+def _format_response_error(response: Any) -> str:
+    code = getattr(response, "code", None) or getattr(response, "status_code", None)
+    message = getattr(response, "message", None) or getattr(response, "msg", None)
+    request_id = getattr(response, "request_id", None)
+
+    parts = ["DashScope 调用失败或返回为空"]
+    if code:
+        parts.append(f"code={code}")
+    if message:
+        parts.append(f"message={message}")
+    if request_id:
+        parts.append(f"request_id={request_id}")
+    return "：".join([parts[0], "，".join(parts[1:])]) if len(parts) > 1 else parts[0]
