@@ -52,6 +52,20 @@ class FakeProvider(LLMProvider):
                 },
                 ensure_ascii=False,
             )
+        if "log_schedule_updates" in prompt:
+            return json.dumps(
+                {
+                    "updates": [
+                        {
+                            "row_index": 1,
+                            "completed": True,
+                            "note": "保留两列白名单",
+                            "evidence": "后续注意：保留两列白名单",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
         return self.reply
 
 
@@ -253,6 +267,37 @@ class ConsoleTests(unittest.TestCase):
             logs = list(Path(config["paths"]["logs_dir"]).glob("*.jsonl"))
             self.assertEqual(len(logs), 1)
             self.assertIn("user_log", logs[0].read_text(encoding="utf-8"))
+
+    def test_log_endpoint_updates_schedule_table_when_present(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            daily_dir = Path(config["paths"]["daily_dir"])
+            daily_dir.mkdir(parents=True)
+            today = date.today().isoformat()
+            (daily_dir / f"{today}.md").write_text(
+                f"# {today}\n\n"
+                "## 计划\n\n"
+                "**今日待办**\n\n"
+                "控制台任务\n\n"
+                "**时间安排**\n\n"
+                "| 任务 | 优先级 | 预估时间 | 完成 | 备注 |\n"
+                "|---|---|---|---|---|\n"
+                "| 控制台任务 | P1 | 30m |  |  |\n\n"
+                "## 记录\n\n",
+                encoding="utf-8",
+            )
+            provider = FakeProvider()
+            client = TestClient(create_app(config=config, provider_factory=lambda: provider))
+
+            response = client.post("/api/log", json={"content": "完成控制台任务。后续注意：保留两列白名单。"})
+
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertIn("任务表已更新", data["message"])
+            self.assertTrue(data["result"]["schedule_updated"])
+            daily_text = data["state"]["daily"]["text"]
+            self.assertIn("| 控制台任务 | P1 | 30m | ✓ | 保留两列白名单 |", daily_text)
+            self.assertEqual(len(provider.prompts), 1)
 
     def test_review_endpoint_rolls_over_today_tasks(self) -> None:
         with _temporary_directory() as temp_dir:

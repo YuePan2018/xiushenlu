@@ -15,6 +15,7 @@ from app.inbox import write_today_tasks
 from app.llm.dashscope_impl import DashScopeProvider
 from app.logger import EventLogger
 from app.pipelines.daily_plan import generate_daily_plan
+from app.pipelines.log_schedule_update import update_schedule_from_log
 from app.pipelines.nightly_review import NightlyReviewParseError, generate_nightly_review
 from app.pipelines.plan_update import PlanUpdateParseError, generate_plan_update
 
@@ -105,7 +106,8 @@ def run_log(content_parts: list[str]) -> int:
     config = load_config()
     content = " ".join(content_parts)
     path = append_record(content, config)
-    EventLogger().append_event(
+    event_logger = EventLogger(config=config)
+    event_logger.append_event(
         "user_log",
         "添加今日记录",
         {
@@ -114,7 +116,24 @@ def run_log(content_parts: list[str]) -> int:
             "content": content,
         },
     )
+    provider = DashScopeProvider(config)
+    try:
+        schedule_result = update_schedule_from_log(
+            provider,
+            content,
+            config=config,
+            logger=event_logger,
+        )
+    except Exception as exc:
+        print(f"记录已写入：{path}")
+        print(f"任务表未更新：{exc}")
+        return 0
+
     print(f"记录已写入：{path}")
+    if schedule_result.updated:
+        print("任务表已更新。")
+    else:
+        print(f"任务表未更新：{schedule_result.reason or '无需更新'}")
     return 0
 
 

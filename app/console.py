@@ -23,6 +23,7 @@ from app.llm.dashscope_impl import DashScopeProvider
 from app.llm.provider import LLMProvider
 from app.logger import EventLogger
 from app.pipelines.daily_plan import generate_daily_plan
+from app.pipelines.log_schedule_update import update_schedule_from_log
 from app.pipelines.nightly_review import NightlyReviewParseError, generate_nightly_review
 from app.pipelines.plan_update import PlanUpdateParseError, generate_plan_update
 
@@ -263,8 +264,16 @@ class ConsoleService:
         content = request.content.strip()
         if not content:
             raise ValueError("记录内容不能为空。")
+        token = self.operations.begin("写入记录")
+        try:
+            return self._add_log_locked(content, token)
+        finally:
+            self.operations.finish(token)
+
+    def _add_log_locked(self, content: str, token: OperationToken) -> dict[str, Any]:
         path = append_record(content, self.config)
-        EventLogger(config=self.config).append_event(
+        event_logger = EventLogger(config=self.config)
+        event_logger.append_event(
             "user_log",
             "添加今日记录",
             {
@@ -273,9 +282,40 @@ class ConsoleService:
                 "content": content,
             },
         )
+        provider = self.provider_factory()
+        try:
+            schedule_result = update_schedule_from_log(
+                provider,
+                content,
+                config=self.config,
+                logger=event_logger,
+                cancel_check=lambda: self.operations.check_cancelled(token),
+            )
+        except OperationCancelled:
+            raise
+        except Exception as exc:
+            return {
+                "message": f"记录已写入，任务表未更新：{exc}",
+                "result": {
+                    "daily_path": str(path),
+                    "schedule_updated": False,
+                    "schedule_reason": str(exc),
+                },
+                "state": self.snapshot(path.stem),
+            }
+
+        if schedule_result.updated:
+            message = _message_with_llm_elapsed("记录已写入，任务表已更新。", provider)
+        else:
+            reason = schedule_result.reason or "无需更新"
+            message = _message_with_llm_elapsed(f"记录已写入，任务表未更新：{reason}", provider)
         return {
-            "message": "记录已写入。",
-            "result": {"daily_path": str(path)},
+            "message": message,
+            "result": {
+                "daily_path": str(path),
+                "schedule_updated": schedule_result.updated,
+                "schedule_reason": schedule_result.reason,
+            },
             "state": self.snapshot(path.stem),
         }
 
@@ -923,7 +963,7 @@ CONSOLE_HTML = f"""<!doctype html>
       operationPoller: null,
     }};
     const $ = (id) => document.getElementById(id);
-    const llmButtonIds = ["planBtn", "addBtn", "reviewBtn"];
+    const llmButtonIds = ["planBtn", "addBtn", "logBtn", "reviewBtn"];
     const sloganStorageKey = "xiushenlu.console.slogan";
 
     if (window.marked) {{
@@ -1198,9 +1238,10 @@ CONSOLE_HTML = f"""<!doctype html>
       $("addInput").value = "";
       return data;
     }}));
-    $("logBtn").addEventListener("click", () => runAction("写入记录", async () => {{
+    $("logBtn").addEventListener("click", () => runLongAction("写入记录", async (signal) => {{
       const data = await requestJson("/api/log", {{
         method: "POST",
+        signal,
         body: JSON.stringify({{ content: $("logInput").value }}),
       }});
       $("logInput").value = "";

@@ -70,13 +70,12 @@ def _build_prompt(date_text: str, goals: str, tasks: str) -> str:
     tasks_text = tasks.strip() or "（尚未填写今日待办）"
     return f"""你是一个帮助用户安排当天时间的个人执行助手。
 
-请根据长期目标和今日待办，为 {date_text} 生成一份当天时间安排。
+请根据长期目标和今日待办，为 {date_text} 生成一份当天时间安排表。
 
 输出结构：
-1. 只输出“时间安排”一段，不要输出风险提醒、收尾检查、注意事项、保底完成标准、对应执行内容或具体技术步骤。
-2. 时间安排用 markdown 表格，表头固定为：任务｜优先级｜预估时间。
-3. “任务”列只写短任务名，不复制长段今日待办原文。
-4. 预估时要考虑用户会用 Codex 辅助工作。如果工作总时间超出6小时（工作外的杂事不算入时间），在表格后用一句话提示超时，并说明6小时内优先做哪几个任务。
+1. 只输出 markdown 表格，不要输出“时间安排”标题，不要输出风险提醒、收尾检查、注意事项、保底完成标准、对应执行内容或具体技术步骤。
+2. 时间安排用 markdown 表格，表头必须使用英文竖线，固定为：| 任务 | 优先级 | 预估时间 | 完成 | 备注 |。“完成”和“备注”两列都不填。
+3. 预估时要考虑用户会用 Codex 辅助工作。如果工作总时间超出6小时（工作外的杂事不算入时间），在表格后用一句话提示超时，并说明6小时内优先做哪几个任务。
 
 其他要求：
 - 不要输出“今日待办”原文；这部分由程序直接写入。
@@ -95,7 +94,7 @@ def _build_prompt(date_text: str, goals: str, tasks: str) -> str:
 
 def _build_plan(tasks: str, plan_schedule: str) -> str:
     today_tasks = _format_today_tasks_section(tasks)
-    schedule_text = plan_schedule.strip()
+    schedule_text = _normalize_schedule_table(plan_schedule.strip())
     if not schedule_text:
         return today_tasks
     return f"{today_tasks}\n\n{schedule_text}".strip()
@@ -108,3 +107,86 @@ def _format_today_tasks_section(tasks: str) -> str:
 
 def _write_plan_section(config: dict[str, Any], date_text: str, plan: str) -> None:
     write_daily_section("计划", plan, config=config, target_date=date_text, mode="replace")
+
+
+def _normalize_schedule_table(schedule_text: str) -> str:
+    lines = schedule_text.splitlines()
+    table_start = _find_schedule_table_start(lines)
+    if table_start is None:
+        return schedule_text
+
+    table_end = table_start
+    while table_end < len(lines) and _looks_like_table_line(lines[table_end]):
+        table_end += 1
+
+    normalized = _normalize_table_lines(lines[table_start:table_end])
+    if normalized is None:
+        return schedule_text
+    prefix = _drop_trailing_schedule_heading(lines[:table_start])
+    return "\n".join(prefix + normalized + lines[table_end:]).strip()
+
+
+def _find_schedule_table_start(lines: list[str]) -> int | None:
+    schedule_heading = None
+    for index, line in enumerate(lines):
+        if line.strip().strip("*").strip("#").strip() == "时间安排":
+            schedule_heading = index
+            break
+
+    search_start = schedule_heading + 1 if schedule_heading is not None else 0
+    for index in range(search_start, len(lines)):
+        if _looks_like_table_line(lines[index]):
+            return index
+    return None
+
+
+def _normalize_table_lines(table_lines: list[str]) -> list[str] | None:
+    if len(table_lines) < 2:
+        return None
+
+    rows = [_split_table_row(line) for line in table_lines]
+    headers = rows[0]
+    if headers == ["任务", "优先级", "预估时间"]:
+        expected_cols = 3
+    elif headers == ["任务", "优先级", "预估时间", "完成", "备注"]:
+        expected_cols = 5
+    else:
+        return None
+
+    separator = rows[1]
+    if len(separator) != expected_cols:
+        return None
+
+    normalized = [
+        "| 任务 | 优先级 | 预估时间 | 完成 | 备注 |",
+        "|---|---|---|---|---|",
+    ]
+    for cells in rows[2:]:
+        if len(cells) != expected_cols:
+            return None
+        task, priority, estimate = cells[:3]
+        normalized.append(f"| {task} | {priority} | {estimate} |  |  |")
+    return normalized
+
+
+def _drop_trailing_schedule_heading(lines: list[str]) -> list[str]:
+    prefix = list(lines)
+    while prefix and not prefix[-1].strip():
+        prefix.pop()
+    if prefix and prefix[-1].strip().strip("*").strip("#").strip() == "时间安排":
+        prefix.pop()
+    while prefix and not prefix[-1].strip():
+        prefix.pop()
+    return prefix
+
+
+def _looks_like_table_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped.startswith("|") or not stripped.endswith("|"):
+        return False
+    return "|" in stripped.strip("|") or "｜" in stripped.strip("|")
+
+
+def _split_table_row(line: str) -> list[str]:
+    normalized = line.replace("｜", "|")
+    return [cell.strip() for cell in normalized.strip().strip("|").split("|")]
