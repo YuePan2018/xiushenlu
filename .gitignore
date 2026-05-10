@@ -9,5 +9,5 @@ app/workspace/
 workspace/
 
 config/
-data/
+/data/
 docs/
