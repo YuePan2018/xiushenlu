@@ -32,6 +32,7 @@ class FakeProvider(LLMProvider):
             total_tokens=18,
             estimated=False,
             raw=None,
+            response_seconds=40.0,
         )
         if "next_today_tasks" in prompt:
             return json.dumps(
@@ -221,6 +222,7 @@ class ConsoleTests(unittest.TestCase):
             response = client.post("/api/plan", json={})
 
             self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["message"], "计划已生成。耗时40s")
             self.assertEqual(len(provider.prompts), 1)
             self.assertIn("本地保存的任务", provider.prompts[0])
             self.assertIn("控制台测试计划", response.json()["state"]["daily"]["text"])

@@ -232,7 +232,7 @@ class ConsoleService:
                 cancel_check=lambda: self.operations.check_cancelled(token),
             )
             return {
-                "message": "计划已局部更新。",
+                "message": _message_with_llm_elapsed("计划已局部更新。", provider),
                 "result": {
                     "date": result.date,
                     "daily_path": str(result.daily_path),
@@ -250,7 +250,7 @@ class ConsoleService:
             cancel_check=lambda: self.operations.check_cancelled(token),
         )
         return {
-            "message": "计划已生成。",
+            "message": _message_with_llm_elapsed("计划已生成。", provider),
             "result": {
                 "date": result.date,
                 "daily_path": str(result.path),
@@ -297,7 +297,7 @@ class ConsoleService:
             cancel_check=lambda: self.operations.check_cancelled(token),
         )
         return {
-            "message": "复盘已生成。",
+            "message": _message_with_llm_elapsed("复盘已生成。", provider),
             "result": {
                 "date": result.date,
                 "daily_path": str(result.path),
@@ -393,6 +393,31 @@ def _handle(operation: Callable[[], dict[str, Any]]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _message_with_llm_elapsed(message: str, provider: LLMProvider) -> str:
+    response_seconds = _provider_llm_response_seconds(provider)
+    if response_seconds is None:
+        return message
+    return f"{message}耗时{_format_elapsed_seconds(response_seconds)}"
+
+
+def _provider_llm_response_seconds(provider: LLMProvider) -> float | None:
+    usage = getattr(provider, "last_usage", None)
+    response_seconds = getattr(usage, "response_seconds", None)
+    if response_seconds is None:
+        response_seconds = getattr(provider, "last_response_seconds", None)
+    if isinstance(response_seconds, (int, float)) and response_seconds >= 0:
+        return float(response_seconds)
+    return None
+
+
+def _format_elapsed_seconds(seconds: float) -> str:
+    if seconds < 1:
+        return f"{max(seconds, 0.1):.1f}s"
+    if seconds < 10:
+        return f"{seconds:.1f}s"
+    return f"{seconds:.0f}s"
 
 
 def _parse_date(value: str | None) -> date:

@@ -13,6 +13,7 @@ class LLMCallUsage:
     total_tokens: int
     estimated: bool
     raw: Any | None = None
+    response_seconds: float | None = None
 
     def to_event_detail(self) -> dict[str, Any]:
         return {
@@ -22,6 +23,7 @@ class LLMCallUsage:
             "total_tokens": self.total_tokens,
             "estimated": self.estimated,
             "raw": _json_safe(self.raw),
+            "response_seconds": self.response_seconds,
         }
 
 

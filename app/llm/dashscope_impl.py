@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 from collections.abc import Mapping
 from typing import Any
 
@@ -41,6 +42,7 @@ class DashScopeProvider(LLMProvider):
             assistant_config.get("system_prompt", "你是一个帮助用户记录、计划和复盘的个人执行助手。")
         )
         self.last_usage: LLMCallUsage | None = None
+        self.last_response_seconds: float | None = None
 
         dashscope.base_http_api_url = "https://dashscope.aliyuncs.com/api/v1"
 
@@ -53,6 +55,9 @@ class DashScopeProvider(LLMProvider):
             {"role": "user", "content": prompt},
         ]
 
+        self.last_usage = None
+        self.last_response_seconds = None
+        started_at = time.perf_counter()
         if self._uses_generation_api():
             response = Generation.call(
                 api_key=self._api_key,
@@ -67,15 +72,23 @@ class DashScopeProvider(LLMProvider):
                 model=self.model,
                 messages=messages,
             )
+        response_seconds = time.perf_counter() - started_at
+        self.last_response_seconds = response_seconds
 
         reply = _extract_reply(response)
-        self.last_usage = self._build_usage(prompt, reply, response)
+        self.last_usage = self._build_usage(prompt, reply, response, response_seconds)
         return reply
 
     def _uses_generation_api(self) -> bool:
         return self.model.lower().startswith("glm-")
 
-    def _build_usage(self, prompt: str, reply: str, response: Any) -> LLMCallUsage:
+    def _build_usage(
+        self,
+        prompt: str,
+        reply: str,
+        response: Any,
+        response_seconds: float,
+    ) -> LLMCallUsage:
         try:
             usage = response.usage
             tokens_in = _first_int(usage, "input_tokens", "prompt_tokens") or 0
@@ -87,6 +100,7 @@ class DashScopeProvider(LLMProvider):
                 total_tokens=tokens_in + tokens_out,
                 estimated=False,
                 raw=str(usage),
+                response_seconds=response_seconds,
             )
         except Exception:
             tokens_in = _estimate_tokens(prompt)
@@ -98,6 +112,7 @@ class DashScopeProvider(LLMProvider):
                 total_tokens=tokens_in + tokens_out,
                 estimated=True,
                 raw=None,
+                response_seconds=response_seconds,
             )
 
 

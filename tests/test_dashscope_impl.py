@@ -43,13 +43,16 @@ class DashScopeProviderTests(unittest.TestCase):
 
         with patch.dict(os.environ, {"DASHSCOPE_API_KEY": "test-key"}):
             with patch("app.llm.dashscope_impl.dashscope.MultiModalConversation.call", return_value=response) as call:
-                provider = DashScopeProvider(_test_config())
+                with patch("app.llm.dashscope_impl.time.perf_counter", side_effect=[10.0, 50.0]):
+                    provider = DashScopeProvider(_test_config())
 
-                reply = provider.chat("生成计划")
+                    reply = provider.chat("生成计划")
 
         self.assertEqual(reply, "计划正文")
         self.assertIsNotNone(provider.last_usage)
         self.assertEqual(provider.last_usage.total_tokens, 8)
+        self.assertEqual(provider.last_usage.response_seconds, 40.0)
+        self.assertEqual(provider.last_response_seconds, 40.0)
         messages = call.call_args.kwargs["messages"]
         self.assertEqual(messages[0]["content"], "测试系统提示词")
         self.assertEqual(messages[1]["content"], "生成计划")
