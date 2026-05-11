@@ -12,6 +12,7 @@ from app.llm.provider import LLMCallUsage, LLMProvider
 from app.pipelines.log_schedule_update import (
     LogScheduleUpdateParseError,
     apply_schedule_patch,
+    build_schedule_patch_prompt,
     parse_schedule_patch_response,
     update_schedule_from_log,
 )
@@ -123,6 +124,68 @@ class LogScheduleUpdateTests(unittest.TestCase):
 
             self.assertTrue(result.updated)
             self.assertIn("| 复盘 | P0 | 20m |  |  |", daily_file.read_text(encoding="utf-8"))
+
+    def test_status_field_supports_in_progress_completed_and_not_started(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            daily_file = _write_daily(
+                config,
+                _daily_text(
+                    "| 计划表更新 | P1 | 30m |  |  |\n"
+                    "| 复盘 | P2 | 20m | ○ | 旧备注 |\n"
+                    "| 收尾 | P3 | 10m | ✓ | 已完成 |"
+                ),
+            )
+            reply = json.dumps(
+                {
+                    "updates": [
+                        {"row_index": 1, "status": "in_progress", "note": "", "evidence": ""},
+                        {"row_index": 2, "status": "completed", "note": "", "evidence": ""},
+                        {"row_index": 3, "status": "not_started", "note": "", "evidence": ""},
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+            result = update_schedule_from_log(
+                FakeProvider(reply),
+                "开始做计划表更新。复盘已经完成。收尾还没开始。",
+                config=config,
+                target_date=date(2026, 5, 10),
+                logger=FakeLogger(),  # type: ignore[arg-type]
+            )
+
+            self.assertTrue(result.updated)
+            daily_text = daily_file.read_text(encoding="utf-8")
+            self.assertIn("| 计划表更新 | P1 | 30m | ○ |  |", daily_text)
+            self.assertIn("| 复盘 | P2 | 20m | ✓ |  |", daily_text)
+            self.assertIn("| 收尾 | P3 | 10m |  |  |", daily_text)
+
+    def test_invalid_status_is_rejected(self) -> None:
+        with self.assertRaisesRegex(LogScheduleUpdateParseError, "status must be one of"):
+            parse_schedule_patch_response(
+                json.dumps(
+                    {
+                        "updates": [
+                            {"row_index": 1, "status": "paused", "note": "", "evidence": ""}
+                        ]
+                    }
+                ),
+                record_content="计划表更新暂停。",
+            )
+
+    def test_prompt_explains_partial_completion_status_rules(self) -> None:
+        prompt = build_schedule_patch_prompt(
+            "2026-05-10",
+            "计划表更新完成了一部分，剩余短期内不做。",
+            _daily_text("| 计划表更新 | P1 | 30m |  |  |"),
+        )
+
+        self.assertIn("not_started", prompt)
+        self.assertIn("in_progress", prompt)
+        self.assertIn("completed", prompt)
+        self.assertIn("完成了一部分但任务还会继续", prompt)
+        self.assertIn("剩余部分短期内不做", prompt)
 
     def test_invalid_json_does_not_write_schedule(self) -> None:
         with _temporary_directory() as temp_dir:

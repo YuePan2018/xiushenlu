@@ -15,8 +15,15 @@ from app.safety import safe_write_text
 
 
 EXPECTED_HEADERS = ("任务", "优先级", "预估时间", "完成", "备注")
+IN_PROGRESS_MARK = "○"
 CHECK_MARK = "✓"
 NOTE_MAX_CHARS = 80
+STATUS_TO_MARK = {
+    "not_started": "",
+    "in_progress": IN_PROGRESS_MARK,
+    "completed": CHECK_MARK,
+}
+VALID_COMPLETION_MARKS = frozenset(STATUS_TO_MARK.values())
 
 
 class LogScheduleUpdateParseError(ValueError):
@@ -26,7 +33,7 @@ class LogScheduleUpdateParseError(ValueError):
 @dataclass(frozen=True)
 class SchedulePatch:
     row_index: int
-    completed: bool
+    completion_mark: str
     note: str
     evidence: str
 
@@ -154,14 +161,12 @@ def parse_schedule_patch_response(text: str, *, record_content: str) -> ParsedSc
             raise LogScheduleUpdateParseError("Each update must be a JSON object.")
 
         row_index = item.get("row_index")
-        completed = item.get("completed")
+        completion_mark = _parse_completion_mark(item)
         note = item.get("note", "")
         evidence = item.get("evidence", "")
 
         if not isinstance(row_index, int):
             raise LogScheduleUpdateParseError("row_index must be an integer.")
-        if not isinstance(completed, bool):
-            raise LogScheduleUpdateParseError("completed must be a boolean.")
         if not isinstance(note, str):
             raise LogScheduleUpdateParseError("note must be a string.")
         if not isinstance(evidence, str):
@@ -173,7 +178,7 @@ def parse_schedule_patch_response(text: str, *, record_content: str) -> ParsedSc
         parsed.append(
             SchedulePatch(
                 row_index=row_index,
-                completed=completed,
+                completion_mark=completion_mark,
                 note=note_text,
                 evidence=evidence_text,
             )
@@ -196,7 +201,7 @@ def apply_schedule_patch(daily_text: str, parsed: ParsedSchedulePatch) -> tuple[
         if update.row_index < 1 or update.row_index > len(rows):
             raise LogScheduleUpdateParseError("row_index is out of range.")
         row = rows[update.row_index - 1]
-        row[3] = CHECK_MARK if update.completed else ""
+        row[3] = update.completion_mark
         row[4] = update.note
 
     new_table_lines = _render_table(tuple(tuple(row) for row in rows)).splitlines()
@@ -222,7 +227,9 @@ def build_schedule_patch_prompt(date_text: str, record_content: str, schedule_ta
 硬性规则：
 - 你只能判断已有任务行的“完成”和“备注”是否需要变化，不要输出整张表。
 - row_index 使用 1-based 行号，第一条任务行是 1。
-- completed 为 true 表示把“完成”列写为“{CHECK_MARK}”，false 表示把“完成”列清空；已经完成的任务如果记录显示又需要继续做，可以改回 false。
+- status 使用三种值：not_started 表示“完成”列清空，in_progress 表示写为“{IN_PROGRESS_MARK}”，completed 表示写为“{CHECK_MARK}”。
+- 记录没有提到任务开始或推进，使用 not_started 或保持原状态不输出更新；记录提到开始做、正在做、推进中、完成了一部分但任务还会继续，使用 in_progress；记录明确完成，使用 completed。
+- 如果记录说完成了任务的一部分，同时剩余部分短期内不做、暂停、取消或不再纳入当前任务，也视为整个任务 completed。
 - note 是要写入“备注”列的短句；只有本次记录里明确出现“后续计划和执行要注意的点”时才写，普通完成事实不要写备注。
 - note 可以用于新增、更新或清空备注；没有要注意的点时必须是空字符串。
 - 非空 note 必须有 evidence，且 evidence 必须是本次写入记录中的原文片段。
@@ -231,7 +238,7 @@ def build_schedule_patch_prompt(date_text: str, record_content: str, schedule_ta
 
 你必须只输出一个严格 JSON 对象，不要使用代码块，不要输出解释文字。
 JSON 格式固定为：
-{{"updates":[{{"row_index":1,"completed":true,"note":"","evidence":""}}]}}
+{{"updates":[{{"row_index":1,"status":"in_progress","note":"","evidence":""}}]}}
 如果没有任何任务行需要变化，输出 {{"updates":[]}}。
 """
 
@@ -253,12 +260,30 @@ def _parse_table_lines(table_lines: list[str]) -> list[tuple[str, str, str, str,
         cells = _split_table_row(line)
         if len(cells) != len(EXPECTED_HEADERS):
             raise LogScheduleUpdateParseError("schedule table row does not match the expected columns.")
-        if cells[3] not in {"", CHECK_MARK}:
-            raise LogScheduleUpdateParseError("completion column must be empty or a check mark.")
+        if cells[3] not in VALID_COMPLETION_MARKS:
+            raise LogScheduleUpdateParseError("completion column must be empty, in progress, or a check mark.")
         if "\n" in cells[4] or "|" in cells[4]:
             raise LogScheduleUpdateParseError("note column contains unsafe content.")
         rows.append(tuple(cells))  # type: ignore[arg-type]
     return rows
+
+
+def _parse_completion_mark(item: dict[str, Any]) -> str:
+    status = item.get("status")
+    if isinstance(status, str):
+        status_text = status.strip()
+        if status_text not in STATUS_TO_MARK:
+            raise LogScheduleUpdateParseError(
+                "status must be one of: not_started, in_progress, completed."
+            )
+        return STATUS_TO_MARK[status_text]
+    if status is not None:
+        raise LogScheduleUpdateParseError("status must be a string.")
+
+    completed = item.get("completed")
+    if isinstance(completed, bool):
+        return CHECK_MARK if completed else ""
+    raise LogScheduleUpdateParseError("status must be provided, or completed must be a boolean.")
 
 
 def _validate_note(note: str, evidence: str, record_content: str) -> None:
