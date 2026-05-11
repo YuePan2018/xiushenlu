@@ -86,6 +86,7 @@ class LogScheduleUpdateTests(unittest.TestCase):
 
             self.assertTrue(result.updated)
             daily_text = daily_file.read_text(encoding="utf-8")
+            self.assertIn("| 任务 | 优先级 | 预计 | 状态 | 备注 |", daily_text)
             self.assertIn("| 计划表更新 | P1 | 30m | ✓ | 下次先验表头 |", daily_text)
             self.assertIn("| 复盘 | P2 | 20m |  |  |", daily_text)
             self.assertNotIn("不要改任务名", daily_text)

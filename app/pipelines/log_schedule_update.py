@@ -14,7 +14,8 @@ from app.logger import EventLogger
 from app.safety import safe_write_text
 
 
-EXPECTED_HEADERS = ("任务", "优先级", "预估时间", "完成", "备注")
+EXPECTED_HEADERS = ("任务", "优先级", "预计", "状态", "备注")
+LEGACY_HEADERS = ("任务", "优先级", "预估时间", "完成", "备注")
 IN_PROGRESS_MARK = "○"
 CHECK_MARK = "✓"
 NOTE_MAX_CHARS = 80
@@ -225,15 +226,15 @@ def build_schedule_patch_prompt(date_text: str, record_content: str, schedule_ta
 {record_text}
 
 硬性规则：
-- 你只能判断已有任务行的“完成”和“备注”是否需要变化，不要输出整张表。
+- 你只能判断已有任务行的“状态”和“备注”是否需要变化，不要输出整张表。
 - row_index 使用 1-based 行号，第一条任务行是 1。
-- status 使用三种值：not_started 表示“完成”列清空，in_progress 表示写为“{IN_PROGRESS_MARK}”，completed 表示写为“{CHECK_MARK}”。
+- status 使用三种值：not_started 表示“状态”列清空，in_progress 表示写为“{IN_PROGRESS_MARK}”，completed 表示写为“{CHECK_MARK}”。
 - 记录没有提到任务开始或推进，使用 not_started 或保持原状态不输出更新；记录提到开始做、正在做、推进中、完成了一部分但任务还会继续，使用 in_progress；记录明确完成，使用 completed。
 - 如果记录说完成了任务的一部分，同时剩余部分短期内不做、暂停、取消或不再纳入当前任务，也视为整个任务 completed。
 - note 是要写入“备注”列的短句；只有本次记录里明确出现“后续计划和执行要注意的点”时才写，普通完成事实不要写备注。
 - note 可以用于新增、更新或清空备注；没有要注意的点时必须是空字符串。
 - 非空 note 必须有 evidence，且 evidence 必须是本次写入记录中的原文片段。
-- 不要新增任务行，不要删除任务行，不要改任务名、优先级、预估时间或行顺序。
+- 不要新增任务行，不要删除任务行，不要改任务名、优先级、预计或行顺序。
 - note 最长 {NOTE_MAX_CHARS} 字，不能包含换行或 |。
 
 你必须只输出一个严格 JSON 对象，不要使用代码块，不要输出解释文字。
@@ -248,7 +249,7 @@ def _parse_table_lines(table_lines: list[str]) -> list[tuple[str, str, str, str,
         raise LogScheduleUpdateParseError("schedule table must contain header and separator.")
 
     headers = _split_table_row(table_lines[0])
-    if tuple(headers) != EXPECTED_HEADERS:
+    if tuple(headers) not in (EXPECTED_HEADERS, LEGACY_HEADERS):
         raise LogScheduleUpdateParseError("schedule table header is not the expected five columns.")
 
     separator = _split_table_row(table_lines[1])
@@ -261,7 +262,7 @@ def _parse_table_lines(table_lines: list[str]) -> list[tuple[str, str, str, str,
         if len(cells) != len(EXPECTED_HEADERS):
             raise LogScheduleUpdateParseError("schedule table row does not match the expected columns.")
         if cells[3] not in VALID_COMPLETION_MARKS:
-            raise LogScheduleUpdateParseError("completion column must be empty, in progress, or a check mark.")
+            raise LogScheduleUpdateParseError("status column must be empty, in progress, or a check mark.")
         if "\n" in cells[4] or "|" in cells[4]:
             raise LogScheduleUpdateParseError("note column contains unsafe content.")
         rows.append(tuple(cells))  # type: ignore[arg-type]
@@ -301,7 +302,7 @@ def _validate_note(note: str, evidence: str, record_content: str) -> None:
 
 def _render_table(rows: tuple[tuple[str, str, str, str, str], ...]) -> str:
     lines = [
-        "| 任务 | 优先级 | 预估时间 | 完成 | 备注 |",
+        "| 任务 | 优先级 | 预计 | 状态 | 备注 |",
         "|---|---|---|---|---|",
     ]
     for row in rows:

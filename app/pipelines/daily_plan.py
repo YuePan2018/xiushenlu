@@ -74,7 +74,7 @@ def _build_prompt(date_text: str, goals: str, tasks: str) -> str:
 
 输出结构：
 1. 只输出 markdown 表格，不要输出“时间安排”标题，不要输出风险提醒、收尾检查、注意事项、保底完成标准、对应执行内容或具体技术步骤。
-2. 时间安排用 markdown 表格，表头必须使用英文竖线，固定为：| 任务 | 优先级 | 预估时间 | 完成 | 备注 |。“完成”和“备注”两列都不填。
+2. 时间安排用 markdown 表格，表头必须使用英文竖线，固定为：| 任务 | 优先级 | 预计 | 状态 | 备注 |。“状态”和“备注”两列都不填。
 3. 预估时要考虑用户会用 Codex 辅助工作。如果工作总时间超出6小时（工作外的杂事不算入时间），在表格后用一句话提示超时，并说明6小时内优先做哪几个任务。
 
 其他要求：
@@ -146,9 +146,12 @@ def _normalize_table_lines(table_lines: list[str]) -> list[str] | None:
 
     rows = [_split_table_row(line) for line in table_lines]
     headers = rows[0]
-    if headers == ["任务", "优先级", "预估时间"]:
+    if headers in (["任务", "优先级", "预计"], ["任务", "优先级", "预估时间"]):
         expected_cols = 3
-    elif headers == ["任务", "优先级", "预估时间", "完成", "备注"]:
+    elif headers in (
+        ["任务", "优先级", "预计", "状态", "备注"],
+        ["任务", "优先级", "预估时间", "完成", "备注"],
+    ):
         expected_cols = 5
     else:
         return None
@@ -158,7 +161,7 @@ def _normalize_table_lines(table_lines: list[str]) -> list[str] | None:
         return None
 
     normalized = [
-        "| 任务 | 优先级 | 预估时间 | 完成 | 备注 |",
+        "| 任务 | 优先级 | 预计 | 状态 | 备注 |",
         "|---|---|---|---|---|",
     ]
     for cells in rows[2:]:
