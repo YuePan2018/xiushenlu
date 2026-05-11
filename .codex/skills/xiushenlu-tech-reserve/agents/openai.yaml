@@ -1,0 +1,7 @@
+interface:
+  display_name: "修身炉技术储备"
+  short_description: "整理技术链接和资料为修身炉技术储备索引"
+  default_prompt: "Use $xiushenlu-tech-reserve to 把下面的技术链接或资料整理为修身炉技术储备，并更新技术储备索引。"
+
+policy:
+  allow_implicit_invocation: true

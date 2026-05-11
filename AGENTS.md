@@ -49,6 +49,7 @@
 - 不让 LLM 输出直接变成 shell 命令。
 - 不让 LLM 直接对外发布内容。
 - 不轻易引入自主 agent loop；只有工具注册、审批、预算和暂停机制稳定后，再扩大自主性。
+- 项目内 Codex skill 放在 `.codex/skills/` 并由 Git 追踪；技术储备 skill 以项目内 `.codex/skills/xiushenlu-tech-reserve/` 为准。
 - 更新功能时，优先同步 `README.md`、`TECHNICAL.md` 和相关规划或执行文档，但不要把技术手册内容重新塞回 `AGENTS.md`。
 
 ## 安全与数据边界
@@ -56,6 +57,7 @@
 - 文件读写应优先使用 `app.safety.safe_read_text`、`safe_write_text`、`safe_append_text` 或已封装模块。
 - 不要绕过 `app/safety.py` 直接写 `data/` 下的运行文件。
 - 受保护路径：`docs/`、`data/memory/`。创建、修改、移动、删除这些路径下的文件前，必须先说明拟改文件、修改原因和预计改法，并获得用户明确同意；未获同意时只能读取和分析。
+- 例外：`docs/吸纳/技术储备/` 是技术储备自由读写目录，可由技术储备 skill 创建、修改和维护索引，不需要按 `docs/` 受保护路径额外审批。
 - 不自动读取浏览器、聊天软件、密钥、cookie 或项目外敏感目录。
 - 不自动删除文件；需要清理时优先移动到 `data/quarantine/`。
 - `data/` 下真实个人数据和运行数据默认不提交到 Git。
