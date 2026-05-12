@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app.config import load_config, resolve_project_path
+from app.config import ConfigError, load_config, resolve_project_path
 from app.cost import append_token_usage_report
 from app.daily import append_record, daily_path, read_daily
 from app.inbox import ensure_today_tasks_file, read_today_tasks, today_tasks_path, write_today_tasks
@@ -240,7 +240,6 @@ class ConsoleService:
                     "daily_path": str(result.daily_path),
                     "today_tasks_path": str(result.today_tasks_path),
                     "target_heading": result.target_heading,
-                    "new_task_advice": result.new_task_advice,
                 },
                 "state": self.snapshot(result.date),
             }
@@ -1291,4 +1290,12 @@ CONSOLE_HTML = f"""<!doctype html>
 """
 
 
-app = create_app()
+try:
+    app = create_app()
+except ConfigError as exc:
+    _CONFIG_ERROR = str(exc)
+    app = FastAPI(title="修身炉本地控制台")
+
+    @app.get("/")
+    def config_error() -> dict[str, str]:
+        raise HTTPException(status_code=500, detail=_CONFIG_ERROR)

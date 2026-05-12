@@ -69,7 +69,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py console
 | `python app/main.py` | 是 | smoke test，测试 DashScope 连通性。 |
 | `python app/main.py plan` | 是 | 根据长期目标和 `today_tasks.md` 生成今日计划。 |
 | `python app/main.py plan --tasks "..."` | 是 | 先覆盖写入今日待办，再生成计划。 |
-| `python app/main.py plan --add "..."` | 是 | 追加一条今日待办，并局部更新当天计划。 |
+| `python app/main.py plan --add "..."` | 是 | 追加一条今日待办，并把新增任务并入 daily 的待办原文和时间安排表。 |
 | `python app/main.py log "..."` | 是 | 先追加一条过程记录，再让 LLM 返回补丁，由代码只更新“时间安排”表的 `状态` 和 `备注` 两列；状态支持空、`○`、`✓`、`×`，其中 `×` 表示删除、取消或不再追踪；失败时保留记录。 |
 | `python app/main.py review` | 是 | 根据今天 daily 生成复盘，滚动明日待办，并更新 token 统计；状态为 `×` 的任务不会滚动到明天。 |
 | `python app/main.py review --date YYYY-MM-DD` | 是 | 对指定日期生成复盘，并默认把未完成项滚动到当前 `today_tasks.md`。历史日期不会把本次 token 统计写回历史 daily。 |
@@ -78,7 +78,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py console
 | `python app/main.py cost` | 否 | 汇总今日和本月 token，并覆盖 daily 的 token 统计区块。 |
 | `python app/main.py console` | 视操作而定 | 启动本地控制台，复用已有 pipeline 和本地读写能力。 |
 
-`plan --add` 要求模型返回严格 JSON，并逐字保留新增任务；解析失败时不会写入 `today_tasks.md` 或 daily。
+`plan --add` 要求模型返回严格 JSON，并逐字保留新增任务；程序会更新 `today_tasks.md`、替换 daily 里已有的“今日待办”原文，并把新增任务作为一行追加到时间安排表，`状态` 和 `备注` 两列保持为空。解析失败时不会写入 `today_tasks.md` 或 daily。
 
 `review` 的事实来源是 daily 里固化的 `今日待办原文` 和 `记录`，不是当前 `today_tasks.md`。默认会滚动生成新的 `today_tasks.md`；需要只补历史复盘时显式加 `--no-rollover`。`明日计划.md` 只用于生成新的 `today_tasks.md`，不用于复盘正文。解析失败时不会写复盘、不会覆盖 `today_tasks.md`，也不会清空 `明日计划.md`。
 
@@ -106,7 +106,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py console
 | `app/console.py` | FastAPI 本地控制台；展示 daily 和 today_tasks；触发已有 plan/log/review 能力。 |
 | `app/pipelines/daily_plan.py` | 今日计划 pipeline；LLM 生成五列表格形式的时间安排。 |
 | `app/pipelines/log_schedule_update.py` | 写入记录后的时间安排表更新 pipeline；LLM 只返回补丁，代码只写 `状态` 和 `备注` 两列。 |
-| `app/pipelines/plan_update.py` | 日内计划局部更新 pipeline；解析失败时停止写入。 |
+| `app/pipelines/plan_update.py` | 日内计划局部更新 pipeline；更新待办原文并给时间安排表追加一行，解析失败时停止写入。 |
 | `app/pipelines/nightly_review.py` | 晚间复盘 pipeline；当天复盘成功后滚动待办并清空 `明日计划.md`。 |
 | `app/daily.py` | daily Markdown 路径、读取、区块替换和记录追加。 |
 | `app/inbox.py` | `today_tasks.md` 和 `明日计划.md` 的读写封装。 |

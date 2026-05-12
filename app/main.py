@@ -78,8 +78,6 @@ def run_plan(tasks: str | None = None, add: str | None = None) -> int:
         print(f"今日待办已更新：{result.today_tasks_path}")
         print(f"计划已局部更新：{result.daily_path}")
         print(f"归入标题：{result.target_heading}")
-        print()
-        print(result.new_task_advice)
         return 0
 
     if tasks is not None:

@@ -20,9 +20,12 @@ REQUIRED_RESPONSE_KEYS = (
     "updated_today_tasks",
     "updated_daily_original",
     "target_heading",
-    "new_task_advice",
+    "schedule_task",
+    "schedule_priority",
+    "schedule_estimate",
 )
-NEW_TASK_ADVICE_MAX_CHARS = 200
+SCHEDULE_HEADERS = ("任务", "优先级", "预计", "状态", "备注")
+LEGACY_SCHEDULE_HEADERS = ("任务", "优先级", "预估时间", "完成", "备注")
 
 
 class PlanUpdateParseError(ValueError):
@@ -30,11 +33,18 @@ class PlanUpdateParseError(ValueError):
 
 
 @dataclass(frozen=True)
+class ScheduleRow:
+    task: str
+    priority: str
+    estimate: str
+
+
+@dataclass(frozen=True)
 class ParsedPlanUpdate:
     updated_today_tasks: str
     updated_daily_original: str
     target_heading: str
-    new_task_advice: str
+    schedule_row: ScheduleRow
 
 
 @dataclass(frozen=True)
@@ -44,7 +54,6 @@ class PlanUpdateResult:
     today_tasks_path: Path
     new_task: str
     target_heading: str
-    new_task_advice: str
 
 
 def generate_plan_update(
@@ -81,17 +90,15 @@ def generate_plan_update(
     parsed = parse_plan_update_response(raw_reply)
     validate_plan_update_content(parsed, new_task=task_text)
 
-    task_path = write_today_tasks(parsed.updated_today_tasks, cfg)
     daily_file = daily_path(cfg, date_text)
     updated_daily = update_daily_plan_text(
         daily_text=daily_text,
         date_text=date_text,
         updated_daily_original=parsed.updated_daily_original,
-        new_task_entry=format_new_task_entry(
-            new_task=task_text,
-            new_task_advice=parsed.new_task_advice,
-        ),
+        schedule_row=parsed.schedule_row,
     )
+
+    task_path = write_today_tasks(parsed.updated_today_tasks, cfg)
     safe_write_text(daily_file, updated_daily, cfg)
 
     event_logger.append_event(
@@ -112,7 +119,6 @@ def generate_plan_update(
         today_tasks_path=task_path,
         new_task=task_text,
         target_heading=parsed.target_heading,
-        new_task_advice=parsed.new_task_advice,
     )
 
 
@@ -140,7 +146,11 @@ def parse_plan_update_response(text: str) -> ParsedPlanUpdate:
         updated_today_tasks=values["updated_today_tasks"],
         updated_daily_original=values["updated_daily_original"],
         target_heading=values["target_heading"],
-        new_task_advice=values["new_task_advice"],
+        schedule_row=ScheduleRow(
+            task=values["schedule_task"],
+            priority=values["schedule_priority"],
+            estimate=values["schedule_estimate"],
+        ),
     )
 
 
@@ -155,26 +165,20 @@ def validate_plan_update_content(parsed: ParsedPlanUpdate, new_task: str) -> Non
             "LLM response must include the new task verbatim in updated_daily_original."
         )
 
-    advice = parsed.new_task_advice.strip()
-    if len(advice) > NEW_TASK_ADVICE_MAX_CHARS:
-        raise PlanUpdateParseError(
-            f"LLM response new_task_advice must be no longer than {NEW_TASK_ADVICE_MAX_CHARS} characters."
-        )
-
-    for line in advice.splitlines():
-        stripped = line.strip()
-        label = stripped.lstrip("-").strip().strip("*").strip()
-        if stripped.startswith("#") or label.startswith(("新增：", "原文：", "归入标题：")):
-            raise PlanUpdateParseError(
-                "LLM response new_task_advice must not include duplicate task headings or metadata."
-            )
+    for key, value in (
+        ("schedule_task", parsed.schedule_row.task),
+        ("schedule_priority", parsed.schedule_row.priority),
+        ("schedule_estimate", parsed.schedule_row.estimate),
+    ):
+        if any(char in value for char in ("\n", "\r", "|")):
+            raise PlanUpdateParseError(f"LLM response {key} must not contain line breaks or table separators.")
 
 
 def update_daily_plan_text(
     daily_text: str,
     date_text: str,
     updated_daily_original: str,
-    new_task_entry: str,
+    schedule_row: ScheduleRow,
 ) -> str:
     original = daily_text.rstrip()
     if not original:
@@ -182,7 +186,7 @@ def update_daily_plan_text(
 
     section_range = _find_level2_section(original, "计划")
     if section_range is None:
-        plan_section = _minimal_plan_section(updated_daily_original, new_task_entry)
+        plan_section = _minimal_plan_section(updated_daily_original, schedule_row)
         return _insert_missing_plan_section(original, plan_section)
 
     start, end = section_range
@@ -190,18 +194,10 @@ def update_daily_plan_text(
     suffix = original[end:].strip()
     plan_section = original[start:end].strip()
     plan_section = _replace_daily_original(plan_section, updated_daily_original)
-    plan_section = _append_new_task_entry(plan_section, new_task_entry)
+    plan_section = _append_schedule_row(plan_section, schedule_row)
 
     parts = [part for part in (prefix, plan_section.rstrip(), suffix) if part]
     return "\n\n".join(parts).rstrip() + "\n"
-
-
-def format_new_task_entry(new_task: str, new_task_advice: str) -> str:
-    advice = new_task_advice.strip()
-    return (
-        f"### 新增：{new_task.strip()}\n\n"
-        f"{advice}"
-    )
 
 
 def _find_level2_section(text: str, title: str) -> tuple[int, int] | None:
@@ -226,13 +222,12 @@ def _find_level2_section(text: str, title: str) -> tuple[int, int] | None:
     return start, len(text)
 
 
-def _minimal_plan_section(updated_daily_original: str, new_task_entry: str) -> str:
+def _minimal_plan_section(updated_daily_original: str, schedule_row: ScheduleRow) -> str:
     return (
         "## 计划\n\n"
         "**今日待办**\n\n"
         f"{updated_daily_original.strip()}\n\n"
-        "**新任务**\n\n"
-        f"{new_task_entry.strip()}"
+        f"{_render_schedule_table([_schedule_row_to_cells(schedule_row)])}"
     )
 
 
@@ -254,17 +249,24 @@ def _replace_daily_original(plan_section: str, updated_daily_original: str) -> s
         block = ["**今日待办**", "", updated_daily_original.strip(), ""]
         return "\n".join(lines[:insert_at] + block + lines[insert_at:]).rstrip()
 
-    end_index = _find_next_plan_subsection(lines, heading_index + 1)
+    end_index = _find_daily_original_end(lines, heading_index + 1)
     block = ["**今日待办**", "", updated_daily_original.strip(), ""]
     if end_index is None:
         return "\n".join(lines[:heading_index] + block).rstrip()
     return "\n".join(lines[:heading_index] + block + lines[end_index:]).rstrip()
 
 
-def _append_new_task_entry(plan_section: str, new_task_entry: str) -> str:
-    if _has_new_task_heading(plan_section.splitlines()):
-        return f"{plan_section.rstrip()}\n\n{new_task_entry.strip()}"
-    return f"{plan_section.rstrip()}\n\n**新任务**\n\n{new_task_entry.strip()}"
+def _append_schedule_row(plan_section: str, schedule_row: ScheduleRow) -> str:
+    lines = plan_section.splitlines()
+    table_range = _find_schedule_table_range(lines)
+    new_row = _schedule_row_to_cells(schedule_row)
+    if table_range is None:
+        return f"{plan_section.rstrip()}\n\n{_render_schedule_table([new_row])}"
+
+    start, end = table_range
+    existing_rows = _parse_schedule_table(lines[start:end])
+    new_table = _render_schedule_table(existing_rows + [new_row]).splitlines()
+    return "\n".join(lines[:start] + new_table + lines[end:]).rstrip()
 
 
 def _find_daily_original_heading(lines: list[str]) -> int | None:
@@ -291,9 +293,9 @@ def _daily_original_insert_index(lines: list[str]) -> int:
     return index
 
 
-def _find_next_plan_subsection(lines: list[str], start_index: int) -> int | None:
+def _find_daily_original_end(lines: list[str], start_index: int) -> int | None:
     for index in range(start_index, len(lines)):
-        if _looks_like_plan_subsection(lines[index]):
+        if _is_schedule_table_start(lines, index) or _looks_like_plan_subsection(lines[index]):
             return index
     return None
 
@@ -315,12 +317,72 @@ def _looks_like_plan_subsection(line: str) -> bool:
     return any(keyword in text for keyword in keywords)
 
 
-def _has_new_task_heading(lines: list[str]) -> bool:
-    for line in lines:
-        text = line.strip().strip("*").strip("#").strip()
-        if text == "新任务":
-            return True
-    return False
+def _find_schedule_table_range(lines: list[str]) -> tuple[int, int] | None:
+    for index in range(len(lines)):
+        if not _is_schedule_table_start(lines, index):
+            continue
+        table_end = index
+        while table_end < len(lines) and _is_table_line(lines[table_end]):
+            table_end += 1
+        return index, table_end
+    return None
+
+
+def _is_schedule_table_start(lines: list[str], index: int) -> bool:
+    if index + 1 >= len(lines) or not _is_table_line(lines[index]):
+        return False
+    headers = _split_table_row(lines[index])
+    if tuple(headers) not in (SCHEDULE_HEADERS, LEGACY_SCHEDULE_HEADERS):
+        return False
+    separator = _split_table_row(lines[index + 1])
+    return len(separator) == len(SCHEDULE_HEADERS) and all(_is_separator_cell(cell) for cell in separator)
+
+
+def _parse_schedule_table(table_lines: list[str]) -> list[tuple[str, str, str, str, str]]:
+    if len(table_lines) < 2:
+        raise PlanUpdateParseError("schedule table must contain header and separator.")
+    headers = _split_table_row(table_lines[0])
+    if tuple(headers) not in (SCHEDULE_HEADERS, LEGACY_SCHEDULE_HEADERS):
+        raise PlanUpdateParseError("schedule table header is not the expected five columns.")
+
+    rows: list[tuple[str, str, str, str, str]] = []
+    for line in table_lines[2:]:
+        cells = _split_table_row(line)
+        if len(cells) != len(SCHEDULE_HEADERS):
+            raise PlanUpdateParseError("schedule table row does not match the expected columns.")
+        rows.append(tuple(cells))  # type: ignore[arg-type]
+    return rows
+
+
+def _render_schedule_table(rows: list[tuple[str, str, str, str, str]]) -> str:
+    lines = [
+        "| 任务 | 优先级 | 预计 | 状态 | 备注 |",
+        "|---|---|---|---|---|",
+    ]
+    for row in rows:
+        lines.append("| " + " | ".join(row) + " |")
+    return "\n".join(lines)
+
+
+def _schedule_row_to_cells(schedule_row: ScheduleRow) -> tuple[str, str, str, str, str]:
+    return (schedule_row.task, schedule_row.priority, schedule_row.estimate, "", "")
+
+
+def _is_table_line(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith("|") and stripped.endswith("|")
+
+
+def _split_table_row(line: str) -> list[str]:
+    normalized = line.replace("｜", "|")
+    return [cell.strip() for cell in normalized.strip().strip("|").split("|")]
+
+
+def _is_separator_cell(cell: str) -> bool:
+    text = cell.replace(" ", "")
+    if len(text) < 3:
+        return False
+    return set(text) <= {"-", ":"} and "-" in text
 
 
 def _build_prompt(
@@ -338,7 +400,7 @@ def _build_prompt(
 你的任务：
 1. 把“新增任务”逐字插入 today_tasks.md，不能改写、概括或扩写。
 2. 同步更新 daily 里的“今日待办”小节，只更新待办快照，不重写原有计划建议。
-3. 只为这一个新增任务生成一段不超过 {NEW_TASK_ADVICE_MAX_CHARS} 字的建议。
+3. 为时间安排表提供一行新增任务的任务名、优先级和预计耗时；状态和备注由程序写空。
 
 日期：{date_text}
 
@@ -357,14 +419,16 @@ def _build_prompt(
 硬性规则：
 - 新增任务必须逐字使用“{new_task}”，不要改成短标题、括号解释或“灵感：优化...”这类摘要。
 - 保留已有内容的原文、顺序、中文分组和列表风格；插入前先判断目标分组下已有任务行的主格式，再按同一格式追加。
-- `updated_today_tasks` 和 `updated_daily_original` 都不要包含任何 Markdown 标题行；禁止输出 `# 今日待办`、`#今日待办`、`## ...` 或任何以 `#` 开头的标题行。
+- `updated_today_tasks` 是完整的新 today_tasks.md；可以保留原有 `# 今日待办` 标题，但只允许增加这一个新增任务，除必要编号外不要改动旧内容。
+- `updated_daily_original` 只填写 daily “今日待办”小节的新内容，风格跟原小节一致，并包含逐字新增任务；不要包含计划建议、时间安排表或任何 Markdown 标题行。
 - 如果目标分组主要使用“1. 2. 3.”编号列表，新增项必须使用下一个编号，例如“6. 新增任务”，不要改成“- 新增任务”。
 - 如果目标分组主要是普通文本行，新增项也必须是普通文本行，不加“-”，不加编号。
 - 只有目标分组原本就是“-”列表时，新增项才允许使用“-”。
-- `updated_today_tasks` 是完整的新 today_tasks.md；只允许增加这一个新增任务，除必要编号外不要改动旧内容，不要添加 Markdown 标题。
-- `updated_daily_original` 只填写 daily “今日待办”小节的新内容，风格跟原小节一致，并包含逐字新增任务；不要包含计划建议，不要添加 Markdown 标题。
-- `target_heading` 只用于内部归类，不会展示在 daily；不要把它写进 `new_task_advice`。
-- `new_task_advice` 只写建议正文，不要写“### 新增”“原文”“归入标题”等标题或元数据；daily 的“新任务”区只会展示“### 新增：原始任务”和建议正文；总字数不超过 {NEW_TASK_ADVICE_MAX_CHARS} 字。
+- `target_heading` 只用于内部归类，不会展示在 daily。
+- `schedule_task` 是写入时间安排表“任务”列的短任务名，可以比新增任务原文更短，但不能包含换行或 `|`。
+- `schedule_priority` 是“优先级”列，例如 P0、P1、P2、P3，不能包含换行或 `|`。
+- `schedule_estimate` 是“预计”列，例如 30m、1h、1.5h，不能包含换行或 `|`。
+- 不要输出状态、备注、单独建议正文、“新任务”标题或“### 新增”。
 
 插入格式示例：
 - 如果“修身炉：”下面已有“1.”到“5.”，新增“灵感：优化codex规则”应写成“6. 灵感：优化codex规则”。
@@ -373,7 +437,9 @@ def _build_prompt(
 你必须只输出一个严格 JSON 对象，不要使用代码块，不要输出解释文字。
 JSON 必须包含且只需要包含这些字符串字段：
 - updated_today_tasks：字符串，完整的新 today_tasks.md。
-- updated_daily_original：字符串，daily “今日待办”小节的新内容。
+- updated_daily_original：字符串，daily “今日待办”小节的新内容，不含标题和时间安排表。
 - target_heading：字符串，新增任务最终归入的小标题名称，不要带序号。
-- new_task_advice：字符串，只针对新增任务的 markdown 建议，必须包含“优先级”“任务建议”“预估时间”“与原计划关系”“风险提醒”。
+- schedule_task：字符串，时间安排表新增行的任务列。
+- schedule_priority：字符串，时间安排表新增行的优先级列。
+- schedule_estimate：字符串，时间安排表新增行的预计列。
 """

@@ -48,7 +48,9 @@ class FakeProvider(LLMProvider):
                     "updated_today_tasks": "# 今日待办\n\n原任务\n新增任务",
                     "updated_daily_original": "原任务\n新增任务",
                     "target_heading": "今日待办",
-                    "new_task_advice": "- 优先级：P2\n- 任务建议：控制范围。",
+                    "schedule_task": "新增任务",
+                    "schedule_priority": "P2",
+                    "schedule_estimate": "30m",
                 },
                 ensure_ascii=False,
             )
@@ -240,6 +242,40 @@ class ConsoleTests(unittest.TestCase):
             self.assertEqual(len(provider.prompts), 1)
             self.assertIn("本地保存的任务", provider.prompts[0])
             self.assertIn("控制台测试计划", response.json()["state"]["daily"]["text"])
+
+    def test_plan_update_endpoint_updates_original_and_schedule_table(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            inbox_dir = Path(config["paths"]["inbox_dir"])
+            daily_dir = Path(config["paths"]["daily_dir"])
+            inbox_dir.mkdir(parents=True)
+            daily_dir.mkdir(parents=True)
+            today = date.today().isoformat()
+            (inbox_dir / "today_tasks.md").write_text("# 今日待办\n\n原任务\n", encoding="utf-8")
+            (daily_dir / f"{today}.md").write_text(
+                f"# {today}\n\n"
+                "## 计划\n\n"
+                "**今日待办**\n\n"
+                "原任务\n\n"
+                "| 任务 | 优先级 | 预计 | 状态 | 备注 |\n"
+                "|---|---|---|---|---|\n"
+                "| 原任务 | P1 | 1h |  |  |\n",
+                encoding="utf-8",
+            )
+            provider = FakeProvider()
+            client = TestClient(create_app(config=config, provider_factory=lambda: provider))
+
+            response = client.post("/api/plan", json={"add": "新增任务"})
+
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["message"], "计划已局部更新。耗时40s")
+            self.assertIn("target_heading", data["result"])
+            self.assertNotIn("new_task_advice", data["result"])
+            daily_text = data["state"]["daily"]["text"]
+            self.assertIn("原任务\n新增任务", daily_text)
+            self.assertIn("| 新增任务 | P2 | 30m |  |  |", daily_text)
+            self.assertNotIn("**新任务**", daily_text)
 
     def test_plan_endpoint_returns_provider_error_without_500(self) -> None:
         with _temporary_directory() as temp_dir:
