@@ -219,7 +219,52 @@ class NightlyReviewTests(unittest.TestCase):
             self.assertIn("去浙大", saved_tasks)
             self.assertEqual(tomorrow_plan.read_text(encoding="utf-8"), "")
 
-    def test_historical_review_does_not_roll_over_current_tasks(self) -> None:
+    def test_historical_review_rolls_over_current_tasks_by_default(self) -> None:
+        with _temporary_directory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            config = _test_config(root)
+            target_date = date.today() - timedelta(days=1)
+            date_text = target_date.isoformat()
+            inbox = Path(config["paths"]["inbox_dir"])
+            daily_dir = Path(config["paths"]["daily_dir"])
+            inbox.mkdir(parents=True)
+            daily_dir.mkdir(parents=True)
+
+            today_tasks = inbox / "today_tasks.md"
+            tomorrow_plan = inbox / "明日计划.md"
+            daily_file = daily_dir / f"{date_text}.md"
+            today_tasks.write_text("# 今日待办\n\n当前任务\n", encoding="utf-8")
+            tomorrow_plan.write_text("明日输入\n", encoding="utf-8")
+            daily_file.write_text(
+                f"# {date_text}\n\n"
+                "## 计划\n\n"
+                "1. 今日待办原文\n\n"
+                "旧任务\n\n"
+                "## 记录\n\n"
+                "- 历史记录\n",
+                encoding="utf-8",
+            )
+            provider = FakeProvider(
+                json.dumps(
+                    {
+                        "review": "历史复盘",
+                        "next_today_tasks": "旧任务\n明日输入",
+                    },
+                    ensure_ascii=False,
+                )
+            )
+
+            result = generate_nightly_review(provider, config=config, target_date=target_date)
+
+            self.assertTrue(result.rolled_over)
+            self.assertEqual(result.today_tasks_path, today_tasks)
+            self.assertIn("历史复盘", daily_file.read_text(encoding="utf-8"))
+            self.assertNotIn("token 消耗统计", daily_file.read_text(encoding="utf-8"))
+            self.assertEqual(today_tasks.read_text(encoding="utf-8"), "旧任务\n明日输入\n")
+            self.assertEqual(tomorrow_plan.read_text(encoding="utf-8"), "")
+            self.assertIn("严格 JSON", provider.prompts[0])
+
+    def test_historical_review_can_disable_rollover(self) -> None:
         with _temporary_directory() as temp_dir:
             root = Path(temp_dir).resolve()
             config = _test_config(root)
@@ -238,7 +283,12 @@ class NightlyReviewTests(unittest.TestCase):
             daily_file.write_text(f"# {date_text}\n\n## 记录\n\n- 历史记录\n", encoding="utf-8")
             provider = FakeProvider("历史复盘")
 
-            result = generate_nightly_review(provider, config=config, target_date=target_date)
+            result = generate_nightly_review(
+                provider,
+                config=config,
+                target_date=target_date,
+                rollover=False,
+            )
 
             self.assertFalse(result.rolled_over)
             self.assertIsNone(result.today_tasks_path)

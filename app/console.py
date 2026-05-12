@@ -139,6 +139,7 @@ class LogRequest(BaseModel):
 
 class ReviewRequest(BaseModel):
     date: str | None = None
+    rollover: bool = True
 
     class Config:
         extra = "forbid"
@@ -335,6 +336,7 @@ class ConsoleService:
             target_date=target_date,
             logger=EventLogger(config=self.config),
             cancel_check=lambda: self.operations.check_cancelled(token),
+            rollover=request.rollover,
         )
         return {
             "message": _message_with_llm_elapsed("复盘已生成。", provider),
@@ -647,6 +649,17 @@ CONSOLE_HTML = f"""<!doctype html>
       color: var(--muted);
       font-size: 13px;
     }}
+    .inline-control {{
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin: 8px 0 0;
+      color: var(--text);
+    }}
+    .inline-control input {{
+      width: auto;
+      margin: 0;
+    }}
     input, textarea {{
       width: 100%;
       border: 1px solid var(--line);
@@ -930,6 +943,10 @@ CONSOLE_HTML = f"""<!doctype html>
             <div>
               <label for="reviewDateInput">复盘日期</label>
               <input id="reviewDateInput" type="date">
+              <label class="inline-control">
+                <input id="reviewRolloverInput" type="checkbox" checked>
+                滚动待办
+              </label>
             </div>
             <div>
               <label>&nbsp;</label>
@@ -1251,7 +1268,10 @@ CONSOLE_HTML = f"""<!doctype html>
       requestJson("/api/review", {{
         method: "POST",
         signal,
-        body: JSON.stringify({{ date: $("reviewDateInput").value }}),
+        body: JSON.stringify({{
+          date: $("reviewDateInput").value,
+          rollover: $("reviewRolloverInput").checked,
+        }}),
       }})
     ));
     $("tokenBtn").addEventListener("click", () => runAction("token 统计", () =>

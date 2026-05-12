@@ -49,6 +49,7 @@ def generate_nightly_review(
     target_date: date | None = None,
     logger: EventLogger | None = None,
     cancel_check: Callable[[], None] | None = None,
+    rollover: bool = True,
 ) -> NightlyReviewResult:
     cfg = config or load_config()
     today = date.today()
@@ -57,7 +58,7 @@ def generate_nightly_review(
     day_text = read_daily(cfg, date_text)
     event_logger = logger or EventLogger(config=cfg)
     events = _events_for_date(event_logger, date_text)
-    rolled_over = current_date == today
+    rolled_over = rollover
 
     if rolled_over:
         tomorrow_plan = read_tomorrow_plan(cfg)
@@ -78,7 +79,8 @@ def generate_nightly_review(
         path = write_daily_section("复盘", review, cfg, date_text, mode="replace")
         next_tasks_path = write_today_tasks(next_today_tasks, cfg)
         next_tomorrow_plan_path = clear_tomorrow_plan(cfg)
-        append_token_usage_report(cfg, event_logger, current_date)
+        if current_date == today:
+            append_token_usage_report(cfg, event_logger, current_date)
     else:
         prompt = _build_prompt(date_text, _build_daily_review_context(day_text))
         review = provider.chat(prompt).strip()

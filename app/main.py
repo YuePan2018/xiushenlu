@@ -38,6 +38,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     review = subparsers.add_parser("review", help="生成晚间复盘")
     review.add_argument("--date", help="指定日期，格式 YYYY-MM-DD，默认今天")
+    review.add_argument(
+        "--no-rollover",
+        action="store_true",
+        help="只生成复盘，不滚动 data/user_inputs/today_tasks.md",
+    )
 
     log = subparsers.add_parser("log", help="添加一条今日记录")
     log.add_argument("content", nargs="+", help="记录内容")
@@ -86,13 +91,18 @@ def run_plan(tasks: str | None = None, add: str | None = None) -> int:
     return 0
 
 
-def run_review(date_str: str | None = None) -> int:
+def run_review(date_str: str | None = None, rollover: bool = True) -> int:
     from datetime import date as _date
     config = load_config()
     provider = DashScopeProvider(config)
     target_date = _date.fromisoformat(date_str) if date_str else None
     try:
-        result = generate_nightly_review(provider, config=config, target_date=target_date)
+        result = generate_nightly_review(
+            provider,
+            config=config,
+            target_date=target_date,
+            rollover=rollover,
+        )
     except NightlyReviewParseError as exc:
         print(f"复盘失败：LLM 没有返回可解析的 JSON。{exc}", file=sys.stderr)
         return 1
@@ -171,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "plan":
         return run_plan(tasks=args.tasks, add=args.add)
     if args.command == "review":
-        return run_review(date_str=args.date)
+        return run_review(date_str=args.date, rollover=not args.no_rollover)
     if args.command == "log":
         return run_log(args.content)
     if args.command == "status":

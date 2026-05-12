@@ -43,7 +43,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py log "整理了 REA
 # 4. 查看今天的 daily，不调用 LLM
 conda run --no-capture-output -n xiushenlu python app/main.py status
 
-# 5. 生成晚间复盘，会调用 LLM；当天 review 会滚动待办并更新 token 统计
+# 5. 生成晚间复盘，会调用 LLM；默认会滚动待办，当天 review 还会更新 token 统计
 conda run --no-capture-output -n xiushenlu python app/main.py review
 
 # 6. 手动重新统计今日和本月 token，不调用 LLM
@@ -72,14 +72,15 @@ conda run --no-capture-output -n xiushenlu python app/main.py console
 | `python app/main.py plan --add "..."` | 是 | 追加一条今日待办，并局部更新当天计划。 |
 | `python app/main.py log "..."` | 是 | 先追加一条过程记录，再让 LLM 返回补丁，由代码只更新“时间安排”表的 `完成` 和 `备注` 两列；失败时保留记录。 |
 | `python app/main.py review` | 是 | 根据今天 daily 生成复盘，滚动明日待办，并更新 token 统计。 |
-| `python app/main.py review --date YYYY-MM-DD` | 是 | 对指定历史日期生成复盘，不滚动当前待办。 |
+| `python app/main.py review --date YYYY-MM-DD` | 是 | 对指定日期生成复盘，并默认把未完成项滚动到当前 `today_tasks.md`。历史日期不会把本次 token 统计写回历史 daily。 |
+| `python app/main.py review --date YYYY-MM-DD --no-rollover` | 是 | 只对指定日期生成复盘，不滚动当前待办。 |
 | `python app/main.py status` | 否 | 打印今天的 daily。 |
 | `python app/main.py cost` | 否 | 汇总今日和本月 token，并覆盖 daily 的 token 统计区块。 |
 | `python app/main.py console` | 视操作而定 | 启动本地控制台，复用已有 pipeline 和本地读写能力。 |
 
 `plan --add` 要求模型返回严格 JSON，并逐字保留新增任务；解析失败时不会写入 `today_tasks.md` 或 daily。
 
-当天 `review` 的事实来源是 daily 里固化的 `今日待办原文` 和 `记录`，不是当前 `today_tasks.md`。`明日计划.md` 只用于生成新的 `today_tasks.md`，不用于复盘正文。解析失败时不会写复盘、不会覆盖 `today_tasks.md`，也不会清空 `明日计划.md`。
+`review` 的事实来源是 daily 里固化的 `今日待办原文` 和 `记录`，不是当前 `today_tasks.md`。默认会滚动生成新的 `today_tasks.md`；需要只补历史复盘时显式加 `--no-rollover`。`明日计划.md` 只用于生成新的 `today_tasks.md`，不用于复盘正文。解析失败时不会写复盘、不会覆盖 `today_tasks.md`，也不会清空 `明日计划.md`。
 
 ## 配置
 

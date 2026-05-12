@@ -327,6 +327,28 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn("控制台明日任务", (inbox_dir / "today_tasks.md").read_text(encoding="utf-8"))
             self.assertEqual((inbox_dir / "明日计划.md").read_text(encoding="utf-8"), "")
 
+    def test_review_endpoint_can_skip_rollover(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            today = date.today().isoformat()
+            inbox_dir = Path(config["paths"]["inbox_dir"])
+            daily_dir = Path(config["paths"]["daily_dir"])
+            inbox_dir.mkdir(parents=True)
+            daily_dir.mkdir(parents=True)
+            (inbox_dir / "today_tasks.md").write_text("# 今日待办\n\n原任务\n", encoding="utf-8")
+            (inbox_dir / "明日计划.md").write_text("控制台明日任务\n", encoding="utf-8")
+            (daily_dir / f"{today}.md").write_text(f"# {today}\n\n## 记录\n\n- 控制台记录\n", encoding="utf-8")
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+
+            response = client.post("/api/review", json={"date": today, "rollover": False})
+
+            self.assertEqual(response.status_code, 200)
+            daily_text = response.json()["state"]["daily"]["text"]
+            self.assertIn("控制台测试计划", daily_text)
+            self.assertNotIn("token 消耗统计", daily_text)
+            self.assertEqual((inbox_dir / "today_tasks.md").read_text(encoding="utf-8"), "# 今日待办\n\n原任务\n")
+            self.assertEqual((inbox_dir / "明日计划.md").read_text(encoding="utf-8"), "控制台明日任务\n")
+
     def test_cost_endpoint_updates_token_section_once(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
