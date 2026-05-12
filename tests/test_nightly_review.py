@@ -116,6 +116,9 @@ class NightlyReviewTests(unittest.TestCase):
                 "# 今日待办\n\n"
                 "修身炉：\n"
                 "1. 未完成任务\n\n"
+                "| 任务 | 优先级 | 预计 | 状态 | 备注 |\n"
+                "|---|---|---|---|---|\n"
+                "| 删除任务 | P2 | 10m | × | 不再追踪 |\n\n"
                 "2. 风险提醒\n\n"
                 "- 注意收口。\n\n"
                 "## 记录\n\n"
@@ -161,6 +164,9 @@ class NightlyReviewTests(unittest.TestCase):
             self.assertTrue(logger.events[-1]["detail"]["rolled_over"])
             self.assertEqual(len(provider.prompts), 1)
             self.assertIn("未完成任务", provider.prompts[0])
+            self.assertIn("| 删除任务 | P2 | 10m | × | 不再追踪 |", provider.prompts[0])
+            self.assertIn("状态”列为“×”", provider.prompts[0])
+            self.assertIn("不能写入 next_today_tasks", provider.prompts[0])
             self.assertIn("去浙大", provider.prompts[0])
             self.assertIn("不要输出任何 Markdown 标题行", provider.prompts[0])
             self.assertIn("禁止输出 `# 今日待办`、`#今日待办`、`## ...`", provider.prompts[0])

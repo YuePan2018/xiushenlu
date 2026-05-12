@@ -18,13 +18,16 @@ EXPECTED_HEADERS = ("任务", "优先级", "预计", "状态", "备注")
 LEGACY_HEADERS = ("任务", "优先级", "预估时间", "完成", "备注")
 IN_PROGRESS_MARK = "○"
 CHECK_MARK = "✓"
+DROPPED_MARK = "×"
 NOTE_MAX_CHARS = 80
 STATUS_TO_MARK = {
     "not_started": "",
     "in_progress": IN_PROGRESS_MARK,
     "completed": CHECK_MARK,
+    "dropped": DROPPED_MARK,
 }
 VALID_COMPLETION_MARKS = frozenset(STATUS_TO_MARK.values())
+VALID_STATUS_NAMES = ", ".join(STATUS_TO_MARK)
 
 
 class LogScheduleUpdateParseError(ValueError):
@@ -228,9 +231,9 @@ def build_schedule_patch_prompt(date_text: str, record_content: str, schedule_ta
 硬性规则：
 - 你只能判断已有任务行的“状态”和“备注”是否需要变化，不要输出整张表。
 - row_index 使用 1-based 行号，第一条任务行是 1。
-- status 使用三种值：not_started 表示“状态”列清空，in_progress 表示写为“{IN_PROGRESS_MARK}”，completed 表示写为“{CHECK_MARK}”。
+- status 使用四种值：not_started 表示“状态”列清空，in_progress 表示写为“{IN_PROGRESS_MARK}”，completed 表示写为“{CHECK_MARK}”，dropped 表示写为“{DROPPED_MARK}”。
 - 记录没有提到任务开始或推进，使用 not_started 或保持原状态不输出更新；记录提到开始做、正在做、推进中、完成了一部分但任务还会继续，使用 in_progress；记录明确完成，使用 completed。
-- 如果记录说完成了任务的一部分，同时剩余部分短期内不做、暂停、取消或不再纳入当前任务，也视为整个任务 completed。
+- 记录说删除这个任务、取消、不再追踪、不再纳入今天任务、短期内不做或这个任务今天不管了，使用 dropped；dropped 表示任务退出追踪，不等同于 completed。
 - note 是要写入“备注”列的短句；只有本次记录里明确出现“后续计划和执行要注意的点”时才写，普通完成事实不要写备注。
 - note 可以用于新增、更新或清空备注；没有要注意的点时必须是空字符串。
 - 非空 note 必须有 evidence，且 evidence 必须是本次写入记录中的原文片段。
@@ -262,7 +265,7 @@ def _parse_table_lines(table_lines: list[str]) -> list[tuple[str, str, str, str,
         if len(cells) != len(EXPECTED_HEADERS):
             raise LogScheduleUpdateParseError("schedule table row does not match the expected columns.")
         if cells[3] not in VALID_COMPLETION_MARKS:
-            raise LogScheduleUpdateParseError("status column must be empty, in progress, or a check mark.")
+            raise LogScheduleUpdateParseError("status column must be empty, in progress, completed, or dropped.")
         if "\n" in cells[4] or "|" in cells[4]:
             raise LogScheduleUpdateParseError("note column contains unsafe content.")
         rows.append(tuple(cells))  # type: ignore[arg-type]
@@ -275,7 +278,7 @@ def _parse_completion_mark(item: dict[str, Any]) -> str:
         status_text = status.strip()
         if status_text not in STATUS_TO_MARK:
             raise LogScheduleUpdateParseError(
-                "status must be one of: not_started, in_progress, completed."
+                f"status must be one of: {VALID_STATUS_NAMES}."
             )
         return STATUS_TO_MARK[status_text]
     if status is not None:

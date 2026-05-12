@@ -126,7 +126,7 @@ class LogScheduleUpdateTests(unittest.TestCase):
             self.assertTrue(result.updated)
             self.assertIn("| 复盘 | P0 | 20m |  |  |", daily_file.read_text(encoding="utf-8"))
 
-    def test_status_field_supports_in_progress_completed_and_not_started(self) -> None:
+    def test_status_field_supports_in_progress_completed_not_started_and_dropped(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
             daily_file = _write_daily(
@@ -134,7 +134,8 @@ class LogScheduleUpdateTests(unittest.TestCase):
                 _daily_text(
                     "| 计划表更新 | P1 | 30m |  |  |\n"
                     "| 复盘 | P2 | 20m | ○ | 旧备注 |\n"
-                    "| 收尾 | P3 | 10m | ✓ | 已完成 |"
+                    "| 收尾 | P3 | 10m | ✓ | 已完成 |\n"
+                    "| 临时任务 | P3 | 10m |  |  |"
                 ),
             )
             reply = json.dumps(
@@ -143,6 +144,7 @@ class LogScheduleUpdateTests(unittest.TestCase):
                         {"row_index": 1, "status": "in_progress", "note": "", "evidence": ""},
                         {"row_index": 2, "status": "completed", "note": "", "evidence": ""},
                         {"row_index": 3, "status": "not_started", "note": "", "evidence": ""},
+                        {"row_index": 4, "status": "dropped", "note": "", "evidence": ""},
                     ]
                 },
                 ensure_ascii=False,
@@ -150,7 +152,7 @@ class LogScheduleUpdateTests(unittest.TestCase):
 
             result = update_schedule_from_log(
                 FakeProvider(reply),
-                "开始做计划表更新。复盘已经完成。收尾还没开始。",
+                "开始做计划表更新。复盘已经完成。收尾还没开始。删除临时任务，不再追踪。",
                 config=config,
                 target_date=date(2026, 5, 10),
                 logger=FakeLogger(),  # type: ignore[arg-type]
@@ -161,6 +163,39 @@ class LogScheduleUpdateTests(unittest.TestCase):
             self.assertIn("| 计划表更新 | P1 | 30m | ○ |  |", daily_text)
             self.assertIn("| 复盘 | P2 | 20m | ✓ |  |", daily_text)
             self.assertIn("| 收尾 | P3 | 10m |  |  |", daily_text)
+            self.assertIn("| 临时任务 | P3 | 10m | × |  |", daily_text)
+
+    def test_existing_dropped_status_can_be_parsed_and_updated(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            daily_file = _write_daily(
+                config,
+                _daily_text(
+                    "| 临时任务 | P3 | 10m | × | 不再追踪 |\n"
+                    "| 复盘 | P2 | 20m |  |  |"
+                ),
+            )
+            reply = json.dumps(
+                {
+                    "updates": [
+                        {"row_index": 2, "status": "completed", "note": "", "evidence": ""},
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+            result = update_schedule_from_log(
+                FakeProvider(reply),
+                "复盘已经完成。",
+                config=config,
+                target_date=date(2026, 5, 10),
+                logger=FakeLogger(),  # type: ignore[arg-type]
+            )
+
+            self.assertTrue(result.updated)
+            daily_text = daily_file.read_text(encoding="utf-8")
+            self.assertIn("| 临时任务 | P3 | 10m | × | 不再追踪 |", daily_text)
+            self.assertIn("| 复盘 | P2 | 20m | ✓ |  |", daily_text)
 
     def test_invalid_status_is_rejected(self) -> None:
         with self.assertRaisesRegex(LogScheduleUpdateParseError, "status must be one of"):
@@ -185,8 +220,12 @@ class LogScheduleUpdateTests(unittest.TestCase):
         self.assertIn("not_started", prompt)
         self.assertIn("in_progress", prompt)
         self.assertIn("completed", prompt)
+        self.assertIn("dropped", prompt)
+        self.assertIn("×", prompt)
         self.assertIn("完成了一部分但任务还会继续", prompt)
-        self.assertIn("剩余部分短期内不做", prompt)
+        self.assertIn("短期内不做", prompt)
+        self.assertIn("删除这个任务", prompt)
+        self.assertIn("不再追踪", prompt)
 
     def test_invalid_json_does_not_write_schedule(self) -> None:
         with _temporary_directory() as temp_dir:
