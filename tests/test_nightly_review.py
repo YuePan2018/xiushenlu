@@ -58,7 +58,7 @@ class NightlyReviewTests(unittest.TestCase):
             json.dumps(
                 {
                     "review": "完成了什么\n- 完成复盘",
-                    "next_today_tasks": "# 今日待办\n\n修身炉：\n1. 规划下一进度",
+                    "next_today_tasks": "修身炉：\n1. 规划下一进度",
                 },
                 ensure_ascii=False,
             )
@@ -130,7 +130,7 @@ class NightlyReviewTests(unittest.TestCase):
             reply = json.dumps(
                 {
                     "review": "完成了什么\n- 做了别的事\n\n改进建议\n- 明天收口。\n\n值得肯定的行为\n- 有记录。",
-                    "next_today_tasks": "# 今日待办\n口号：过最想要的一天！\n\n修身炉：\n1. 未完成任务\n\n杂事：\n去浙大",
+                    "next_today_tasks": "修身炉：\n1. 未完成任务\n\n杂事：\n去浙大",
                 },
                 ensure_ascii=False,
             )
@@ -157,7 +157,7 @@ class NightlyReviewTests(unittest.TestCase):
             self.assertNotIn("输入 token", daily_text)
             self.assertNotIn("输出 token", daily_text)
             saved_tasks = today_tasks.read_text(encoding="utf-8")
-            self.assertTrue(saved_tasks.startswith("# 今日待办"))
+            self.assertFalse(saved_tasks.startswith("# 今日待办"))
             self.assertIn("去浙大", saved_tasks)
             self.assertEqual(tomorrow_plan.read_text(encoding="utf-8"), "")
             self.assertEqual([event["type"] for event in logger.events], ["llm_call", "review_generated"])
@@ -169,11 +169,14 @@ class NightlyReviewTests(unittest.TestCase):
             self.assertIn("不能写入 next_today_tasks", provider.prompts[0])
             self.assertIn("去浙大", provider.prompts[0])
             self.assertIn("不要输出任何 Markdown 标题行", provider.prompts[0])
-            self.assertIn("禁止输出 `# 今日待办`、`#今日待办`、`## ...`", provider.prompts[0])
+            self.assertIn("禁止输出任何以 `#` 开头的标题行", provider.prompts[0])
+            self.assertIn("禁止从记录内容新增、派生或沉淀任务", provider.prompts[0])
+            self.assertIn("不要生成口号、总结句或装饰性标题", provider.prompts[0])
+            self.assertIn("不要判断优先级", provider.prompts[0])
             self.assertNotIn("已经滚动的明日槽", provider.prompts[0])
             self.assertNotIn("旧复盘不应再次喂给 LLM", provider.prompts[0])
 
-    def test_today_review_writes_next_tasks_without_heading_cleanup(self) -> None:
+    def test_today_review_keeps_record_only_tasks_out_of_next_tasks_prompt(self) -> None:
         with _temporary_directory() as temp_dir:
             root = Path(temp_dir).resolve()
             config = _test_config(root)
@@ -199,19 +202,21 @@ class NightlyReviewTests(unittest.TestCase):
                 "2. 风险提醒\n\n"
                 "- 注意收口。\n\n"
                 "## 记录\n\n"
-                "- 10:00 做了别的事\n",
+                "- 10:00 做了别的事\n"
+                "- 11:00 学习 NotebookLM 并准备整理成工作流文档\n",
                 encoding="utf-8",
             )
             reply = json.dumps(
                 {
                     "review": "完成了什么\n- 做了别的事",
-                    "next_today_tasks": "# 今日待办\n\n口号：过最想要的一天！\n\n修身炉：\n1. 未完成任务\n\n杂事：\n去浙大",
+                    "next_today_tasks": "修身炉：\n1. 未完成任务\n\n杂事：\n去浙大",
                 },
                 ensure_ascii=False,
             )
+            provider = FakeProvider(reply)
 
             result = generate_nightly_review(
-                FakeProvider(reply),
+                provider,
                 config=config,
                 target_date=today,
                 logger=FakeLogger(),  # type: ignore[arg-type]
@@ -219,11 +224,12 @@ class NightlyReviewTests(unittest.TestCase):
 
             saved_tasks = today_tasks.read_text(encoding="utf-8")
             self.assertTrue(result.rolled_over)
-            self.assertTrue(saved_tasks.startswith("# 今日待办"))
-            self.assertEqual(saved_tasks, "# 今日待办\n\n口号：过最想要的一天！\n\n修身炉：\n1. 未完成任务\n\n杂事：\n去浙大\n")
-            self.assertIn("口号：过最想要的一天！", saved_tasks)
+            self.assertEqual(saved_tasks, "修身炉：\n1. 未完成任务\n\n杂事：\n去浙大\n")
+            self.assertNotIn("NotebookLM", saved_tasks)
             self.assertIn("去浙大", saved_tasks)
             self.assertEqual(tomorrow_plan.read_text(encoding="utf-8"), "")
+            self.assertIn("学习 NotebookLM", provider.prompts[0])
+            self.assertIn("如果不在“今日待办”中，也不能写入 next_today_tasks", provider.prompts[0])
 
     def test_historical_review_rolls_over_current_tasks_by_default(self) -> None:
         with _temporary_directory() as temp_dir:

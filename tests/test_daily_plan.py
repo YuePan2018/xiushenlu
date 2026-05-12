@@ -36,6 +36,7 @@ class DailyPlanTests(unittest.TestCase):
             "学习：\n"
             "思考：如何提速？\n"
             "视频：学习agent\n\n"
+            "**任务管理**\n"
             "| 任务 | 优先级 | 预计 | 状态 | 备注 |\n"
             "|---|---|---|---|---|\n"
             "| 小红书post功能 | P0 | 1.5h |  |  |",
@@ -58,6 +59,7 @@ class DailyPlanTests(unittest.TestCase):
         )
 
         self.assertIn("| 任务 | 优先级 | 预计 | 状态 | 备注 |", plan)
+        self.assertIn("**任务管理**\n| 任务 | 优先级 | 预计 | 状态 | 备注 |", plan)
         self.assertIn("| 修复表格渲染 | P0 | 30m |  |  |", plan)
         self.assertNotIn("｜", plan)
         self.assertNotIn("时间安排", plan)
@@ -74,19 +76,19 @@ class DailyPlanTests(unittest.TestCase):
         )
 
         self.assertIn("| 任务 | 优先级 | 预计 | 状态 | 备注 |", plan)
+        self.assertIn("**任务管理**\n| 任务 | 优先级 | 预计 | 状态 | 备注 |", plan)
         self.assertIn("| 修复表格渲染 | P0 | 30m |  |  |", plan)
         self.assertNotIn("时间安排", plan)
 
     def test_build_prompt_only_requests_schedule_table(self) -> None:
         prompt = _build_prompt("2026-05-09", "长期目标", "修身炉：\n1. 只写待办")
 
-        self.assertIn("只输出 markdown 表格", prompt)
-        self.assertIn("不要输出“时间安排”标题", prompt)
+        self.assertIn("只输出普通文本标题“任务管理”和 markdown 表格", prompt)
+        self.assertIn("任务管理表格前固定输出一行普通文本：**任务管理**", prompt)
         self.assertIn("| 任务 | 优先级 | 预计 | 状态 | 备注 |", prompt)
         self.assertIn("必须使用英文竖线", prompt)
         self.assertIn("“状态”和“备注”两列都不填", prompt)
         self.assertNotIn("建议时段", prompt)
-        self.assertIn("不要输出风险提醒、收尾检查、注意事项、保底完成标准、对应执行内容", prompt)
         self.assertNotIn("调度风险与调整规则", prompt)
         self.assertNotIn("晚间收口动作", prompt)
 

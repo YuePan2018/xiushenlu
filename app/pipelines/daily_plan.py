@@ -70,12 +70,13 @@ def _build_prompt(date_text: str, goals: str, tasks: str) -> str:
     tasks_text = tasks.strip() or "（尚未填写今日待办）"
     return f"""你是一个帮助用户安排当天时间的个人执行助手。
 
-请根据长期目标和今日待办，为 {date_text} 生成一份当天时间安排表。
+请根据长期目标和今日待办，为 {date_text} 生成一份当天任务管理表。
 
 输出结构：
-1. 只输出 markdown 表格，不要输出“时间安排”标题，不要输出风险提醒、收尾检查、注意事项、保底完成标准、对应执行内容或具体技术步骤。
-2. 时间安排用 markdown 表格，表头必须使用英文竖线，固定为：| 任务 | 优先级 | 预计 | 状态 | 备注 |。“状态”和“备注”两列都不填。
-3. 预估时要考虑用户会用 Codex 辅助工作。如果工作总时间超出6小时（工作外的杂事不算入时间），在表格后用一句话提示超时，并说明6小时内优先做哪几个任务。
+1. 只输出普通文本标题“任务管理”和 markdown 表格。
+2. 任务管理表格前固定输出一行普通文本：**任务管理**
+3. 任务管理表格的表头必须使用英文竖线，固定为：| 任务 | 优先级 | 预计 | 状态 | 备注 |。“状态”和“备注”两列都不填。
+4. 预估时要考虑用户会用 Codex 辅助工作。如果工作总时间超出6小时（工作外的杂事不算入时间），在表格后用一句话提示超时，并说明6小时内优先做哪几个任务。
 
 其他要求：
 - 不要输出“今日待办”原文；这部分由程序直接写入。
@@ -97,6 +98,7 @@ def _build_plan(tasks: str, plan_schedule: str) -> str:
     schedule_text = _normalize_schedule_table(plan_schedule.strip())
     if not schedule_text:
         return today_tasks
+    schedule_text = _ensure_task_management_title(schedule_text)
     return f"{today_tasks}\n\n{schedule_text}".strip()
 
 
@@ -181,6 +183,25 @@ def _drop_trailing_schedule_heading(lines: list[str]) -> list[str]:
     while prefix and not prefix[-1].strip():
         prefix.pop()
     return prefix
+
+
+def _ensure_task_management_title(schedule_text: str) -> str:
+    lines = schedule_text.splitlines()
+    table_start = _find_schedule_table_start(lines)
+    if table_start is None:
+        return schedule_text
+
+    prefix = list(lines[:table_start])
+    table_and_after = lines[table_start:]
+    while prefix and not prefix[-1].strip():
+        prefix.pop()
+
+    if prefix and prefix[-1].strip().strip("*").strip("#").strip() == "任务管理":
+        prefix[-1] = "**任务管理**"
+    else:
+        prefix.append("**任务管理**")
+
+    return "\n".join(prefix + table_and_after).strip()
 
 
 def _looks_like_table_line(line: str) -> bool:
