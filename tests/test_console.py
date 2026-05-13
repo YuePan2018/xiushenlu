@@ -273,7 +273,7 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn("target_heading", data["result"])
             self.assertNotIn("new_task_advice", data["result"])
             daily_text = data["state"]["daily"]["text"]
-            self.assertIn("原任务\n新增任务", daily_text)
+            self.assertIn("【待办】\n1. 原任务\n2. 新增任务", daily_text)
             self.assertIn("| 新增任务 | P2 | 30m |  |  |", daily_text)
             self.assertNotIn("**新任务**", daily_text)
 

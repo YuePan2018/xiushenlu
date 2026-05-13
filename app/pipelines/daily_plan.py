@@ -12,6 +12,7 @@ from app.llm.provider import LLMProvider
 from app.llm.usage import append_llm_call_event
 from app.logger import EventLogger
 from app.memory.goals import read_goals
+from app.pipelines.today_tasks_format import format_today_tasks_snapshot
 
 
 @dataclass(frozen=True)
@@ -103,7 +104,7 @@ def _build_plan(tasks: str, plan_schedule: str) -> str:
 
 
 def _format_today_tasks_section(tasks: str) -> str:
-    tasks_text = tasks.strip() or "（尚未填写今日待办）"
+    tasks_text = format_today_tasks_snapshot(tasks)
     return f"**今日待办**\n\n{tasks_text}"
 
 

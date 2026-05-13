@@ -88,7 +88,8 @@ class PlanUpdateTests(unittest.TestCase):
         self.assertIn("schedule_estimate", prompt)
         self.assertIn("状态和备注由程序写空", prompt)
         self.assertIn("冒号前是目标分组标题", prompt)
-        self.assertIn("新建“杂事”时必须写“【杂事】”", prompt)
+        self.assertIn("分组展示必须统一为“【分组】”", prompt)
+        self.assertIn("新增“杂事： 游泳”，必须新建或使用“【杂事】”", prompt)
         self.assertIn("不要输出状态、备注、单独建议正文", prompt)
         self.assertNotIn("new_task_advice", prompt)
         self.assertIn("不要输出状态、备注、单独建议正文、“新任务”标题或“### 新增”", prompt)
@@ -322,12 +323,12 @@ class PlanUpdateTests(unittest.TestCase):
             today_text = (inbox / "today_tasks.md").read_text(encoding="utf-8")
             daily_text = (daily_dir / "2026-05-13.md").read_text(encoding="utf-8")
             self.assertEqual(result.target_heading, "杂事")
-            self.assertIn("【杂事】\n游泳", today_text)
-            self.assertIn("【杂事】\n游泳", daily_text)
+            self.assertIn("【杂事】\n1. 游泳", today_text)
+            self.assertIn("【杂事】\n1. 游泳", daily_text)
             self.assertNotIn("杂事：\n游泳", today_text)
             self.assertNotIn("杂事： 游泳", today_text)
 
-    def test_generate_plan_update_preserves_existing_colon_heading(self) -> None:
+    def test_generate_plan_update_normalizes_existing_colon_heading(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
             inbox = Path(config["paths"]["inbox_dir"])
@@ -370,9 +371,9 @@ class PlanUpdateTests(unittest.TestCase):
 
             today_text = (inbox / "today_tasks.md").read_text(encoding="utf-8")
             daily_text = (daily_dir / "2026-05-13.md").read_text(encoding="utf-8")
-            self.assertIn("杂事：\n扫地拖地\n游泳", today_text)
-            self.assertIn("杂事：\n扫地拖地\n游泳", daily_text)
-            self.assertNotIn("【杂事】", today_text)
+            self.assertIn("【杂事】\n1. 扫地拖地\n2. 游泳", today_text)
+            self.assertIn("【杂事】\n1. 扫地拖地\n2. 游泳", daily_text)
+            self.assertNotIn("杂事：", today_text)
 
     def test_generate_plan_update_does_not_write_files_on_parse_error(self) -> None:
         with _temporary_directory() as temp_dir:

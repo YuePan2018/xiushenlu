@@ -14,6 +14,7 @@ from app.llm.provider import LLMProvider
 from app.llm.usage import append_llm_call_event
 from app.logger import EventLogger
 from app.memory.goals import read_goals
+from app.pipelines.today_tasks_format import format_today_tasks_snapshot
 from app.safety import safe_write_text
 
 
@@ -100,7 +101,6 @@ def generate_plan_update(
     parsed = normalize_plan_update_content(
         parsed,
         new_task_intent=task_intent,
-        original_today_tasks=today_tasks,
     )
     validate_plan_update_content(parsed, new_task=task_intent.task_text)
 
@@ -184,7 +184,6 @@ def parse_new_task_intent(new_task: str) -> NewTaskIntent:
 def normalize_plan_update_content(
     parsed: ParsedPlanUpdate,
     new_task_intent: NewTaskIntent,
-    original_today_tasks: str,
 ) -> ParsedPlanUpdate:
     target_heading = _normalize_heading_name(new_task_intent.target_heading or parsed.target_heading)
     updated_today_tasks = parsed.updated_today_tasks
@@ -198,17 +197,8 @@ def normalize_plan_update_content(
             new_task_intent.raw_text, new_task_intent.task_text
         )
 
-    desired_heading = _desired_heading_line(original_today_tasks, target_heading)
-    updated_today_tasks = _normalize_target_heading_lines(
-        updated_today_tasks,
-        target_heading,
-        desired_heading,
-    )
-    updated_daily_original = _normalize_target_heading_lines(
-        updated_daily_original,
-        target_heading,
-        desired_heading,
-    )
+    updated_today_tasks = format_today_tasks_snapshot(updated_today_tasks)
+    updated_daily_original = format_today_tasks_snapshot(updated_daily_original)
 
     return ParsedPlanUpdate(
         updated_today_tasks=updated_today_tasks,
@@ -238,43 +228,12 @@ def validate_plan_update_content(parsed: ParsedPlanUpdate, new_task: str) -> Non
             raise PlanUpdateParseError(f"LLM response {key} must not contain line breaks or table separators.")
 
 
-def _desired_heading_line(original_today_tasks: str, target_heading: str) -> str:
-    existing = _find_existing_heading_line(original_today_tasks, target_heading)
-    if existing is not None:
-        return existing
-    if _contains_bracket_heading(original_today_tasks):
-        return f"【{target_heading}】"
-    return f"{target_heading}："
-
-
 def _normalize_heading_name(text: str) -> str:
     stripped = text.strip()
     parsed = _parse_heading_line(stripped)
     if parsed is not None:
         return parsed
     return stripped
-
-
-def _find_existing_heading_line(text: str, target_heading: str) -> str | None:
-    for line in text.splitlines():
-        heading = _parse_heading_line(line)
-        if heading == target_heading:
-            return line.strip()
-    return None
-
-
-def _contains_bracket_heading(text: str) -> bool:
-    return any(_is_bracket_heading(line) for line in text.splitlines())
-
-
-def _normalize_target_heading_lines(text: str, target_heading: str, desired_heading: str) -> str:
-    lines = []
-    for line in text.splitlines():
-        if _parse_heading_line(line) == target_heading:
-            lines.append(desired_heading)
-        else:
-            lines.append(line)
-    return "\n".join(lines).strip()
 
 
 def _parse_heading_line(line: str) -> str | None:
@@ -538,14 +497,11 @@ def _build_prompt(
 硬性规则：
 - 如果新增任务是“标题：任务正文”格式，冒号前是目标分组标题，冒号后是要插入的任务正文；用这个标题去匹配已有分组或新建分组，不要把“标题：”当成任务正文。
 - 新增任务正文必须逐字使用，不要改成短标题、括号解释或“灵感：优化...”这类摘要。
-- 保留已有内容的原文、顺序、中文分组和列表风格；插入前先判断目标分组下已有任务行的主格式，再按同一格式追加。
-- 如果目标分组已存在，必须沿用原分组标题的原样写法，例如已有“杂事：”就继续用“杂事：”。
-- 如果目标分组不存在，必须跟随原始文本的标题格式：原文有“【工作与自动化】”这类标题，新建“杂事”时必须写“【杂事】”；原文没有“【...】”标题时，才使用“杂事：”。
+- 保留已有内容的原文、顺序和中文分组，但分组展示必须统一为“【分组】”，分组下统一使用“1. 任务”编号列表。
+- 如果目标分组已存在，任务插入到该分组；如果目标分组不存在，新建“【目标分组】”。
 - `updated_today_tasks` 是完整的新 today_tasks.md；可以保留原有 `# 今日待办` 标题，但只允许增加这一个新增任务，除必要编号外不要改动旧内容。
-- `updated_daily_original` 只填写 daily “今日待办”小节的新内容，风格跟原小节一致，并包含逐字新增任务正文；不要包含计划建议、时间安排表或任何 Markdown 标题行。
-- 如果目标分组主要使用“1. 2. 3.”编号列表，新增项必须使用下一个编号，例如“6. 新增任务”，不要改成“- 新增任务”。
-- 如果目标分组主要是普通文本行，新增项也必须是普通文本行，不加“-”，不加编号。
-- 只有目标分组原本就是“-”列表时，新增项才允许使用“-”。
+- `updated_daily_original` 只填写 daily “今日待办”小节的新内容，并包含逐字新增任务正文；不要包含计划建议、时间安排表或任何 Markdown 标题行。
+- daily “今日待办”小节和 today_tasks.md 的最终样式都必须类似：“【杂事】”下一行“1. 游泳”；不要输出“杂事：\n游泳”或“杂事：游泳”。
 - `target_heading` 只用于内部归类，不会展示在 daily。
 - `schedule_task` 是写入时间安排表“任务”列的短任务名，可以比新增任务原文更短，但不能包含换行或 `|`。
 - `schedule_priority` 是“优先级”列，例如 P0、P1、P2、P3，不能包含换行或 `|`。
@@ -553,9 +509,9 @@ def _build_prompt(
 - 不要输出状态、备注、单独建议正文、“新任务”标题或“### 新增”。
 
 插入格式示例：
-- 如果“修身炉：”下面已有“1.”到“5.”，新增“灵感：优化codex规则”应写成“6. 灵感：优化codex规则”。
-- 如果“杂事：”下面已有“游泳或篮球”“扫地拖地”，新增“看鸡汤和英雄传记（调节今日心情）”应写成“看鸡汤和英雄传记（调节今日心情）”，不要加“-”。
-- 如果原文已有“【工作与自动化】”但没有“杂事”，新增“杂事： 游泳”应新建“【杂事】”并在下面写“游泳”。
+- 如果“修身炉：”下面已有“1.”到“5.”，新增“灵感：优化codex规则”应写成“【修身炉】”分组下的“6. 灵感：优化codex规则”。
+- 如果“杂事：”下面已有“游泳或篮球”“扫地拖地”，新增“看鸡汤和英雄传记（调节今日心情）”应写成“【杂事】”分组下的下一条编号。
+- 如果新增“杂事： 游泳”，必须新建或使用“【杂事】”并在下面写“1. 游泳”。
 
 你必须只输出一个严格 JSON 对象，不要使用代码块，不要输出解释文字。
 JSON 必须包含且只需要包含这些字符串字段：

@@ -38,7 +38,7 @@ class FakeLogger:
 
 
 class DailyPlanTests(unittest.TestCase):
-    def test_build_plan_preserves_today_tasks_verbatim_and_appends_schedule(self) -> None:
+    def test_build_plan_formats_today_tasks_snapshot_and_appends_schedule(self) -> None:
         tasks = (
             "# 今日待办\n\n"
             "口号：过最想要的一天！\n\n"
@@ -60,19 +60,24 @@ class DailyPlanTests(unittest.TestCase):
         self.assertEqual(
             plan,
             "**今日待办**\n\n"
-            "# 今日待办\n\n"
-            "口号：过最想要的一天！\n\n"
-            "xiushenlu：\n"
+            "【口号】\n"
+            "1. 过最想要的一天！\n\n"
+            "【xiushenlu】\n"
             "1. 查看下一阶段计划\n"
             "2. 完成小红书post功能\n\n"
-            "学习：\n"
-            "思考：如何提速？\n"
-            "视频：学习agent\n\n"
+            "【学习】\n"
+            "1. 思考：如何提速？\n"
+            "2. 视频：学习agent\n\n"
             "**任务管理**\n"
             "| 任务 | 优先级 | 预计 | 状态 | 备注 |\n"
             "|---|---|---|---|---|\n"
             "| 小红书post功能 | P0 | 1.5h |  |  |",
         )
+
+    def test_build_plan_formats_inline_heading_as_bracket_numbered_list(self) -> None:
+        plan = _build_plan("杂事：游泳", "")
+
+        self.assertEqual(plan, "**今日待办**\n\n【杂事】\n1. 游泳")
 
     def test_build_plan_uses_empty_tasks_placeholder(self) -> None:
         plan = _build_plan("  ", "")
