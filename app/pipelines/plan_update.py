@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -40,6 +41,13 @@ class ScheduleRow:
 
 
 @dataclass(frozen=True)
+class NewTaskIntent:
+    raw_text: str
+    task_text: str
+    target_heading: str | None = None
+
+
+@dataclass(frozen=True)
 class ParsedPlanUpdate:
     updated_today_tasks: str
     updated_daily_original: str
@@ -68,6 +76,7 @@ def generate_plan_update(
     if not task_text:
         raise ValueError("Plan update content must not be empty.")
 
+    task_intent = parse_new_task_intent(task_text)
     cfg = config or load_config()
     current_date = target_date or date.today()
     date_text = current_date.isoformat()
@@ -88,7 +97,12 @@ def generate_plan_update(
     event_logger = logger or EventLogger()
     append_llm_call_event(event_logger, provider, "plan_update")
     parsed = parse_plan_update_response(raw_reply)
-    validate_plan_update_content(parsed, new_task=task_text)
+    parsed = normalize_plan_update_content(
+        parsed,
+        new_task_intent=task_intent,
+        original_today_tasks=today_tasks,
+    )
+    validate_plan_update_content(parsed, new_task=task_intent.task_text)
 
     daily_file = daily_path(cfg, date_text)
     updated_daily = update_daily_plan_text(
@@ -154,8 +168,58 @@ def parse_plan_update_response(text: str) -> ParsedPlanUpdate:
     )
 
 
-def validate_plan_update_content(parsed: ParsedPlanUpdate, new_task: str) -> None:
+def parse_new_task_intent(new_task: str) -> NewTaskIntent:
     task_text = new_task.strip()
+    match = re.match(r"^([^：:\n]{1,30})[：:]\s*(.+)$", task_text, flags=re.DOTALL)
+    if match is None:
+        return NewTaskIntent(raw_text=task_text, task_text=task_text)
+
+    heading = _normalize_heading_name(match.group(1))
+    item = match.group(2).strip()
+    if not heading or not item:
+        return NewTaskIntent(raw_text=task_text, task_text=task_text)
+    return NewTaskIntent(raw_text=task_text, task_text=item, target_heading=heading)
+
+
+def normalize_plan_update_content(
+    parsed: ParsedPlanUpdate,
+    new_task_intent: NewTaskIntent,
+    original_today_tasks: str,
+) -> ParsedPlanUpdate:
+    target_heading = _normalize_heading_name(new_task_intent.target_heading or parsed.target_heading)
+    updated_today_tasks = parsed.updated_today_tasks
+    updated_daily_original = parsed.updated_daily_original
+
+    if new_task_intent.target_heading is not None:
+        updated_today_tasks = updated_today_tasks.replace(
+            new_task_intent.raw_text, new_task_intent.task_text
+        )
+        updated_daily_original = updated_daily_original.replace(
+            new_task_intent.raw_text, new_task_intent.task_text
+        )
+
+    desired_heading = _desired_heading_line(original_today_tasks, target_heading)
+    updated_today_tasks = _normalize_target_heading_lines(
+        updated_today_tasks,
+        target_heading,
+        desired_heading,
+    )
+    updated_daily_original = _normalize_target_heading_lines(
+        updated_daily_original,
+        target_heading,
+        desired_heading,
+    )
+
+    return ParsedPlanUpdate(
+        updated_today_tasks=updated_today_tasks,
+        updated_daily_original=updated_daily_original,
+        target_heading=target_heading,
+        schedule_row=parsed.schedule_row,
+    )
+
+
+def validate_plan_update_content(parsed: ParsedPlanUpdate, new_task: str) -> None:
+    task_text = parse_new_task_intent(new_task).task_text
     if task_text not in parsed.updated_today_tasks:
         raise PlanUpdateParseError(
             "LLM response must include the new task verbatim in updated_today_tasks."
@@ -172,6 +236,61 @@ def validate_plan_update_content(parsed: ParsedPlanUpdate, new_task: str) -> Non
     ):
         if any(char in value for char in ("\n", "\r", "|")):
             raise PlanUpdateParseError(f"LLM response {key} must not contain line breaks or table separators.")
+
+
+def _desired_heading_line(original_today_tasks: str, target_heading: str) -> str:
+    existing = _find_existing_heading_line(original_today_tasks, target_heading)
+    if existing is not None:
+        return existing
+    if _contains_bracket_heading(original_today_tasks):
+        return f"【{target_heading}】"
+    return f"{target_heading}："
+
+
+def _normalize_heading_name(text: str) -> str:
+    stripped = text.strip()
+    parsed = _parse_heading_line(stripped)
+    if parsed is not None:
+        return parsed
+    return stripped
+
+
+def _find_existing_heading_line(text: str, target_heading: str) -> str | None:
+    for line in text.splitlines():
+        heading = _parse_heading_line(line)
+        if heading == target_heading:
+            return line.strip()
+    return None
+
+
+def _contains_bracket_heading(text: str) -> bool:
+    return any(_is_bracket_heading(line) for line in text.splitlines())
+
+
+def _normalize_target_heading_lines(text: str, target_heading: str, desired_heading: str) -> str:
+    lines = []
+    for line in text.splitlines():
+        if _parse_heading_line(line) == target_heading:
+            lines.append(desired_heading)
+        else:
+            lines.append(line)
+    return "\n".join(lines).strip()
+
+
+def _parse_heading_line(line: str) -> str | None:
+    stripped = line.strip()
+    if not stripped:
+        return None
+    if _is_bracket_heading(stripped):
+        return stripped[1:-1].strip()
+    if stripped.endswith(("：", ":")):
+        return stripped[:-1].strip()
+    return None
+
+
+def _is_bracket_heading(line: str) -> bool:
+    stripped = line.strip()
+    return len(stripped) > 2 and stripped.startswith("【") and stripped.endswith("】")
 
 
 def update_daily_plan_text(
@@ -417,10 +536,13 @@ def _build_prompt(
 {daily_plan_text}
 
 硬性规则：
-- 新增任务必须逐字使用“{new_task}”，不要改成短标题、括号解释或“灵感：优化...”这类摘要。
+- 如果新增任务是“标题：任务正文”格式，冒号前是目标分组标题，冒号后是要插入的任务正文；用这个标题去匹配已有分组或新建分组，不要把“标题：”当成任务正文。
+- 新增任务正文必须逐字使用，不要改成短标题、括号解释或“灵感：优化...”这类摘要。
 - 保留已有内容的原文、顺序、中文分组和列表风格；插入前先判断目标分组下已有任务行的主格式，再按同一格式追加。
+- 如果目标分组已存在，必须沿用原分组标题的原样写法，例如已有“杂事：”就继续用“杂事：”。
+- 如果目标分组不存在，必须跟随原始文本的标题格式：原文有“【工作与自动化】”这类标题，新建“杂事”时必须写“【杂事】”；原文没有“【...】”标题时，才使用“杂事：”。
 - `updated_today_tasks` 是完整的新 today_tasks.md；可以保留原有 `# 今日待办` 标题，但只允许增加这一个新增任务，除必要编号外不要改动旧内容。
-- `updated_daily_original` 只填写 daily “今日待办”小节的新内容，风格跟原小节一致，并包含逐字新增任务；不要包含计划建议、时间安排表或任何 Markdown 标题行。
+- `updated_daily_original` 只填写 daily “今日待办”小节的新内容，风格跟原小节一致，并包含逐字新增任务正文；不要包含计划建议、时间安排表或任何 Markdown 标题行。
 - 如果目标分组主要使用“1. 2. 3.”编号列表，新增项必须使用下一个编号，例如“6. 新增任务”，不要改成“- 新增任务”。
 - 如果目标分组主要是普通文本行，新增项也必须是普通文本行，不加“-”，不加编号。
 - 只有目标分组原本就是“-”列表时，新增项才允许使用“-”。
@@ -433,6 +555,7 @@ def _build_prompt(
 插入格式示例：
 - 如果“修身炉：”下面已有“1.”到“5.”，新增“灵感：优化codex规则”应写成“6. 灵感：优化codex规则”。
 - 如果“杂事：”下面已有“游泳或篮球”“扫地拖地”，新增“看鸡汤和英雄传记（调节今日心情）”应写成“看鸡汤和英雄传记（调节今日心情）”，不要加“-”。
+- 如果原文已有“【工作与自动化】”但没有“杂事”，新增“杂事： 游泳”应新建“【杂事】”并在下面写“游泳”。
 
 你必须只输出一个严格 JSON 对象，不要使用代码块，不要输出解释文字。
 JSON 必须包含且只需要包含这些字符串字段：

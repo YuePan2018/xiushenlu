@@ -87,6 +87,8 @@ class PlanUpdateTests(unittest.TestCase):
         self.assertIn("schedule_priority", prompt)
         self.assertIn("schedule_estimate", prompt)
         self.assertIn("状态和备注由程序写空", prompt)
+        self.assertIn("冒号前是目标分组标题", prompt)
+        self.assertIn("新建“杂事”时必须写“【杂事】”", prompt)
         self.assertIn("不要输出状态、备注、单独建议正文", prompt)
         self.assertNotIn("new_task_advice", prompt)
         self.assertIn("不要输出状态、备注、单独建议正文、“新任务”标题或“### 新增”", prompt)
@@ -261,6 +263,116 @@ class PlanUpdateTests(unittest.TestCase):
             self.assertNotIn("**新任务**", daily_text)
             self.assertNotIn("任务建议", daily_text)
             self.assertEqual([event["type"] for event in logger.events], ["llm_call", "plan_updated"])
+
+    def test_generate_plan_update_uses_bracket_heading_style_for_new_group(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            inbox = Path(config["paths"]["inbox_dir"])
+            daily_dir = Path(config["paths"]["daily_dir"])
+            inbox.mkdir(parents=True)
+            daily_dir.mkdir(parents=True)
+            (inbox / "today_tasks.md").write_text(
+                "重点：\n学习最新的知识库\n\n"
+                "【工作与自动化】\n"
+                "1. 配置Codex每日自动化任务\n",
+                encoding="utf-8",
+            )
+            (daily_dir / "2026-05-13.md").write_text(
+                "# 2026-05-13\n\n"
+                "## 计划\n\n"
+                "**今日待办**\n\n"
+                "重点：\n学习最新的知识库\n\n"
+                "【工作与自动化】\n"
+                "1. 配置Codex每日自动化任务\n\n"
+                "| 任务 | 优先级 | 预计 | 状态 | 备注 |\n"
+                "|---|---|---|---|---|\n"
+                "| 配置Codex每日自动化任务 | P1 | 30m |  |  |\n",
+                encoding="utf-8",
+            )
+            reply = json.dumps(
+                {
+                    "updated_today_tasks": (
+                        "重点：\n学习最新的知识库\n\n"
+                        "【工作与自动化】\n"
+                        "1. 配置Codex每日自动化任务\n\n"
+                        "杂事：\n杂事： 游泳"
+                    ),
+                    "updated_daily_original": (
+                        "重点：\n学习最新的知识库\n\n"
+                        "【工作与自动化】\n"
+                        "1. 配置Codex每日自动化任务\n\n"
+                        "杂事：\n杂事： 游泳"
+                    ),
+                    "target_heading": "杂事",
+                    "schedule_task": "游泳",
+                    "schedule_priority": "P3",
+                    "schedule_estimate": "60m",
+                },
+                ensure_ascii=False,
+            )
+
+            result = generate_plan_update(
+                FakeProvider(reply),
+                "杂事： 游泳",
+                config=config,
+                target_date=date(2026, 5, 13),
+                logger=FakeLogger(),  # type: ignore[arg-type]
+            )
+
+            today_text = (inbox / "today_tasks.md").read_text(encoding="utf-8")
+            daily_text = (daily_dir / "2026-05-13.md").read_text(encoding="utf-8")
+            self.assertEqual(result.target_heading, "杂事")
+            self.assertIn("【杂事】\n游泳", today_text)
+            self.assertIn("【杂事】\n游泳", daily_text)
+            self.assertNotIn("杂事：\n游泳", today_text)
+            self.assertNotIn("杂事： 游泳", today_text)
+
+    def test_generate_plan_update_preserves_existing_colon_heading(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            inbox = Path(config["paths"]["inbox_dir"])
+            daily_dir = Path(config["paths"]["daily_dir"])
+            inbox.mkdir(parents=True)
+            daily_dir.mkdir(parents=True)
+            (inbox / "today_tasks.md").write_text(
+                "# 今日待办\n\n杂事：\n扫地拖地\n",
+                encoding="utf-8",
+            )
+            (daily_dir / "2026-05-13.md").write_text(
+                "# 2026-05-13\n\n"
+                "## 计划\n\n"
+                "**今日待办**\n\n"
+                "杂事：\n扫地拖地\n\n"
+                "| 任务 | 优先级 | 预计 | 状态 | 备注 |\n"
+                "|---|---|---|---|---|\n"
+                "| 扫地拖地 | P3 | 30m |  |  |\n",
+                encoding="utf-8",
+            )
+            reply = json.dumps(
+                {
+                    "updated_today_tasks": "# 今日待办\n\n【杂事】\n扫地拖地\n游泳",
+                    "updated_daily_original": "【杂事】\n扫地拖地\n游泳",
+                    "target_heading": "杂事",
+                    "schedule_task": "游泳",
+                    "schedule_priority": "P3",
+                    "schedule_estimate": "60m",
+                },
+                ensure_ascii=False,
+            )
+
+            generate_plan_update(
+                FakeProvider(reply),
+                "游泳",
+                config=config,
+                target_date=date(2026, 5, 13),
+                logger=FakeLogger(),  # type: ignore[arg-type]
+            )
+
+            today_text = (inbox / "today_tasks.md").read_text(encoding="utf-8")
+            daily_text = (daily_dir / "2026-05-13.md").read_text(encoding="utf-8")
+            self.assertIn("杂事：\n扫地拖地\n游泳", today_text)
+            self.assertIn("杂事：\n扫地拖地\n游泳", daily_text)
+            self.assertNotIn("【杂事】", today_text)
 
     def test_generate_plan_update_does_not_write_files_on_parse_error(self) -> None:
         with _temporary_directory() as temp_dir:

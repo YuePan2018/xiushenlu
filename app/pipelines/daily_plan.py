@@ -73,8 +73,8 @@ def _build_prompt(date_text: str, goals: str, tasks: str) -> str:
 请根据长期目标和今日待办，为 {date_text} 生成一份当天任务管理表。
 
 输出结构：
-1. 只输出普通文本标题“任务管理”和 markdown 表格。
-2. 任务管理表格前固定输出一行普通文本：**任务管理**
+1. 只输出"**任务管理**"和 markdown 表格。
+2. 任务管理表格前固定输出一行：**任务管理**
 3. 任务管理表格的表头必须使用英文竖线，固定为：| 任务 | 优先级 | 预计 | 状态 | 备注 |。“状态”和“备注”两列都不填。
 4. 预估时要考虑用户会用 Codex 辅助工作。如果工作总时间超出6小时（工作外的杂事不算入时间），在表格后用一句话提示超时，并说明6小时内优先做哪几个任务。
 
@@ -108,7 +108,14 @@ def _format_today_tasks_section(tasks: str) -> str:
 
 
 def _write_plan_section(config: dict[str, Any], date_text: str, plan: str) -> None:
-    write_daily_section("计划", plan, config=config, target_date=date_text, mode="replace")
+    write_daily_section(
+        "计划",
+        plan,
+        config=config,
+        target_date=date_text,
+        mode="replace",
+        include_generated_at=False,
+    )
 
 
 def _normalize_schedule_table(schedule_text: str) -> str:

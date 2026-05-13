@@ -37,12 +37,16 @@ def write_daily_section(
     target_date: date | str | None = None,
     *,
     mode: str = "replace",
+    include_generated_at: bool = True,
 ) -> Path:
     cfg = config or load_config()
     path = daily_path(cfg, target_date)
     day = path.stem
-    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    section = f"## {title}\n\n生成时间：{generated_at}\n\n{body.strip()}\n"
+    section_body = body.strip()
+    if include_generated_at:
+        generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        section_body = f"生成时间：{generated_at}\n\n{section_body}"
+    section = f"## {title}\n\n{section_body}\n"
 
     if path.exists():
         original = safe_read_text(path, cfg).strip()
