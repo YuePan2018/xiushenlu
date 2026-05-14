@@ -27,6 +27,18 @@ def tomorrow_plan_path(config: dict[str, Any] | None = None) -> Path:
     return inbox_dir / "明日计划.md"
 
 
+def misc_tasks_path(config: dict[str, Any] | None = None) -> Path:
+    cfg = config or load_config()
+    inbox_dir = resolve_project_path(cfg["paths"]["inbox_dir"])
+    return inbox_dir / "杂事.md"
+
+
+def long_plan_path(config: dict[str, Any] | None = None) -> Path:
+    cfg = config or load_config()
+    inbox_dir = resolve_project_path(cfg["paths"]["inbox_dir"])
+    return inbox_dir / "长远计划.md"
+
+
 def read_today_tasks(config: dict[str, Any] | None = None) -> str:
     cfg = config or load_config()
     path = today_tasks_path(cfg)
@@ -54,8 +66,45 @@ def read_tomorrow_plan(config: dict[str, Any] | None = None) -> str:
     return safe_read_text(path, cfg).strip()
 
 
+def read_misc_tasks(config: dict[str, Any] | None = None) -> str:
+    cfg = config or load_config()
+    path = misc_tasks_path(cfg)
+    if not path.exists():
+        return ""
+    return safe_read_text(path, cfg).strip()
+
+
+def write_misc_tasks(text: str, config: dict[str, Any] | None = None) -> Path:
+    cfg = config or load_config()
+    path = misc_tasks_path(cfg)
+    safe_write_text(path, _normalize_optional_text(text), cfg)
+    return path
+
+
+def read_long_plan(config: dict[str, Any] | None = None) -> str:
+    cfg = config or load_config()
+    path = long_plan_path(cfg)
+    if not path.exists():
+        return ""
+    return safe_read_text(path, cfg).strip()
+
+
+def write_long_plan(text: str, config: dict[str, Any] | None = None) -> Path:
+    cfg = config or load_config()
+    path = long_plan_path(cfg)
+    safe_write_text(path, _normalize_optional_text(text), cfg)
+    return path
+
+
 def clear_tomorrow_plan(config: dict[str, Any] | None = None) -> Path:
     cfg = config or load_config()
     path = tomorrow_plan_path(cfg)
     safe_write_text(path, "", cfg)
     return path
+
+
+def _normalize_optional_text(text: str) -> str:
+    value = text.strip()
+    if not value:
+        return ""
+    return value.rstrip() + "\n"

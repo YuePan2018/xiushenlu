@@ -125,6 +125,11 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn('id="sloganInput"', html)
             self.assertIn("xiushenlu.console.slogan", html)
             self.assertIn('id="tokenBtn">token</button>', html)
+            self.assertIn('<span class="panel-title">杂事</span>', html)
+            self.assertIn('<span class="panel-title">长远计划</span>', html)
+            self.assertIn('id="miscInput"', html)
+            self.assertIn('id="longPlanInput"', html)
+            self.assertIn('/api/user-notes', html)
             self.assertIn('id="openTasksBtn">打开文件</button>', html)
             self.assertIn('id="stopBtn"', html)
             self.assertIn('id="menuBtn"', html)
@@ -453,6 +458,29 @@ class ConsoleTests(unittest.TestCase):
             self.assertEqual(saved_tasks, "学习控制台保存待办\n")
             self.assertEqual(provider.prompts, [])
             self.assertEqual(list(Path(config["paths"]["logs_dir"]).glob("*.jsonl")), [])
+
+    def test_user_notes_endpoint_persists_misc_and_long_plan(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            provider = FakeProvider()
+            client = TestClient(create_app(config=config, provider_factory=lambda: provider))
+
+            response = client.post(
+                "/api/user-notes",
+                json={
+                    "misc": "买菜\n整理发票",
+                    "long_plan": "半年内完成知识库升级",
+                },
+            )
+
+            self.assertEqual(response.status_code, 200)
+            inbox_dir = Path(config["paths"]["inbox_dir"])
+            self.assertEqual((inbox_dir / "杂事.md").read_text(encoding="utf-8"), "买菜\n整理发票\n")
+            self.assertEqual((inbox_dir / "长远计划.md").read_text(encoding="utf-8"), "半年内完成知识库升级\n")
+            state = response.json()["state"]["user_notes"]
+            self.assertEqual(state["misc"]["text"], "买菜\n整理发票")
+            self.assertEqual(state["long_plan"]["text"], "半年内完成知识库升级")
+            self.assertEqual(provider.prompts, [])
 
     def test_open_tasks_endpoint_ensures_file_and_uses_default_app(self) -> None:
         with _temporary_directory() as temp_dir:

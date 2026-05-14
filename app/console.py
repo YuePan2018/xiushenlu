@@ -20,7 +20,18 @@ from pydantic import BaseModel
 from app.config import ConfigError, load_config, resolve_project_path
 from app.cost import append_token_usage_report
 from app.daily import append_record, daily_path, read_daily
-from app.inbox import ensure_today_tasks_file, read_today_tasks, today_tasks_path, write_today_tasks
+from app.inbox import (
+    ensure_today_tasks_file,
+    long_plan_path,
+    misc_tasks_path,
+    read_long_plan,
+    read_misc_tasks,
+    read_today_tasks,
+    today_tasks_path,
+    write_long_plan,
+    write_misc_tasks,
+    write_today_tasks,
+)
 from app.llm.dashscope_impl import DashScopeProvider
 from app.llm.provider import LLMProvider
 from app.logger import EventLogger
@@ -138,6 +149,14 @@ class TasksRequest(BaseModel):
         extra = "forbid"
 
 
+class UserNotesRequest(BaseModel):
+    misc: str = ""
+    long_plan: str = ""
+
+    class Config:
+        extra = "forbid"
+
+
 class LogRequest(BaseModel):
     content: str
 
@@ -205,6 +224,8 @@ class ConsoleService:
         target_text = target_date.isoformat()
         daily_file = daily_path(self.config, target_text)
         tasks_file = today_tasks_path(self.config)
+        misc_file = misc_tasks_path(self.config)
+        long_plan_file = long_plan_path(self.config)
 
         return {
             "date": target_text,
@@ -218,6 +239,18 @@ class ConsoleService:
                 "path": str(tasks_file),
                 "exists": tasks_file.exists(),
                 "text": read_today_tasks(self.config),
+            },
+            "user_notes": {
+                "misc": {
+                    "path": str(misc_file),
+                    "exists": misc_file.exists(),
+                    "text": read_misc_tasks(self.config),
+                },
+                "long_plan": {
+                    "path": str(long_plan_file),
+                    "exists": long_plan_file.exists(),
+                    "text": read_long_plan(self.config),
+                },
             },
             "future": [
                 {"name": "自动化", "status": "预留"},
@@ -236,6 +269,18 @@ class ConsoleService:
         return {
             "message": "今日待办已保存。",
             "result": {"today_tasks_path": str(path)},
+            "state": self.snapshot(),
+        }
+
+    def save_user_notes(self, request: UserNotesRequest) -> dict[str, Any]:
+        misc_path = write_misc_tasks(request.misc, self.config)
+        long_path = write_long_plan(request.long_plan, self.config)
+        return {
+            "message": "杂事和长远计划已保存。",
+            "result": {
+                "misc_path": str(misc_path),
+                "long_plan_path": str(long_path),
+            },
             "state": self.snapshot(),
         }
 
@@ -584,6 +629,10 @@ def create_app(
     @app.post("/api/tasks")
     def api_tasks(request: TasksRequest) -> dict[str, Any]:
         return _handle(lambda: service.save_tasks(request))
+
+    @app.post("/api/user-notes")
+    def api_user_notes(request: UserNotesRequest) -> dict[str, Any]:
+        return _handle(lambda: service.save_user_notes(request))
 
     @app.post("/api/tasks/open")
     def api_open_tasks() -> dict[str, Any]:
@@ -1444,6 +1493,28 @@ CONSOLE_HTML = f"""<!doctype html>
           </div>
         </div>
       </details>
+      <details class="panel">
+        <summary class="collapsible-summary">
+          <span class="panel-title">杂事</span>
+        </summary>
+        <div class="collapsible-body">
+          <label for="miscInput">用户填写</label>
+          <textarea id="miscInput" spellcheck="false"></textarea>
+          <button class="secondary" id="saveMiscBtn">保存杂事</button>
+          <div class="path" id="miscPath"></div>
+        </div>
+      </details>
+      <details class="panel">
+        <summary class="collapsible-summary">
+          <span class="panel-title">长远计划</span>
+        </summary>
+        <div class="collapsible-body">
+          <label for="longPlanInput">用户填写</label>
+          <textarea id="longPlanInput" spellcheck="false"></textarea>
+          <button class="secondary" id="saveLongPlanBtn">保存长远计划</button>
+          <div class="path" id="longPlanPath"></div>
+        </div>
+      </details>
     </div>
     <section>
       <h2>Daily</h2>
@@ -1556,6 +1627,10 @@ CONSOLE_HTML = f"""<!doctype html>
       $("dailyPath").textContent = data.daily.path;
       $("tasksInput").value = data.tasks.text || "";
       $("tasksPath").textContent = data.tasks.path;
+      $("miscInput").value = data.user_notes?.misc?.text || "";
+      $("miscPath").textContent = data.user_notes?.misc?.path || "";
+      $("longPlanInput").value = data.user_notes?.long_plan?.text || "";
+      $("longPlanPath").textContent = data.user_notes?.long_plan?.path || "";
       renderFuture(data.future);
     }}
 
@@ -1740,6 +1815,19 @@ CONSOLE_HTML = f"""<!doctype html>
         body: JSON.stringify({{ tasks: $("tasksInput").value }}),
       }})
     ));
+    function saveUserNotes(label) {{
+      return runAction(label, () =>
+        requestJson("/api/user-notes", {{
+          method: "POST",
+          body: JSON.stringify({{
+            misc: $("miscInput").value,
+            long_plan: $("longPlanInput").value,
+          }}),
+        }})
+      );
+    }}
+    $("saveMiscBtn").addEventListener("click", () => saveUserNotes("保存杂事"));
+    $("saveLongPlanBtn").addEventListener("click", () => saveUserNotes("保存长远计划"));
     $("planBtn").addEventListener("click", () => runLongAction("生成计划", (signal) =>
       requestJson("/api/plan", {{
         method: "POST",
