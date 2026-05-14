@@ -1860,6 +1860,8 @@ CONSOLE_HTML = f"""<!doctype html>
     ));
     submitOnCtrlEnter("logInput", "logBtn");
     submitOnCtrlEnter("addInput", "addBtn");
+    submitOnCtrlEnter("miscInput", "saveMiscBtn");
+    submitOnCtrlEnter("longPlanInput", "saveLongPlanBtn");
     loadSlogan();
     loadState();
     loadOperation().catch(() => null);

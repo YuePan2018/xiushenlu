@@ -129,6 +129,8 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn('id="miscInput"', html)
             self.assertIn('id="longPlanInput"', html)
             self.assertIn('/api/user-notes', html)
+            self.assertIn('submitOnCtrlEnter("miscInput", "saveMiscBtn")', html)
+            self.assertIn('submitOnCtrlEnter("longPlanInput", "saveLongPlanBtn")', html)
             self.assertIn('id="openTasksBtn">打开文件</button>', html)
             self.assertIn('id="stopBtn"', html)
             self.assertIn('id="menuBtn"', html)
