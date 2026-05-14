@@ -40,8 +40,7 @@ from app.pipelines.log_schedule_update import update_schedule_from_log
 from app.pipelines.nightly_review import NightlyReviewParseError, generate_nightly_review
 from app.pipelines.plan_update import PlanUpdateParseError, generate_plan_update
 from app.posting import publish_xhs_from_draft
-from app.posting.xhs_mcp import XhsMcpClient, XhsMcpError
-from app.safety import safe_read_text, safe_write_text, validate_path
+from app.posting.xhs_mcp import XhsMcpClient
 
 
 ProviderFactory = Callable[[], LLMProvider]
@@ -50,7 +49,6 @@ ProcessStarter = Callable[[Path, Path, bool], None]
 XhsProcessFinder = Callable[[Path], list[int]]
 XhsProcessStopper = Callable[[list[int]], None]
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-XHS_ACCOUNT_CACHE_NAME = "xhs_account.json"
 
 
 class OperationCancelled(RuntimeError):
@@ -506,35 +504,6 @@ class ConsoleService:
             "result": status,
         }
 
-    def refresh_xhs_account(self) -> dict[str, Any]:
-        client = self.xhs_client_factory()
-        status = _xhs_status_payload(client, self.config)
-        if status.get("error"):
-            return {
-                "message": status["error"],
-                "result": self._with_xhs_connection_info(status),
-            }
-
-        try:
-            username = client.get_my_profile_username().strip()
-        except XhsMcpError as exc:
-            return {
-                "message": f"用户名刷新失败：{exc}",
-                "result": self.xhs_status(),
-            }
-
-        if not username:
-            return {
-                "message": "用户名刷新失败：未获取到用户名。",
-                "result": self.xhs_status(),
-            }
-
-        _write_xhs_account_cache(self.config, username)
-        return {
-            "message": "小红书用户名已刷新。",
-            "result": self.xhs_status(),
-        }
-
     def stop_xhs_mcp(self) -> dict[str, Any]:
         process_info = self._xhs_process_info()
         pids = process_info["pids"]
@@ -706,10 +675,6 @@ def create_app(
     def api_xhs_stop() -> dict[str, Any]:
         return _handle(service.stop_xhs_mcp)
 
-    @app.post("/api/xhs/account/refresh")
-    def api_xhs_account_refresh() -> dict[str, Any]:
-        return _handle(service.refresh_xhs_account)
-
     @app.post("/api/xhs/publish")
     def api_xhs_publish(request: XhsPublishRequest) -> dict[str, Any]:
         return _handle(lambda: service.publish_xhs(request))
@@ -734,57 +699,12 @@ def _xhs_status_payload(client: XhsMcpClient, config: dict[str, Any] | None = No
             "error": "未连接",
         }
 
-    username = _read_xhs_account_cache(config) if config is not None else ""
-    display_text = _format_xhs_status_text(username)
     return {
         "connected": True,
-        "logged_in": bool(username),
-        "text": display_text,
+        "logged_in": False,
+        "text": "MCP 已连接",
         "error": None,
     }
-
-
-def _format_xhs_status_text(username: str = "") -> str:
-    if username:
-        return f"已缓存登录\n用户名: {username}"
-    return "MCP 已连接"
-
-
-def _xhs_account_cache_path(config: dict[str, Any]) -> Path:
-    state_dir = resolve_project_path(config.get("paths", {}).get("state_dir", "data/state"))
-    return state_dir / XHS_ACCOUNT_CACHE_NAME
-
-
-def _read_xhs_account_cache(config: dict[str, Any]) -> str:
-    path = _xhs_account_cache_path(config)
-    if not path.exists():
-        return ""
-    try:
-        data = json.loads(safe_read_text(path, config))
-    except (OSError, ValueError, json.JSONDecodeError):
-        return ""
-    username = data.get("username") if isinstance(data, dict) else None
-    return username.strip() if isinstance(username, str) else ""
-
-
-def _write_xhs_account_cache(config: dict[str, Any], username: str) -> None:
-    data = {
-        "username": username.strip(),
-        "cached_at": datetime.now().isoformat(timespec="seconds"),
-    }
-    safe_write_text(
-        _xhs_account_cache_path(config),
-        json.dumps(data, ensure_ascii=False, indent=2) + "\n",
-        config,
-    )
-
-
-def _clear_xhs_account_cache(config: dict[str, Any]) -> None:
-    path = validate_path(_xhs_account_cache_path(config), config, for_write=True)
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        pass
 
 
 def _describe_publish_path(path_text: str) -> dict[str, Any]:
@@ -2200,11 +2120,8 @@ XHS_HTML = """<!doctype html>
     const state = {
       busy: false,
       statusLoading: true,
-      accountRefreshing: false,
-      loggedIn: false,
       mcpConnected: false,
       canStopMcp: false,
-      poller: null,
       pathTimer: null,
     };
 
@@ -2317,16 +2234,13 @@ XHS_HTML = """<!doctype html>
 
     function renderMcpStatus(data) {
       state.mcpConnected = Boolean(data.connected);
-      state.loggedIn = Boolean(data.logged_in);
       state.canStopMcp = Boolean(data.can_stop);
       if (!data.connected) {
         setStatus("xhsStatus", "未连接");
       } else if (data.error) {
         setStatus("xhsStatus", data.error, "error");
-      } else if (data.logged_in) {
-        setStatus("xhsStatus", data.text || "已登录", "ok");
       } else {
-        setStatus("xhsStatus", data.text || "未登录");
+        setStatus("xhsStatus", data.text || "MCP 已连接", "ok");
       }
       updateControls();
     }
@@ -2345,9 +2259,6 @@ XHS_HTML = """<!doctype html>
       try {
         const data = await requestJson("/api/xhs/start", { method: "POST" });
         renderMcpStatus(data.result);
-        if (data.result.connected && !hasXhsUsername(data.result)) {
-          refreshXhsAccount();
-        }
       } catch (error) {
         setStatus("xhsStatus", error.message, "error");
       } finally {
@@ -2356,7 +2267,6 @@ XHS_HTML = """<!doctype html>
     }
 
     async function stopMcp() {
-      stopPollingLogin();
       setBusy(true);
       setStatus("xhsStatus", "关闭 MCP 中...");
       try {
@@ -2367,53 +2277,6 @@ XHS_HTML = """<!doctype html>
       } finally {
         setBusy(false);
       }
-    }
-
-    function startPollingLogin() {
-      if (state.poller) {
-        return;
-      }
-      state.poller = window.setInterval(async () => {
-        try {
-          const data = await checkStatus();
-          if (data.connected) {
-            stopPollingLogin();
-            refreshXhsAccount();
-          } else if (data.error) {
-            stopPollingLogin();
-          }
-        } catch (error) {
-          setStatus("xhsStatus", error.message, "error");
-          stopPollingLogin();
-        }
-      }, 3000);
-    }
-
-    function stopPollingLogin() {
-      if (!state.poller) {
-        return;
-      }
-      window.clearInterval(state.poller);
-      state.poller = null;
-    }
-
-    async function refreshXhsAccount() {
-      if (state.accountRefreshing) {
-        return;
-      }
-      state.accountRefreshing = true;
-      try {
-        const data = await requestJson("/api/xhs/account/refresh", { method: "POST" });
-        renderMcpStatus(data.result);
-      } catch (error) {
-        // 登录状态已经确认，用户名刷新失败不影响发布。
-      } finally {
-        state.accountRefreshing = false;
-      }
-    }
-
-    function hasXhsUsername(data) {
-      return String((data && data.text) || "").includes("用户名:");
     }
 
     function collectPublishRequest() {
@@ -2496,12 +2359,7 @@ XHS_HTML = """<!doctype html>
     $("draftInput").addEventListener("input", schedulePathStatus);
     $("imageInput").addEventListener("input", schedulePathStatus);
     loadDefaults()
-      .then(async () => {
-        const data = await checkStatus();
-        if (data.connected && !hasXhsUsername(data)) {
-          refreshXhsAccount();
-        }
-      })
+      .then(checkStatus)
       .catch((error) => {
         setStatus("xhsStatus", error.message, "error");
         setStatusLoading(false);

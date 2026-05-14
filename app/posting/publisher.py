@@ -4,16 +4,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from app.config import load_config, resolve_project_path
+from app.config import load_config
 from app.logger import EventLogger
 from app.posting.drafts import read_post_draft, summarize_content
 from app.posting.validation import XhsPostPayload, build_xhs_payload
 from app.posting.xhs_mcp import XhsMcpClient, XhsMcpError, XhsToolResult
-from app.safety import validate_path
-
-
-XHS_ACCOUNT_CACHE_NAME = "xhs_account.json"
-LOGIN_EXPIRED_MARKERS = ("未登录", "cookies", "cookie", "登录", "401")
 
 
 @dataclass(frozen=True)
@@ -85,8 +80,6 @@ def publish_xhs_from_draft(
         if publish_result.is_error:
             raise XhsMcpError(publish_result.text or "小红书发布失败。")
     except XhsMcpError as exc:
-        if _looks_like_login_expired(str(exc)):
-            _clear_xhs_account_cache(cfg)
         event_logger.append_event(
             "post_failed",
             "小红书图文发布失败",
@@ -124,17 +117,3 @@ def _build_client(config: dict[str, Any]) -> XhsMcpClient:
     url = settings.get("mcp_url", "http://localhost:18060/mcp")
     timeout = float(settings.get("timeout", 30))
     return XhsMcpClient(url=url, timeout=timeout)
-
-
-def _looks_like_login_expired(message: str) -> bool:
-    lower = message.lower()
-    return any(marker in lower for marker in LOGIN_EXPIRED_MARKERS)
-
-
-def _clear_xhs_account_cache(config: dict[str, Any]) -> None:
-    state_dir = resolve_project_path(config.get("paths", {}).get("state_dir", "data/state"))
-    path = validate_path(state_dir / XHS_ACCOUNT_CACHE_NAME, config, for_write=True)
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        pass
