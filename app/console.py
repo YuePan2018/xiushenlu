@@ -41,6 +41,7 @@ from app.pipelines.nightly_review import NightlyReviewParseError, generate_night
 from app.pipelines.plan_update import PlanUpdateParseError, generate_plan_update
 from app.posting import publish_xhs_from_draft
 from app.posting.xhs_mcp import XhsMcpClient, XhsMcpError
+from app.safety import safe_read_text, safe_write_text, validate_path
 
 
 ProviderFactory = Callable[[], LLMProvider]
@@ -49,6 +50,7 @@ ProcessStarter = Callable[[Path, Path, bool], None]
 XhsProcessFinder = Callable[[Path], list[int]]
 XhsProcessStopper = Callable[[list[int]], None]
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+XHS_ACCOUNT_CACHE_NAME = "xhs_account.json"
 
 
 class OperationCancelled(RuntimeError):
@@ -477,7 +479,7 @@ class ConsoleService:
         }
 
     def xhs_status(self) -> dict[str, Any]:
-        return self._with_xhs_process_info(_xhs_status_payload(self.xhs_client_factory()))
+        return self._with_xhs_process_info(_xhs_status_payload(self.xhs_client_factory(), self.config))
 
     def xhs_path_status(self, request: XhsPathStatusRequest) -> dict[str, Any]:
         return {
@@ -500,6 +502,7 @@ class ConsoleService:
             }
 
         if not status["logged_in"]:
+            _clear_xhs_account_cache(self.config)
             login_exe = _configured_xhs_file(self.config, "login_exe")
             working_dir = _configured_xhs_working_dir(self.config, login_exe)
             self.process_starter(login_exe, working_dir, False)
@@ -511,6 +514,41 @@ class ConsoleService:
         return {
             "message": "小红书 MCP 已启动并已登录。",
             "result": status,
+        }
+
+    def refresh_xhs_account(self) -> dict[str, Any]:
+        client = self.xhs_client_factory()
+        status = _xhs_status_payload(client, self.config)
+        if status.get("error"):
+            return {
+                "message": status["error"],
+                "result": self._with_xhs_process_info(status),
+            }
+        if not status["logged_in"]:
+            _clear_xhs_account_cache(self.config)
+            return {
+                "message": "小红书尚未登录，未刷新用户名。",
+                "result": self._with_xhs_process_info(status),
+            }
+
+        try:
+            username = client.get_my_profile_username().strip()
+        except XhsMcpError as exc:
+            return {
+                "message": f"用户名刷新失败：{exc}",
+                "result": self.xhs_status(),
+            }
+
+        if not username:
+            return {
+                "message": "用户名刷新失败：未获取到用户名。",
+                "result": self.xhs_status(),
+            }
+
+        _write_xhs_account_cache(self.config, username)
+        return {
+            "message": "小红书用户名已刷新。",
+            "result": self.xhs_status(),
         }
 
     def stop_xhs_mcp(self) -> dict[str, Any]:
@@ -681,6 +719,10 @@ def create_app(
     def api_xhs_stop() -> dict[str, Any]:
         return _handle(service.stop_xhs_mcp)
 
+    @app.post("/api/xhs/account/refresh")
+    def api_xhs_account_refresh() -> dict[str, Any]:
+        return _handle(service.refresh_xhs_account)
+
     @app.post("/api/xhs/publish")
     def api_xhs_publish(request: XhsPublishRequest) -> dict[str, Any]:
         return _handle(lambda: service.publish_xhs(request))
@@ -696,7 +738,7 @@ def _build_xhs_client(config: dict[str, Any]) -> XhsMcpClient:
     )
 
 
-def _xhs_status_payload(client: XhsMcpClient) -> dict[str, Any]:
+def _xhs_status_payload(client: XhsMcpClient, config: dict[str, Any] | None = None) -> dict[str, Any]:
     try:
         result = client.check_login_status()
     except XhsMcpError as exc:
@@ -704,21 +746,79 @@ def _xhs_status_payload(client: XhsMcpClient) -> dict[str, Any]:
             "connected": False,
             "logged_in": False,
             "text": "",
-            "error": str(exc),
+            "error": "未连接",
         }
 
     text = result.text or ""
     logged_in = _is_xhs_logged_in(text)
+    if not logged_in and config is not None:
+        _clear_xhs_account_cache(config)
+    username = _read_xhs_account_cache(config) if logged_in and config is not None else ""
+    display_text = _format_xhs_status_text(text, logged_in, username)
     return {
         "connected": True,
         "logged_in": logged_in,
-        "text": text,
-        "error": text if result.is_error else None,
+        "text": display_text,
+        "error": display_text if result.is_error else None,
     }
 
 
 def _is_xhs_logged_in(text: str) -> bool:
     return "已登录" in text and "未登录" not in text
+
+
+def _format_xhs_status_text(text: str, logged_in: bool, username: str = "") -> str:
+    clean_lines = [
+        line.strip()
+        for line in text.replace("✅", "").splitlines()
+        if line.strip()
+        and "你可以使用其他功能了" not in line
+        and not line.strip().startswith("用户名:")
+    ]
+    if logged_in:
+        if username:
+            return f"已登录\n用户名: {username}"
+        return "已登录"
+    if any("未登录" in line for line in clean_lines):
+        return "未登录"
+    return "\n".join(clean_lines).strip()
+
+
+def _xhs_account_cache_path(config: dict[str, Any]) -> Path:
+    state_dir = resolve_project_path(config.get("paths", {}).get("state_dir", "data/state"))
+    return state_dir / XHS_ACCOUNT_CACHE_NAME
+
+
+def _read_xhs_account_cache(config: dict[str, Any]) -> str:
+    path = _xhs_account_cache_path(config)
+    if not path.exists():
+        return ""
+    try:
+        data = json.loads(safe_read_text(path, config))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return ""
+    username = data.get("username") if isinstance(data, dict) else None
+    return username.strip() if isinstance(username, str) else ""
+
+
+def _write_xhs_account_cache(config: dict[str, Any], username: str) -> None:
+    data = {
+        "username": username.strip(),
+        "cached_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    safe_write_text(
+        _xhs_account_cache_path(config),
+        json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+        config,
+    )
+
+
+def _clear_xhs_account_cache(config: dict[str, Any]) -> None:
+    path = validate_path(_xhs_account_cache_path(config), config, for_write=True)
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def _describe_publish_path(path_text: str) -> dict[str, Any]:
@@ -737,7 +837,7 @@ def _describe_publish_path(path_text: str) -> dict[str, Any]:
             "kind": "url",
             "exists": None,
             "is_file": None,
-            "message": f"{value}：远程 URL，未检查本地文件",
+            "message": "远程 URL",
         }
 
     path = Path(value).expanduser()
@@ -753,15 +853,15 @@ def _describe_publish_path(path_text: str) -> dict[str, Any]:
             "kind": "local",
             "exists": False,
             "is_file": False,
-            "message": f"{value}：路径无法检查：{exc}",
+            "message": "路径无法检查",
         }
 
     if exists and is_file:
-        message = f"{resolved}：文件存在"
+        message = "文件存在"
     elif exists:
-        message = f"{resolved}：路径存在，但不是文件"
+        message = "路径存在，但不是文件"
     else:
-        message = f"{resolved}：文件不存在"
+        message = "文件不存在"
     return {
         "path": str(resolved),
         "kind": "local",
@@ -822,14 +922,17 @@ def _find_configured_process_ids(executable: Path) -> list[int]:
         return []
 
     script = (
-        "$target = [System.IO.Path]::GetFullPath($env:XHS_MCP_EXE);"
+        "$targetName = [System.IO.Path]::GetFileNameWithoutExtension($env:XHS_MCP_EXE);"
         "try {"
         "  $items = @(Get-CimInstance Win32_Process -ErrorAction Stop | "
-        "    Where-Object { $_.ExecutablePath -and ([System.IO.Path]::GetFullPath($_.ExecutablePath) -eq $target) } | "
+        "    Where-Object {"
+        "      $name = if ($_.ExecutablePath) { [System.IO.Path]::GetFileNameWithoutExtension($_.ExecutablePath) } else { $_.Name };"
+        "      $name -like 'xiaohongshu-mcp*' -or $name -eq $targetName"
+        "    } | "
         "    Select-Object -ExpandProperty ProcessId);"
         "} catch {"
         "  $items = @(Get-Process | Where-Object {"
-        "    try { $_.Path -and ([System.IO.Path]::GetFullPath($_.Path) -eq $target) } catch { $false }"
+        "    try { $_.ProcessName -like 'xiaohongshu-mcp*' -or $_.ProcessName -eq $targetName } catch { $false }"
         "  } | Select-Object -ExpandProperty Id);"
         "}"
         "$items | ConvertTo-Json -Compress"
@@ -2078,7 +2181,7 @@ XHS_HTML = """<!doctype html>
         <h2>MCP</h2>
         <div class="status" id="xhsStatus">准备中</div>
         <div class="row">
-          <button id="startMcpBtn" type="button">打开 MCP</button>
+          <button id="startMcpBtn" type="button" disabled>打开 MCP</button>
         </div>
       </section>
     </div>
@@ -2087,18 +2190,18 @@ XHS_HTML = """<!doctype html>
       <div class="stack">
         <div class="field">
           <label for="draftInput">文本路径</label>
-          <input id="draftInput" type="text" spellcheck="false">
+          <input id="draftInput" type="text" spellcheck="false" required>
           <div class="meta" id="draftState"></div>
         </div>
         <div class="field">
-          <label for="imageInput">图片路径</label>
-          <textarea id="imageInput" spellcheck="false"></textarea>
+          <label for="imageInput">图片路径（每行一张）</label>
+          <textarea id="imageInput" spellcheck="false" required></textarea>
           <div class="meta" id="imageState"></div>
         </div>
         <div class="split">
           <div class="field">
-            <label for="titleInput">标题（可选）</label>
-            <input id="titleInput" type="text" spellcheck="false">
+            <label for="titleInput">标题</label>
+            <input id="titleInput" type="text" spellcheck="false" required>
           </div>
           <div class="field">
             <label for="tagsInput">标签（可选）</label>
@@ -2130,6 +2233,8 @@ XHS_HTML = """<!doctype html>
     const $ = (id) => document.getElementById(id);
     const state = {
       busy: false,
+      statusLoading: true,
+      accountRefreshing: false,
       loggedIn: false,
       canStopMcp: false,
       poller: null,
@@ -2141,9 +2246,14 @@ XHS_HTML = """<!doctype html>
       updateControls();
     }
 
+    function setStatusLoading(value) {
+      state.statusLoading = value;
+      updateControls();
+    }
+
     function updateControls() {
       const mcpButton = $("startMcpBtn");
-      mcpButton.disabled = state.busy;
+      mcpButton.disabled = state.busy || state.statusLoading;
       mcpButton.textContent = state.canStopMcp ? "关闭 MCP" : "打开 MCP";
       $("publishBtn").disabled = state.busy || !state.loggedIn;
     }
@@ -2228,16 +2338,21 @@ XHS_HTML = """<!doctype html>
     }
 
     async function checkStatus() {
-      const data = await requestJson("/api/xhs/status");
-      renderMcpStatus(data);
-      return data;
+      setStatusLoading(true);
+      try {
+        const data = await requestJson("/api/xhs/status");
+        renderMcpStatus(data);
+        return data;
+      } finally {
+        setStatusLoading(false);
+      }
     }
 
     function renderMcpStatus(data) {
       state.loggedIn = Boolean(data.logged_in);
       state.canStopMcp = Boolean(data.can_stop);
       if (!data.connected) {
-        setStatus("xhsStatus", data.error || "MCP 未连接");
+        setStatus("xhsStatus", "未连接");
       } else if (data.error) {
         setStatus("xhsStatus", data.error, "error");
       } else if (data.logged_in) {
@@ -2264,6 +2379,8 @@ XHS_HTML = """<!doctype html>
         renderMcpStatus(data.result);
         if (!data.result.logged_in && !data.result.error) {
           startPollingLogin();
+        } else if (data.result.logged_in && !hasXhsUsername(data.result)) {
+          refreshXhsAccount();
         }
       } catch (error) {
         setStatus("xhsStatus", error.message, "error");
@@ -2293,7 +2410,10 @@ XHS_HTML = """<!doctype html>
       state.poller = window.setInterval(async () => {
         try {
           const data = await checkStatus();
-          if (data.logged_in || data.error) {
+          if (data.logged_in) {
+            stopPollingLogin();
+            refreshXhsAccount();
+          } else if (data.error) {
             stopPollingLogin();
           }
         } catch (error) {
@@ -2311,6 +2431,25 @@ XHS_HTML = """<!doctype html>
       state.poller = null;
     }
 
+    async function refreshXhsAccount() {
+      if (state.accountRefreshing) {
+        return;
+      }
+      state.accountRefreshing = true;
+      try {
+        const data = await requestJson("/api/xhs/account/refresh", { method: "POST" });
+        renderMcpStatus(data.result);
+      } catch (error) {
+        // 登录状态已经确认，用户名刷新失败不影响发布。
+      } finally {
+        state.accountRefreshing = false;
+      }
+    }
+
+    function hasXhsUsername(data) {
+      return String((data && data.text) || "").includes("用户名:");
+    }
+
     function collectPublishRequest() {
       return {
         draft: $("draftInput").value,
@@ -2326,6 +2465,11 @@ XHS_HTML = """<!doctype html>
 
     async function publishXhs() {
       const request = collectPublishRequest();
+      const missing = missingRequiredFields(request);
+      if (missing.length) {
+        setStatus("publishStatus", `请补全：${missing.join("、")}`, "error");
+        return;
+      }
       if (!window.confirm(`确认发布小红书？可见范围：${request.visibility}`)) {
         return;
       }
@@ -2358,6 +2502,20 @@ XHS_HTML = """<!doctype html>
         .filter(Boolean);
     }
 
+    function missingRequiredFields(request) {
+      const missing = [];
+      if (!request.draft.trim()) {
+        missing.push("文本路径");
+      }
+      if (!request.images.length) {
+        missing.push("图片路径");
+      }
+      if (!request.title.trim()) {
+        missing.push("标题");
+      }
+      return missing;
+    }
+
     function escapeHtml(value) {
       return String(value)
         .replaceAll("&", "&amp;")
@@ -2372,8 +2530,16 @@ XHS_HTML = """<!doctype html>
     $("draftInput").addEventListener("input", schedulePathStatus);
     $("imageInput").addEventListener("input", schedulePathStatus);
     loadDefaults()
-      .then(checkStatus)
-      .catch((error) => setStatus("xhsStatus", error.message, "error"));
+      .then(async () => {
+        const data = await checkStatus();
+        if (data.logged_in && !hasXhsUsername(data)) {
+          refreshXhsAccount();
+        }
+      })
+      .catch((error) => {
+        setStatus("xhsStatus", error.message, "error");
+        setStatusLoading(false);
+      });
   </script>
 </body>
 </html>

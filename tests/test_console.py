@@ -91,15 +91,28 @@ class ErrorProvider(FakeProvider):
 
 
 class FakeXhsClient:
-    def __init__(self, *, logged_in: bool = True, connect_error: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        logged_in: bool = True,
+        connect_error: bool = False,
+        status_text: str = "",
+        profile_username: str = "",
+        profile_error: bool = False,
+    ) -> None:
         self.logged_in = logged_in
         self.connect_error = connect_error
+        self.status_text = status_text
+        self.profile_username = profile_username
+        self.profile_error = profile_error
         self.calls: list[tuple[str, dict[str, object]]] = []
 
     def check_login_status(self) -> XhsToolResult:
         self.calls.append(("check_login_status", {}))
         if self.connect_error:
             raise XhsMcpError("无法连接 xiaohongshu-mcp")
+        if self.status_text:
+            return XhsToolResult("check_login_status", self.status_text, {})
         if self.logged_in:
             return XhsToolResult("check_login_status", "已登录\n用户名: test-user", {})
         return XhsToolResult("check_login_status", "未登录", {})
@@ -107,6 +120,12 @@ class FakeXhsClient:
     def publish_content(self, arguments: dict[str, object]) -> XhsToolResult:
         self.calls.append(("publish_content", arguments))
         return XhsToolResult("publish_content", "发布成功 note_id=abc", {})
+
+    def get_my_profile_username(self) -> str:
+        self.calls.append(("get_my_profile_username", {}))
+        if self.profile_error:
+            raise XhsMcpError("profile failed")
+        return self.profile_username
 
 
 class ConsoleTests(unittest.TestCase):
@@ -165,14 +184,20 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn('id="imageState"', html)
             self.assertIn('id="visibilityInput"', html)
             self.assertIn("可见范围", html)
-            self.assertIn("标题（可选）", html)
+            self.assertIn("图片路径（每行一张）", html)
+            self.assertIn("标题</label>", html)
             self.assertIn("标签（可选）", html)
             self.assertIn("定时发布（可选）", html)
             self.assertIn("原创标记（可选）", html)
+            self.assertIn('id="startMcpBtn" type="button" disabled', html)
+            self.assertIn("statusLoading", html)
+            self.assertIn("missingRequiredFields", html)
+            self.assertIn("请补全", html)
             self.assertNotIn('id="coverPreview"', html)
             self.assertNotIn("默认封面", html)
             self.assertIn("/api/xhs/start", html)
             self.assertIn("/api/xhs/stop", html)
+            self.assertIn("/api/xhs/account/refresh", html)
             self.assertIn("/api/xhs/publish", html)
             self.assertIn("/api/xhs/path-status", html)
             self.assertIn("schedulePathStatus", html)
@@ -222,15 +247,23 @@ class ConsoleTests(unittest.TestCase):
             data = response.json()
             self.assertTrue(data["draft"]["exists"])
             self.assertTrue(data["draft"]["is_file"])
+            self.assertEqual(data["draft"]["message"], "文件存在")
             self.assertTrue(data["images"][0]["exists"])
+            self.assertEqual(data["images"][0]["message"], "文件存在")
             self.assertEqual(data["images"][1]["kind"], "url")
+            self.assertEqual(data["images"][1]["message"], "远程 URL")
             self.assertIsNone(data["images"][1]["exists"])
             self.assertFalse(data["images"][2]["exists"])
+            self.assertEqual(data["images"][2]["message"], "文件不存在")
 
     def test_xhs_start_runs_login_when_mcp_is_available_but_not_logged_in(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
             _create_fake_xhs_executables(config)
+            state_dir = Path(config["paths"]["state_dir"])
+            state_dir.mkdir(parents=True)
+            cache_path = state_dir / "xhs_account.json"
+            cache_path.write_text(json.dumps({"username": "旧账号"}, ensure_ascii=False), encoding="utf-8")
             xhs_client = FakeXhsClient(logged_in=False)
             starts: list[tuple[Path, Path, bool]] = []
             client = TestClient(
@@ -249,6 +282,7 @@ class ConsoleTests(unittest.TestCase):
             self.assertEqual(len(starts), 1)
             self.assertEqual(starts[0][0], Path(config["xiaohongshu"]["login_exe"]).resolve())
             self.assertFalse(starts[0][2])
+            self.assertFalse(cache_path.exists())
 
     def test_xhs_status_reports_configured_mcp_process(self) -> None:
         with _temporary_directory() as temp_dir:
@@ -272,11 +306,162 @@ class ConsoleTests(unittest.TestCase):
             self.assertTrue(data["can_stop"])
             self.assertEqual(data["pids"], [101, 102])
 
-    def test_xhs_stop_closes_configured_mcp_process(self) -> None:
+    def test_xhs_status_uses_cached_username_without_profile_lookup(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
             _create_fake_xhs_executables(config)
-            active_pids = [321]
+            state_dir = Path(config["paths"]["state_dir"])
+            state_dir.mkdir(parents=True)
+            (state_dir / "xhs_account.json").write_text(
+                json.dumps({"username": "123886", "cached_at": "2026-05-14T00:00:00"}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            xhs_client = FakeXhsClient(
+                status_text="✅ 已登录\n用户名: xiaohongshu-mcp\n\n你可以使用其他功能了。",
+                profile_username="真实昵称",
+            )
+            client = TestClient(
+                create_app(
+                    config=config,
+                    provider_factory=FakeProvider,
+                    xhs_client_factory=lambda: xhs_client,  # type: ignore[arg-type]
+                    process_finder=lambda exe: [],
+                )
+            )
+
+            response = client.get("/api/xhs/status")
+
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertTrue(data["logged_in"])
+            self.assertEqual(data["text"], "已登录\n用户名: 123886")
+            self.assertNotIn("get_my_profile_username", [name for name, _ in xhs_client.calls])
+
+    def test_xhs_status_without_cache_does_not_show_hardcoded_username(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            _create_fake_xhs_executables(config)
+            xhs_client = FakeXhsClient(
+                status_text="✅ 已登录\n用户名: xiaohongshu-mcp\n\n你可以使用其他功能了。",
+                profile_username="真实昵称",
+            )
+            client = TestClient(
+                create_app(
+                    config=config,
+                    provider_factory=FakeProvider,
+                    xhs_client_factory=lambda: xhs_client,  # type: ignore[arg-type]
+                    process_finder=lambda exe: [],
+                )
+            )
+
+            response = client.get("/api/xhs/status")
+
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertTrue(data["logged_in"])
+            self.assertEqual(data["text"], "已登录")
+            self.assertNotIn("get_my_profile_username", [name for name, _ in xhs_client.calls])
+
+    def test_xhs_status_deletes_cache_when_not_logged_in(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            _create_fake_xhs_executables(config)
+            state_dir = Path(config["paths"]["state_dir"])
+            state_dir.mkdir(parents=True)
+            cache_path = state_dir / "xhs_account.json"
+            cache_path.write_text(json.dumps({"username": "旧账号"}, ensure_ascii=False), encoding="utf-8")
+            client = TestClient(
+                create_app(
+                    config=config,
+                    provider_factory=FakeProvider,
+                    xhs_client_factory=lambda: FakeXhsClient(logged_in=False),  # type: ignore[arg-type]
+                    process_finder=lambda exe: [],
+                )
+            )
+
+            response = client.get("/api/xhs/status")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertFalse(response.json()["logged_in"])
+            self.assertFalse(cache_path.exists())
+
+    def test_xhs_status_simplifies_disconnected_error(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            _create_fake_xhs_executables(config)
+            client = TestClient(
+                create_app(
+                    config=config,
+                    provider_factory=FakeProvider,
+                    xhs_client_factory=lambda: FakeXhsClient(connect_error=True),  # type: ignore[arg-type]
+                    process_finder=lambda exe: [],
+                )
+            )
+
+            response = client.get("/api/xhs/status")
+
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertFalse(data["connected"])
+            self.assertEqual(data["error"], "未连接")
+
+    def test_xhs_account_refresh_writes_username_cache(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            _create_fake_xhs_executables(config)
+            xhs_client = FakeXhsClient(
+                status_text="✅ 已登录\n用户名: xiaohongshu-mcp\n\n你可以使用其他功能了。",
+                profile_username="123886",
+            )
+            client = TestClient(
+                create_app(
+                    config=config,
+                    provider_factory=FakeProvider,
+                    xhs_client_factory=lambda: xhs_client,  # type: ignore[arg-type]
+                    process_finder=lambda exe: [],
+                )
+            )
+
+            response = client.post("/api/xhs/account/refresh")
+
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["message"], "小红书用户名已刷新。")
+            self.assertEqual(data["result"]["text"], "已登录\n用户名: 123886")
+            cache_path = Path(config["paths"]["state_dir"]) / "xhs_account.json"
+            cache = json.loads(cache_path.read_text(encoding="utf-8"))
+            self.assertEqual(cache["username"], "123886")
+            self.assertIn("cached_at", cache)
+
+    def test_xhs_account_refresh_failure_keeps_logged_in_status(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            _create_fake_xhs_executables(config)
+            client = TestClient(
+                create_app(
+                    config=config,
+                    provider_factory=FakeProvider,
+                    xhs_client_factory=lambda: FakeXhsClient(  # type: ignore[arg-type]
+                        status_text="✅ 已登录\n用户名: xiaohongshu-mcp",
+                        profile_error=True,
+                    ),
+                    process_finder=lambda exe: [],
+                )
+            )
+
+            response = client.post("/api/xhs/account/refresh")
+
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertIn("用户名刷新失败", data["message"])
+            self.assertTrue(data["result"]["logged_in"])
+            self.assertEqual(data["result"]["text"], "已登录")
+
+    def test_xhs_stop_closes_all_xhs_mcp_processes(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            _create_fake_xhs_executables(config)
+            active_pids = [321, 654]
             stopped: list[int] = []
             xhs_client = FakeXhsClient(logged_in=True)
 
@@ -300,7 +485,7 @@ class ConsoleTests(unittest.TestCase):
             response = client.post("/api/xhs/stop")
 
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(stopped, [321])
+            self.assertEqual(stopped, [321, 654])
             data = response.json()
             self.assertIn("已关闭", data["message"])
             self.assertFalse(data["result"]["mcp_running"])
@@ -328,7 +513,7 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn("没有找到", response.json()["message"])
             self.assertEqual(stopped, [])
 
-    def test_xhs_stop_uses_configured_mcp_path_only(self) -> None:
+    def test_xhs_process_lookup_still_uses_configured_name_as_fallback(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
             _create_fake_xhs_executables(config)

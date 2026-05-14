@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
@@ -32,6 +33,10 @@ class XhsMcpClient:
 
     def publish_content(self, arguments: dict[str, object]) -> XhsToolResult:
         return self.call_tool("publish_content", arguments)
+
+    def get_my_profile_username(self) -> str:
+        response = self._get_json(_sibling_api_url(self.url, "/api/v1/user/me"))
+        return _extract_my_profile_username(response)
 
     def call_tool(self, name: str, arguments: dict[str, object]) -> XhsToolResult:
         self._ensure_initialized()
@@ -119,6 +124,22 @@ class XhsMcpClient:
         except json.JSONDecodeError as exc:
             raise XhsMcpError(f"MCP 返回不是 JSON：{raw[:200]}") from exc
 
+    def _get_json(self, url: str) -> dict[str, Any]:
+        request = urllib.request.Request(url, method="GET", headers={"Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                raw = response.read().decode("utf-8")
+        except urllib.error.URLError as exc:
+            raise XhsMcpError(f"无法读取小红书当前用户信息：{exc}") from exc
+
+        try:
+            body = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise XhsMcpError(f"小红书当前用户信息返回不是 JSON：{raw[:200]}") from exc
+        if not isinstance(body, dict):
+            raise XhsMcpError(f"小红书当前用户信息返回格式异常：{raw[:200]}")
+        return body
+
 
 def _extract_text(result: dict[str, Any]) -> str:
     content = result.get("content")
@@ -131,3 +152,30 @@ def _extract_text(result: dict[str, Any]) -> str:
             if isinstance(text, str):
                 texts.append(text)
     return "\n".join(texts).strip()
+
+
+def _sibling_api_url(mcp_url: str, api_path: str) -> str:
+    parsed = urllib.parse.urlparse(mcp_url)
+    return urllib.parse.urlunparse(parsed._replace(path=api_path, params="", query="", fragment=""))
+
+
+def _extract_my_profile_username(response: dict[str, Any]) -> str:
+    candidates = [
+        response,
+        response.get("data") if isinstance(response.get("data"), dict) else None,
+    ]
+    first_data = candidates[1]
+    if isinstance(first_data, dict):
+        candidates.append(first_data.get("data") if isinstance(first_data.get("data"), dict) else None)
+
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        basic_info = candidate.get("userBasicInfo")
+        if not isinstance(basic_info, dict):
+            continue
+        for key in ("nickname", "nickName"):
+            value = basic_info.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return ""
