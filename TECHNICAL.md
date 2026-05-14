@@ -84,26 +84,26 @@ conda run --no-capture-output -n xiushenlu python app/main.py console
 # 2. 在控制台首页日期右侧，打开“发布”下拉菜单，进入“发布小红书”。
 
 # 3. 在 /xhs 页面点击“打开 MCP”。
-#    页面会按配置启动 xiaohongshu.mcp_exe，并自动检查登录状态。
-#    如果未登录，会启动 xiaohongshu.login_exe；登录完成后页面轮询到“已登录”。
+#    页面会按配置启动 xiaohongshu.mcp_exe，并只检查 MCP URL 是否连通。
+#    小红书登录态由 xiaohongshu-mcp cookies 管理；发布失败时按 MCP 返回错误处理。
 
 # 4. 选择文本路径、图片路径、标题、标签、可见范围等，点击“发布”并确认。
 ```
 
 `/xhs` 页面行为：
 
-- MCP 状态接口会合并 HTTP 登录状态和本机进程状态。
-- 如果检测到本机 `xiaohongshu-mcp*` 进程正在运行，按钮显示“关闭 MCP”；点击会关闭本机所有 `xiaohongshu-mcp*` 进程，包括不是当前控制台启动的进程。
+- MCP 状态接口只做 MCP URL 连通性检查并读取本地用户名缓存，不主动调用 `check_login_status`。
+- 如果 MCP URL 能连上，按钮显示“关闭 MCP”；平时状态加载不扫描 Windows 进程。点击“关闭 MCP”时才扫描并关闭本机所有 `xiaohongshu-mcp*` 进程，包括不是当前控制台启动的进程。
 - 用户名缓存到 `data/state/xhs_account.json`；常规 MCP 状态同步只读缓存，不调用 `/api/v1/user/me`，登录完成后才单独刷新一次用户名缓存。
 - 文本路径默认 `post/data/YYYY-MM-DD.txt`，文件不存在时只提示，不自动创建。
 - 图片路径默认 `post/images/xiushenlu-xhs-cover.png`，支持多行，每行一个本地绝对路径或 HTTP/HTTPS URL。
 - 标题为必填；标签、定时发布和原创标记为可选；可见范围默认 `公开可见`。
-- 发布按钮会真实调用 `publish_content`，前端确认框通过后后端固定按 `approve=true` 执行。
+- 发布按钮会真实调用 `publish_content`，前端确认框通过后后端固定按 `approve=true` 执行；发布前不再预检查登录状态，cookies 失效或未登录时由 MCP 发布接口返回错误。
 
 命令行仍可作为备用入口：
 
 ```powershell
-# 检查修身炉能否连上 MCP，并确认小红书仍处于登录状态。
+# 检查修身炉能否连上 MCP；不会确认小红书实时登录状态。
 conda run --no-capture-output -n xiushenlu python app/main.py xhs status
 
 # 先 dry-run：读取草稿、校验参数、写 post_publish_requested，不真实发布。
@@ -122,7 +122,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 - `--visibility`：默认 `仅自己可见`，可显式传 `公开可见` 或 `仅互关好友可见`。
 - `--approve`：真正调用 `publish_content` 的确认开关；不带时只做 dry-run。
 
-发布前会先调用 `check_login_status`。如果 cookies 失效或 MCP 未登录，修身炉会停止发布并记录 `post_failed`，不会自动重试。发布请求会记录 `post_publish_requested`；发布成功记录 `post_published`。
+发布前不再调用 `check_login_status`，会直接调用 `publish_content`。如果 cookies 失效或 MCP 未登录，修身炉会记录 `post_failed` 并展示 MCP 返回的错误，不会自动重试；发布请求会记录 `post_publish_requested`，发布成功记录 `post_published`。
 
 ## 命令
 
@@ -138,7 +138,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 | `python app/main.py review --date YYYY-MM-DD --no-rollover` | 是 | 只对指定日期生成复盘，不滚动当前待办。 |
 | `python app/main.py status` | 否 | 打印今天的 daily。 |
 | `python app/main.py cost` | 否 | 汇总今日和本月 token，并覆盖 daily 的 token 统计区块。 |
-| `python app/main.py xhs status` | 否 | 通过本地 `xiaohongshu-mcp` 检查小红书登录状态。 |
+| `python app/main.py xhs status` | 否 | 通过本地 `xiaohongshu-mcp` 检查 MCP 连通性和本地缓存状态。 |
 | `python app/main.py xhs publish ...` | 否 | 从 `post/data` 草稿发布小红书图文；不带 `--approve` 只记录请求。 |
 | `python app/main.py console` | 视操作而定 | 启动本地控制台，复用已有 pipeline 和本地读写能力。 |
 
@@ -161,7 +161,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 | `paths.post_image_dir` | 小红书默认图片目录，默认 `post/images`。 |
 | `xiaohongshu.mcp_url` | 本地 `xiaohongshu-mcp` MCP 地址，默认 `http://localhost:18060/mcp`。 |
 | `xiaohongshu.mcp_exe` | 第三方 MCP release 主程序路径；控制台“打开/关闭 MCP”使用它。 |
-| `xiaohongshu.login_exe` | 第三方登录工具路径；未登录时控制台自动打开它。 |
+| `xiaohongshu.login_exe` | 第三方登录工具路径；需要重新登录时可手动使用它。 |
 | `xiaohongshu.working_dir` | 运行第三方 exe 的工作目录，通常是同级 `xiaohongshu-mcp`。 |
 | `safety.allowed_dirs` | 允许读写的数据目录白名单。 |
 | `safety.protected_files` | 受保护文件，当前包含 `data/memory/goals.md`。 |

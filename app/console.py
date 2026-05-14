@@ -479,7 +479,7 @@ class ConsoleService:
         }
 
     def xhs_status(self) -> dict[str, Any]:
-        return self._with_xhs_process_info(_xhs_status_payload(self.xhs_client_factory(), self.config))
+        return self._with_xhs_connection_info(_xhs_status_payload(self.xhs_client_factory(), self.config))
 
     def xhs_path_status(self, request: XhsPathStatusRequest) -> dict[str, Any]:
         return {
@@ -493,26 +493,16 @@ class ConsoleService:
             mcp_exe = _configured_xhs_file(self.config, "mcp_exe")
             working_dir = _configured_xhs_working_dir(self.config, mcp_exe)
             self.process_starter(mcp_exe, working_dir, True)
-            status = self._with_xhs_process_info(_wait_for_xhs_connection(self.xhs_client_factory))
+            status = self._with_xhs_connection_info(_wait_for_xhs_connection(self.xhs_client_factory))
 
         if status.get("error"):
             return {
-                "message": "MCP 已启动，但登录状态检查失败。",
-                "result": status,
-            }
-
-        if not status["logged_in"]:
-            _clear_xhs_account_cache(self.config)
-            login_exe = _configured_xhs_file(self.config, "login_exe")
-            working_dir = _configured_xhs_working_dir(self.config, login_exe)
-            self.process_starter(login_exe, working_dir, False)
-            return {
-                "message": "已打开小红书登录工具，请完成登录。",
+                "message": "MCP 已启动，但连接检查失败。",
                 "result": status,
             }
 
         return {
-            "message": "小红书 MCP 已启动并已登录。",
+            "message": "小红书 MCP 已连接。",
             "result": status,
         }
 
@@ -522,13 +512,7 @@ class ConsoleService:
         if status.get("error"):
             return {
                 "message": status["error"],
-                "result": self._with_xhs_process_info(status),
-            }
-        if not status["logged_in"]:
-            _clear_xhs_account_cache(self.config)
-            return {
-                "message": "小红书尚未登录，未刷新用户名。",
-                "result": self._with_xhs_process_info(status),
+                "result": self._with_xhs_connection_info(status),
             }
 
         try:
@@ -567,12 +551,6 @@ class ConsoleService:
         }
 
     def publish_xhs(self, request: XhsPublishRequest) -> dict[str, Any]:
-        status = self.xhs_status()
-        if status.get("error"):
-            raise RuntimeError(status["error"])
-        if not status["logged_in"]:
-            raise RuntimeError("小红书尚未登录，请先打开 MCP 并完成登录。")
-
         result = publish_xhs_from_draft(
             draft=request.draft,
             title=request.title,
@@ -602,6 +580,15 @@ class ConsoleService:
         return {
             **status,
             **self._xhs_process_info(),
+        }
+
+    def _with_xhs_connection_info(self, status: dict[str, Any]) -> dict[str, Any]:
+        connected = bool(status.get("connected"))
+        return {
+            **status,
+            "mcp_running": connected,
+            "can_stop": connected,
+            "pids": [],
         }
 
     def _xhs_process_info(self) -> dict[str, Any]:
@@ -739,9 +726,7 @@ def _build_xhs_client(config: dict[str, Any]) -> XhsMcpClient:
 
 
 def _xhs_status_payload(client: XhsMcpClient, config: dict[str, Any] | None = None) -> dict[str, Any]:
-    try:
-        result = client.check_login_status()
-    except XhsMcpError as exc:
+    if not client.can_connect():
         return {
             "connected": False,
             "logged_in": False,
@@ -749,39 +734,20 @@ def _xhs_status_payload(client: XhsMcpClient, config: dict[str, Any] | None = No
             "error": "未连接",
         }
 
-    text = result.text or ""
-    logged_in = _is_xhs_logged_in(text)
-    if not logged_in and config is not None:
-        _clear_xhs_account_cache(config)
-    username = _read_xhs_account_cache(config) if logged_in and config is not None else ""
-    display_text = _format_xhs_status_text(text, logged_in, username)
+    username = _read_xhs_account_cache(config) if config is not None else ""
+    display_text = _format_xhs_status_text(username)
     return {
         "connected": True,
-        "logged_in": logged_in,
+        "logged_in": bool(username),
         "text": display_text,
-        "error": display_text if result.is_error else None,
+        "error": None,
     }
 
 
-def _is_xhs_logged_in(text: str) -> bool:
-    return "已登录" in text and "未登录" not in text
-
-
-def _format_xhs_status_text(text: str, logged_in: bool, username: str = "") -> str:
-    clean_lines = [
-        line.strip()
-        for line in text.replace("✅", "").splitlines()
-        if line.strip()
-        and "你可以使用其他功能了" not in line
-        and not line.strip().startswith("用户名:")
-    ]
-    if logged_in:
-        if username:
-            return f"已登录\n用户名: {username}"
-        return "已登录"
-    if any("未登录" in line for line in clean_lines):
-        return "未登录"
-    return "\n".join(clean_lines).strip()
+def _format_xhs_status_text(username: str = "") -> str:
+    if username:
+        return f"已缓存登录\n用户名: {username}"
+    return "MCP 已连接"
 
 
 def _xhs_account_cache_path(config: dict[str, Any]) -> Path:
@@ -2236,6 +2202,7 @@ XHS_HTML = """<!doctype html>
       statusLoading: true,
       accountRefreshing: false,
       loggedIn: false,
+      mcpConnected: false,
       canStopMcp: false,
       poller: null,
       pathTimer: null,
@@ -2255,7 +2222,7 @@ XHS_HTML = """<!doctype html>
       const mcpButton = $("startMcpBtn");
       mcpButton.disabled = state.busy || state.statusLoading;
       mcpButton.textContent = state.canStopMcp ? "关闭 MCP" : "打开 MCP";
-      $("publishBtn").disabled = state.busy || !state.loggedIn;
+      $("publishBtn").disabled = state.busy || !state.mcpConnected;
     }
 
     function setStatus(id, text, kind = "") {
@@ -2349,6 +2316,7 @@ XHS_HTML = """<!doctype html>
     }
 
     function renderMcpStatus(data) {
+      state.mcpConnected = Boolean(data.connected);
       state.loggedIn = Boolean(data.logged_in);
       state.canStopMcp = Boolean(data.can_stop);
       if (!data.connected) {
@@ -2377,9 +2345,7 @@ XHS_HTML = """<!doctype html>
       try {
         const data = await requestJson("/api/xhs/start", { method: "POST" });
         renderMcpStatus(data.result);
-        if (!data.result.logged_in && !data.result.error) {
-          startPollingLogin();
-        } else if (data.result.logged_in && !hasXhsUsername(data.result)) {
+        if (data.result.connected && !hasXhsUsername(data.result)) {
           refreshXhsAccount();
         }
       } catch (error) {
@@ -2410,7 +2376,7 @@ XHS_HTML = """<!doctype html>
       state.poller = window.setInterval(async () => {
         try {
           const data = await checkStatus();
-          if (data.logged_in) {
+          if (data.connected) {
             stopPollingLogin();
             refreshXhsAccount();
           } else if (data.error) {
@@ -2532,7 +2498,7 @@ XHS_HTML = """<!doctype html>
     loadDefaults()
       .then(async () => {
         const data = await checkStatus();
-        if (data.logged_in && !hasXhsUsername(data)) {
+        if (data.connected && !hasXhsUsername(data)) {
           refreshXhsAccount();
         }
       })

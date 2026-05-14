@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import unittest
 import uuid
@@ -97,7 +98,7 @@ class PostingTests(unittest.TestCase):
             self.assertFalse(events[0]["detail"]["approved"])
             self.assertEqual(events[0]["detail"]["content_summary"], "今天完成小红书发布模块。")
 
-    def test_approve_checks_login_then_publishes_and_records_success(self) -> None:
+    def test_approve_publishes_without_login_precheck_and_records_success(self) -> None:
         with _temporary_config() as config:
             draft = _write_draft(config, "发布成功路径测试正文。")
             client = FakeXhsClient()
@@ -114,8 +115,8 @@ class PostingTests(unittest.TestCase):
             )
 
             self.assertTrue(result.approved)
-            self.assertEqual([name for name, _ in client.calls], ["check_login_status", "publish_content"])
-            publish_args = client.calls[1][1]
+            self.assertEqual([name for name, _ in client.calls], ["publish_content"])
+            publish_args = client.calls[0][1]
             self.assertEqual(publish_args["title"], "发布成功测试")
             self.assertEqual(publish_args["visibility"], "仅自己可见")
             events = logger.read_events()
@@ -124,11 +125,15 @@ class PostingTests(unittest.TestCase):
                 ["post_publish_requested", "post_published"],
             )
 
-    def test_approve_stops_when_not_logged_in_and_records_failure(self) -> None:
+    def test_approve_records_failure_and_clears_cache_when_publish_reports_login_error(self) -> None:
         with _temporary_config() as config:
             draft = _write_draft(config, "登录失败路径测试正文。")
-            client = FakeXhsClient(logged_in=False)
+            client = FakeXhsClient(publish_error=True)
             logger = EventLogger(config=config)
+            state_dir = Path(config["paths"]["state_dir"])
+            state_dir.mkdir(parents=True)
+            cache_path = state_dir / "xhs_account.json"
+            cache_path.write_text(json.dumps({"username": "旧账号"}, ensure_ascii=False), encoding="utf-8")
 
             with self.assertRaises(XhsMcpError):
                 publish_xhs_from_draft(
@@ -141,13 +146,14 @@ class PostingTests(unittest.TestCase):
                     client=client,  # type: ignore[arg-type]
                 )
 
-            self.assertEqual([name for name, _ in client.calls], ["check_login_status"])
+            self.assertEqual([name for name, _ in client.calls], ["publish_content"])
             events = logger.read_events()
             self.assertEqual(
                 [event["type"] for event in events],
                 ["post_publish_requested", "post_failed"],
             )
-            self.assertIn("未登录", events[1]["detail"]["error"])
+            self.assertIn("cookies", events[1]["detail"]["error"])
+            self.assertFalse(cache_path.exists())
 
 
 def _write_draft(config: dict[str, Any], text: str) -> Path:
@@ -165,13 +171,15 @@ class _temporary_config:
         self.root = parent / uuid.uuid4().hex
         post_dir = self.root / "post" / "data"
         logs_dir = self.root / "system_logs"
+        state_dir = self.root / "state"
         self.config = {
             "paths": {
                 "post_dir": str(post_dir),
                 "logs_dir": str(logs_dir),
+                "state_dir": str(state_dir),
             },
             "safety": {
-                "allowed_dirs": [str(post_dir), str(logs_dir)],
+                "allowed_dirs": [str(post_dir), str(logs_dir), str(state_dir)],
                 "protected_files": [],
             },
             "xiaohongshu": {

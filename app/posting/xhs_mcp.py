@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -33,6 +34,18 @@ class XhsMcpClient:
 
     def publish_content(self, arguments: dict[str, object]) -> XhsToolResult:
         return self.call_tool("publish_content", arguments)
+
+    def can_connect(self, timeout: float = 1.0) -> bool:
+        parsed = urllib.parse.urlparse(self.url)
+        host = parsed.hostname
+        if not host:
+            return False
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        try:
+            with socket.create_connection((host, port), timeout=min(timeout, self.timeout)):
+                return True
+        except OSError:
+            return False
 
     def get_my_profile_username(self) -> str:
         response = self._get_json(_sibling_api_url(self.url, "/api/v1/user/me"))

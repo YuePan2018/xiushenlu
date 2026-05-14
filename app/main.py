@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
+from typing import Any
 
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.config import load_config
+from app.config import load_config, resolve_project_path
 from app.cost import append_token_usage_report
 from app.daily import append_record, read_daily
 from app.inbox import write_today_tasks
@@ -20,6 +22,7 @@ from app.pipelines.nightly_review import NightlyReviewParseError, generate_night
 from app.pipelines.plan_update import PlanUpdateParseError, generate_plan_update
 from app.posting import publish_xhs_from_draft
 from app.posting.xhs_mcp import XhsMcpClient, XhsMcpError
+from app.safety import safe_read_text
 
 
 def configure_output_encoding() -> None:
@@ -194,13 +197,30 @@ def run_xhs_status() -> int:
         url=settings.get("mcp_url", "http://localhost:18060/mcp"),
         timeout=float(settings.get("timeout", 30)),
     )
-    try:
-        result = client.check_login_status()
-    except XhsMcpError as exc:
-        print(f"小红书 MCP 检查失败：{exc}", file=sys.stderr)
+    if not client.can_connect():
+        print("小红书 MCP 检查失败：未连接", file=sys.stderr)
         return 1
-    print(result.text or "小红书 MCP 未返回登录状态文本。")
-    return 1 if result.is_error else 0
+
+    username = _read_xhs_cached_username(config)
+    if username:
+        print("MCP 已连接")
+        print(f"已缓存登录：{username}")
+    else:
+        print("MCP 已连接")
+    return 0
+
+
+def _read_xhs_cached_username(config: dict[str, Any]) -> str:
+    state_dir = resolve_project_path(config.get("paths", {}).get("state_dir", "data/state"))
+    cache_path = state_dir / "xhs_account.json"
+    if not cache_path.exists():
+        return ""
+    try:
+        data = json.loads(safe_read_text(cache_path, config))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return ""
+    username = data.get("username") if isinstance(data, dict) else None
+    return username.strip() if isinstance(username, str) else ""
 
 
 def run_xhs_publish(args: argparse.Namespace) -> int:
