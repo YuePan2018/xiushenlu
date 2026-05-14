@@ -10,7 +10,7 @@
 
 当前版本已经具备基础 daily 闭环：今日计划、过程记录、日内更新、晚间复盘、待办滚动、本地控制台和 token 统计。后续所有 pipeline、post、工具、通知、自动化和审批能力，都会围绕“积累资料并用回知识”这条主线展开。
 
-小红书图文发布采用轻量外部适配：第三方 `xiaohongshu-mcp` 独立放在本项目同级目录运行，修身炉只读取 `post/data/` 草稿、做发布前校验和审批门禁，并通过本地 MCP 地址调用发布工具。
+小红书图文发布作为控制台里的内容出口，负责把整理好的 post 草稿发布到小红书。
 
 ## Demo 流程
 
@@ -24,26 +24,7 @@
 6. 晚间复盘：根据当天任务快照和过程记录生成复盘，只从计划内未完成任务和显式明日计划滚动待办；过程记录只作为证据和分析来源，不派生新任务。
 7. 统计消耗：汇总本地 LLM token 使用情况，避免后台调用失控。
 
-小红书发布分两步：先在同级目录启动第三方 `xiaohongshu-mcp`，再回到修身炉调用发布命令。
-
-```powershell
-# 终端 1：启动第三方 MCP。第一次使用前先人工登录。
-cd C:\Users\Ua Pan\Desktop\project\xiaohongshu-mcp
-go run cmd/login/main.go
-go run . -headless=false
-
-# 终端 2：回到修身炉检查登录状态。
-cd C:\Users\Ua Pan\Desktop\project\xiushenlu
-conda run --no-capture-output -n xiushenlu python app/main.py xhs status
-
-# 先 dry-run：只记录发布请求，不真实发布。
-conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draft post/data/YYYY-MM-DD.txt --title "标题" --image "C:\path\to\image.png" --tag 修身炉
-
-# 确认后实发：追加 --approve。
-conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draft post/data/YYYY-MM-DD.txt --title "标题" --image "C:\path\to\image.png" --tag 修身炉 --approve
-```
-
-`post/data/YYYY-MM-DD.txt` 是正文草稿；标题用 `--title` 传入，图片用 `--image` 传入本地绝对路径或 HTTP/HTTPS URL。默认可见范围是 `仅自己可见`。
+小红书发布推荐从控制台进入：在首页日期右侧的“发布”下拉菜单里点“发布小红书”。
 
 ## Milestone
 

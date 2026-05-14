@@ -53,6 +53,9 @@
 - 不轻易引入自主 agent loop；只有工具注册、审批、预算和暂停机制稳定后，再扩大自主性。
 - 项目内 Codex skill 放在 `.codex/skills/` 并由 Git 追踪；技术储备 skill 以项目内 `.codex/skills/xiushenlu-tech-reserve/` 为准。
 - 更新功能时，优先同步 `README.md`、`TECHNICAL.md` 和相关规划或执行文档，但不要把技术手册内容重新塞回 `AGENTS.md`。
+- `README.md` 保持项目定位、能力概览、面向用户的主流程和关键入口；不要放配置项、命令细节、第三方仓库布局、参数说明、实现机制或排障步骤。
+- README 末尾已有统一的 `TECHNICAL.md` 技术细节入口；新增功能段落不要反复写“详见 TECHNICAL”这类重复跳转。
+- 技术细节统一放进 `TECHNICAL.md`，包括运行命令、配置路径、模块职责、第三方工具/MCP 适配、API/CLI 参数、验证命令和故障处理。
 
 ## 安全与数据边界
 

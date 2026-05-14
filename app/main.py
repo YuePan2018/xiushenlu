@@ -18,6 +18,8 @@ from app.pipelines.daily_plan import generate_daily_plan
 from app.pipelines.log_schedule_update import update_schedule_from_log
 from app.pipelines.nightly_review import NightlyReviewParseError, generate_nightly_review
 from app.pipelines.plan_update import PlanUpdateParseError, generate_plan_update
+from app.posting import publish_xhs_from_draft
+from app.posting.xhs_mcp import XhsMcpClient, XhsMcpError
 
 
 def configure_output_encoding() -> None:
@@ -49,6 +51,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("status", help="查看今日 daily 内容")
     subparsers.add_parser("cost", help="查看今日和本月 token 消耗")
+
+    xhs = subparsers.add_parser("xhs", help="小红书图文发布")
+    xhs_subparsers = xhs.add_subparsers(dest="xhs_command")
+
+    xhs_subparsers.add_parser("status", help="检查 xiaohongshu-mcp 登录状态")
+
+    xhs_publish = xhs_subparsers.add_parser("publish", help="从 post/data 草稿发布小红书图文")
+    xhs_publish.add_argument("--draft", required=True, help="post/data 下的草稿文件路径")
+    xhs_publish.add_argument("--title", required=True, help="小红书标题")
+    xhs_publish.add_argument("--image", action="append", required=True, help="图片绝对路径或 HTTP/HTTPS URL，可重复传入")
+    xhs_publish.add_argument("--tag", action="append", default=[], help="话题标签，可重复传入")
+    xhs_publish.add_argument(
+        "--visibility",
+        default="仅自己可见",
+        choices=["公开可见", "仅自己可见", "仅互关好友可见"],
+        help="可见范围，默认仅自己可见",
+    )
+    xhs_publish.add_argument("--schedule-at", default="", help="定时发布时间，ISO8601 格式")
+    xhs_publish.add_argument("--original", action="store_true", help="声明原创")
+    xhs_publish.add_argument("--product", action="append", default=[], help="商品关键词，可重复传入")
+    xhs_publish.add_argument("--approve", action="store_true", help="确认调用 xiaohongshu-mcp 真实发布")
 
     console = subparsers.add_parser("console", help="启动本地控制台")
     console.add_argument("--host", default="127.0.0.1", help="监听地址，默认只监听本机")
@@ -164,6 +187,56 @@ def run_cost() -> int:
     return 0
 
 
+def run_xhs_status() -> int:
+    config = load_config()
+    settings = config.get("xiaohongshu", {})
+    client = XhsMcpClient(
+        url=settings.get("mcp_url", "http://localhost:18060/mcp"),
+        timeout=float(settings.get("timeout", 30)),
+    )
+    try:
+        result = client.check_login_status()
+    except XhsMcpError as exc:
+        print(f"小红书 MCP 检查失败：{exc}", file=sys.stderr)
+        return 1
+    print(result.text or "小红书 MCP 未返回登录状态文本。")
+    return 1 if result.is_error else 0
+
+
+def run_xhs_publish(args: argparse.Namespace) -> int:
+    config = load_config()
+    try:
+        result = publish_xhs_from_draft(
+            draft=args.draft,
+            title=args.title,
+            images=args.image,
+            tags=args.tag,
+            visibility=args.visibility,
+            approve=args.approve,
+            schedule_at=args.schedule_at,
+            is_original=args.original,
+            products=args.product,
+            config=config,
+        )
+    except (ValueError, XhsMcpError) as exc:
+        print(f"小红书发布失败：{exc}", file=sys.stderr)
+        return 1
+
+    print(f"草稿：{result.draft_path}")
+    print(f"标题：{result.payload.title}")
+    print(f"图片：{len(result.payload.images)} 张")
+    print(f"标签：{', '.join(result.payload.tags) if result.payload.tags else '无'}")
+    print(f"可见范围：{result.payload.visibility}")
+    if not result.approved:
+        print("已记录发布请求，但未真实发布。追加 --approve 后才会调用 xiaohongshu-mcp。")
+        return 0
+
+    print("小红书图文已提交发布。")
+    if result.publish_result and result.publish_result.text:
+        print(result.publish_result.text)
+    return 0
+
+
 def run_console(host: str = "127.0.0.1", port: int = 8765, reload: bool = False) -> int:
     import uvicorn
 
@@ -186,6 +259,12 @@ def main(argv: list[str] | None = None) -> int:
         return run_status()
     if args.command == "cost":
         return run_cost()
+    if args.command == "xhs":
+        if args.xhs_command == "status":
+            return run_xhs_status()
+        if args.xhs_command == "publish":
+            return run_xhs_publish(args)
+        parser.error("xhs 需要指定子命令：status 或 publish")
     if args.command == "console":
         return run_console(host=args.host, port=args.port, reload=args.reload)
 

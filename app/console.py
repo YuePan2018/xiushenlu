@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -11,7 +13,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -26,9 +28,15 @@ from app.pipelines.daily_plan import generate_daily_plan
 from app.pipelines.log_schedule_update import update_schedule_from_log
 from app.pipelines.nightly_review import NightlyReviewParseError, generate_nightly_review
 from app.pipelines.plan_update import PlanUpdateParseError, generate_plan_update
+from app.posting import publish_xhs_from_draft
+from app.posting.xhs_mcp import XhsMcpClient, XhsMcpError
 
 
 ProviderFactory = Callable[[], LLMProvider]
+XhsClientFactory = Callable[[], XhsMcpClient]
+ProcessStarter = Callable[[Path, Path, bool], None]
+XhsProcessFinder = Callable[[Path], list[int]]
+XhsProcessStopper = Callable[[list[int]], None]
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
@@ -152,10 +160,44 @@ class CostRequest(BaseModel):
         extra = "forbid"
 
 
+class XhsPublishRequest(BaseModel):
+    draft: str
+    title: str
+    images: list[str]
+    tags: list[str] = []
+    visibility: str = "公开可见"
+    schedule_at: str = ""
+    is_original: bool = False
+    products: list[str] = []
+
+    class Config:
+        extra = "forbid"
+
+
+class XhsPathStatusRequest(BaseModel):
+    draft: str = ""
+    images: list[str] = []
+
+    class Config:
+        extra = "forbid"
+
+
 class ConsoleService:
-    def __init__(self, config: dict[str, Any], provider_factory: ProviderFactory) -> None:
+    def __init__(
+        self,
+        config: dict[str, Any],
+        provider_factory: ProviderFactory,
+        xhs_client_factory: XhsClientFactory | None = None,
+        process_starter: ProcessStarter | None = None,
+        process_finder: XhsProcessFinder | None = None,
+        process_stopper: XhsProcessStopper | None = None,
+    ) -> None:
         self.config = config
         self.provider_factory = provider_factory
+        self.xhs_client_factory = xhs_client_factory or (lambda: _build_xhs_client(config))
+        self.process_starter = process_starter or _start_configured_process
+        self.process_finder = process_finder or _find_configured_process_ids
+        self.process_stopper = process_stopper or _stop_process_ids
         self.operations = OperationManager()
 
     def snapshot(self, date_text: str | None = None) -> dict[str, Any]:
@@ -370,14 +412,151 @@ class ConsoleService:
     def stop_operation(self) -> dict[str, Any]:
         return self.operations.stop()
 
+    def xhs_defaults(self) -> dict[str, Any]:
+        today_text = date.today().isoformat()
+        draft_path = resolve_project_path(self.config.get("paths", {}).get("post_dir", "post/data")) / f"{today_text}.txt"
+        image_path = (
+            resolve_project_path(self.config.get("paths", {}).get("post_image_dir", "post/images"))
+            / "xiushenlu-xhs-cover.png"
+        )
+        return {
+            "date": today_text,
+            "draft_path": str(draft_path),
+            "draft_exists": draft_path.exists(),
+            "image_path": str(image_path),
+            "image_exists": image_path.exists(),
+            "visibility": "公开可见",
+            "visibility_options": ["仅自己可见", "公开可见", "仅互关好友可见"],
+            "title": "",
+            "tags": [],
+        }
+
+    def xhs_status(self) -> dict[str, Any]:
+        return self._with_xhs_process_info(_xhs_status_payload(self.xhs_client_factory()))
+
+    def xhs_path_status(self, request: XhsPathStatusRequest) -> dict[str, Any]:
+        return {
+            "draft": _describe_publish_path(request.draft),
+            "images": [_describe_publish_path(path) for path in request.images],
+        }
+
+    def start_xhs_mcp(self) -> dict[str, Any]:
+        status = self.xhs_status()
+        if not status["connected"]:
+            mcp_exe = _configured_xhs_file(self.config, "mcp_exe")
+            working_dir = _configured_xhs_working_dir(self.config, mcp_exe)
+            self.process_starter(mcp_exe, working_dir, True)
+            status = self._with_xhs_process_info(_wait_for_xhs_connection(self.xhs_client_factory))
+
+        if status.get("error"):
+            return {
+                "message": "MCP 已启动，但登录状态检查失败。",
+                "result": status,
+            }
+
+        if not status["logged_in"]:
+            login_exe = _configured_xhs_file(self.config, "login_exe")
+            working_dir = _configured_xhs_working_dir(self.config, login_exe)
+            self.process_starter(login_exe, working_dir, False)
+            return {
+                "message": "已打开小红书登录工具，请完成登录。",
+                "result": status,
+            }
+
+        return {
+            "message": "小红书 MCP 已启动并已登录。",
+            "result": status,
+        }
+
+    def stop_xhs_mcp(self) -> dict[str, Any]:
+        process_info = self._xhs_process_info()
+        pids = process_info["pids"]
+        if not pids:
+            return {
+                "message": "没有找到由当前配置文件指定的 xiaohongshu-mcp 进程。",
+                "result": self.xhs_status(),
+            }
+
+        self.process_stopper(pids)
+        return {
+            "message": "小红书 MCP 已关闭。",
+            "result": self.xhs_status(),
+        }
+
+    def publish_xhs(self, request: XhsPublishRequest) -> dict[str, Any]:
+        status = self.xhs_status()
+        if status.get("error"):
+            raise RuntimeError(status["error"])
+        if not status["logged_in"]:
+            raise RuntimeError("小红书尚未登录，请先打开 MCP 并完成登录。")
+
+        result = publish_xhs_from_draft(
+            draft=request.draft,
+            title=request.title,
+            images=request.images,
+            tags=request.tags,
+            visibility=request.visibility,
+            approve=True,
+            schedule_at=request.schedule_at,
+            is_original=request.is_original,
+            products=request.products,
+            config=self.config,
+            client=self.xhs_client_factory(),
+        )
+        return {
+            "message": "小红书图文已提交发布。",
+            "result": {
+                "draft_path": str(result.draft_path),
+                "title": result.payload.title,
+                "images_count": len(result.payload.images),
+                "tags": result.payload.tags,
+                "visibility": result.payload.visibility,
+                "publish_result": result.publish_result.text if result.publish_result else "",
+            },
+        }
+
+    def _with_xhs_process_info(self, status: dict[str, Any]) -> dict[str, Any]:
+        return {
+            **status,
+            **self._xhs_process_info(),
+        }
+
+    def _xhs_process_info(self) -> dict[str, Any]:
+        try:
+            mcp_exe = _configured_xhs_file(self.config, "mcp_exe")
+            pids = self.process_finder(mcp_exe)
+        except RuntimeError as exc:
+            return {
+                "mcp_running": False,
+                "can_stop": False,
+                "pids": [],
+                "process_error": str(exc),
+            }
+        return {
+            "mcp_running": bool(pids),
+            "can_stop": bool(pids),
+            "pids": pids,
+        }
+
 
 def create_app(
     config: dict[str, Any] | None = None,
     provider_factory: ProviderFactory | None = None,
+    xhs_client_factory: XhsClientFactory | None = None,
+    process_starter: ProcessStarter | None = None,
+    process_finder: XhsProcessFinder | None = None,
+    process_stopper: XhsProcessStopper | None = None,
 ) -> FastAPI:
     cfg = config or load_config()
     factory = provider_factory or (lambda: DashScopeProvider(cfg))
-    service = ConsoleService(cfg, factory)
+    service = ConsoleService(
+        cfg,
+        factory,
+        xhs_client_factory,
+        process_starter,
+        process_finder,
+        process_stopper,
+    )
     app = FastAPI(title="修身炉本地控制台")
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     app.state.console_service = service
@@ -385,6 +564,10 @@ def create_app(
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
         return HTMLResponse(CONSOLE_HTML)
+
+    @app.get("/xhs", response_class=HTMLResponse)
+    def xhs_page() -> HTMLResponse:
+        return HTMLResponse(XHS_HTML)
 
     @app.get("/api/state")
     def api_state(date: str | None = None) -> dict[str, Any]:
@@ -422,7 +605,251 @@ def create_app(
     def api_cost(request: CostRequest) -> dict[str, Any]:
         return _handle(lambda: service.report_tokens(request))
 
+    @app.get("/api/xhs/defaults")
+    def api_xhs_defaults() -> dict[str, Any]:
+        return _handle(service.xhs_defaults)
+
+    @app.post("/api/xhs/path-status")
+    def api_xhs_path_status(request: XhsPathStatusRequest) -> dict[str, Any]:
+        return _handle(lambda: service.xhs_path_status(request))
+
+    @app.get("/api/xhs/cover")
+    def api_xhs_cover() -> FileResponse:
+        path = resolve_project_path(cfg.get("paths", {}).get("post_image_dir", "post/images")) / "xiushenlu-xhs-cover.png"
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="默认封面图不存在。")
+        return FileResponse(path)
+
+    @app.get("/api/xhs/status")
+    def api_xhs_status() -> dict[str, Any]:
+        return _handle(service.xhs_status)
+
+    @app.post("/api/xhs/start")
+    def api_xhs_start() -> dict[str, Any]:
+        return _handle(service.start_xhs_mcp)
+
+    @app.post("/api/xhs/stop")
+    def api_xhs_stop() -> dict[str, Any]:
+        return _handle(service.stop_xhs_mcp)
+
+    @app.post("/api/xhs/publish")
+    def api_xhs_publish(request: XhsPublishRequest) -> dict[str, Any]:
+        return _handle(lambda: service.publish_xhs(request))
+
     return app
+
+
+def _build_xhs_client(config: dict[str, Any]) -> XhsMcpClient:
+    settings = config.get("xiaohongshu", {})
+    return XhsMcpClient(
+        url=settings.get("mcp_url", "http://localhost:18060/mcp"),
+        timeout=float(settings.get("timeout", 30)),
+    )
+
+
+def _xhs_status_payload(client: XhsMcpClient) -> dict[str, Any]:
+    try:
+        result = client.check_login_status()
+    except XhsMcpError as exc:
+        return {
+            "connected": False,
+            "logged_in": False,
+            "text": "",
+            "error": str(exc),
+        }
+
+    text = result.text or ""
+    logged_in = _is_xhs_logged_in(text)
+    return {
+        "connected": True,
+        "logged_in": logged_in,
+        "text": text,
+        "error": text if result.is_error else None,
+    }
+
+
+def _is_xhs_logged_in(text: str) -> bool:
+    return "已登录" in text and "未登录" not in text
+
+
+def _describe_publish_path(path_text: str) -> dict[str, Any]:
+    value = path_text.strip()
+    if not value:
+        return {
+            "path": "",
+            "kind": "empty",
+            "exists": False,
+            "is_file": False,
+            "message": "未填写",
+        }
+    if value.startswith(("http://", "https://")):
+        return {
+            "path": value,
+            "kind": "url",
+            "exists": None,
+            "is_file": None,
+            "message": f"{value}：远程 URL，未检查本地文件",
+        }
+
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = resolve_project_path(value)
+    try:
+        resolved = path.resolve()
+        exists = resolved.exists()
+        is_file = resolved.is_file() if exists else False
+    except (OSError, RuntimeError, ValueError) as exc:
+        return {
+            "path": value,
+            "kind": "local",
+            "exists": False,
+            "is_file": False,
+            "message": f"{value}：路径无法检查：{exc}",
+        }
+
+    if exists and is_file:
+        message = f"{resolved}：文件存在"
+    elif exists:
+        message = f"{resolved}：路径存在，但不是文件"
+    else:
+        message = f"{resolved}：文件不存在"
+    return {
+        "path": str(resolved),
+        "kind": "local",
+        "exists": exists,
+        "is_file": is_file,
+        "message": message,
+    }
+
+
+def _wait_for_xhs_connection(factory: XhsClientFactory, timeout_seconds: float = 12.0) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout_seconds
+    last_status: dict[str, Any] | None = None
+    while time.monotonic() < deadline:
+        last_status = _xhs_status_payload(factory())
+        if last_status["connected"]:
+            return last_status
+        time.sleep(0.8)
+    error = (last_status or {}).get("error") or "xiaohongshu-mcp 启动后仍无法连接。"
+    raise RuntimeError(error)
+
+
+def _configured_xhs_file(config: dict[str, Any], key: str) -> Path:
+    value = config.get("xiaohongshu", {}).get(key)
+    if not value:
+        raise RuntimeError(f"缺少配置：xiaohongshu.{key}")
+    path = resolve_project_path(value).resolve()
+    if not path.is_file():
+        raise RuntimeError(f"配置的文件不存在：xiaohongshu.{key}={path}")
+    return path
+
+
+def _configured_xhs_working_dir(config: dict[str, Any], executable: Path) -> Path:
+    value = config.get("xiaohongshu", {}).get("working_dir")
+    path = resolve_project_path(value).resolve() if value else executable.parent
+    if not path.is_dir():
+        raise RuntimeError(f"配置的工作目录不存在：{path}")
+    return path
+
+
+def _start_configured_process(executable: Path, working_dir: Path, hidden: bool) -> None:
+    creationflags = 0
+    if hidden and sys.platform.startswith("win"):
+        creationflags = subprocess.CREATE_NO_WINDOW
+    try:
+        subprocess.Popen(
+            [str(executable)],
+            cwd=str(working_dir),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creationflags,
+        )
+    except OSError as exc:
+        raise RuntimeError(f"无法启动 {executable.name}：{exc}") from exc
+
+
+def _find_configured_process_ids(executable: Path) -> list[int]:
+    if not sys.platform.startswith("win"):
+        return []
+
+    script = (
+        "$target = [System.IO.Path]::GetFullPath($env:XHS_MCP_EXE);"
+        "try {"
+        "  $items = @(Get-CimInstance Win32_Process -ErrorAction Stop | "
+        "    Where-Object { $_.ExecutablePath -and ([System.IO.Path]::GetFullPath($_.ExecutablePath) -eq $target) } | "
+        "    Select-Object -ExpandProperty ProcessId);"
+        "} catch {"
+        "  $items = @(Get-Process | Where-Object {"
+        "    try { $_.Path -and ([System.IO.Path]::GetFullPath($_.Path) -eq $target) } catch { $false }"
+        "  } | Select-Object -ExpandProperty Id);"
+        "}"
+        "$items | ConvertTo-Json -Compress"
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        env={**os.environ, "XHS_MCP_EXE": str(executable)},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        timeout=10,
+        check=False,
+    )
+    if result.returncode != 0:
+        message = result.stderr.strip() or "进程查询失败。"
+        raise RuntimeError(f"无法查询 xiaohongshu-mcp 进程：{message}")
+
+    output = result.stdout.strip()
+    if not output:
+        return []
+    try:
+        parsed = json.loads(output)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"进程查询返回格式异常：{output}") from exc
+    if isinstance(parsed, int):
+        return [parsed]
+    if isinstance(parsed, list):
+        return [int(item) for item in parsed]
+    return []
+
+
+def _stop_process_ids(pids: list[int]) -> None:
+    clean_pids = sorted({int(pid) for pid in pids if int(pid) > 0})
+    if not clean_pids:
+        return
+    if not sys.platform.startswith("win"):
+        raise RuntimeError("当前平台暂不支持从控制台关闭 xiaohongshu-mcp。")
+
+    ids = ",".join(str(pid) for pid in clean_pids)
+    script = (
+        f"$ids = @({ids});"
+        "Stop-Process -Id $ids -ErrorAction SilentlyContinue;"
+        "$deadline = (Get-Date).AddSeconds(5);"
+        "do {"
+        "  $alive = @(Get-Process -Id $ids -ErrorAction SilentlyContinue);"
+        "  if ($alive.Count -eq 0) { break }"
+        "  Start-Sleep -Milliseconds 200;"
+        "} while ((Get-Date) -lt $deadline);"
+        "$alive = @(Get-Process -Id $ids -ErrorAction SilentlyContinue);"
+        "if ($alive.Count -gt 0) { Stop-Process -Id $alive.Id -Force -ErrorAction SilentlyContinue };"
+        "$remaining = @(Get-Process -Id $ids -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id);"
+        "$remaining | ConvertTo-Json -Compress"
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        timeout=10,
+        check=False,
+    )
+    if result.returncode != 0:
+        message = result.stderr.strip() or "进程关闭失败。"
+        raise RuntimeError(f"无法关闭 xiaohongshu-mcp 进程：{message}")
+    remaining = result.stdout.strip()
+    if remaining:
+        raise RuntimeError(f"xiaohongshu-mcp 进程未能关闭：{remaining}")
 
 
 def _handle(operation: Callable[[], dict[str, Any]]) -> dict[str, Any]:
@@ -641,6 +1068,57 @@ CONSOLE_HTML = f"""<!doctype html>
       align-items: center;
       gap: 8px;
       flex-wrap: wrap;
+    }}
+    .menu-wrap {{
+      position: relative;
+    }}
+    .menu-button {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 9px;
+      min-width: 86px;
+      border: 1px solid var(--line);
+      background: #fffefa;
+      color: var(--text);
+      padding: 8px 10px 8px 12px;
+    }}
+    .menu-button:hover {{
+      background: var(--surface-2);
+    }}
+    .menu-button .chevron {{
+      width: 8px;
+      height: 8px;
+      border-right: 2px solid currentColor;
+      border-bottom: 2px solid currentColor;
+      transform: rotate(45deg) translateY(-2px);
+      transition: transform 0.14s ease;
+    }}
+    .menu-button[aria-expanded="true"] .chevron {{
+      transform: rotate(225deg) translateY(-2px);
+    }}
+    .menu-list {{
+      position: absolute;
+      right: 0;
+      top: calc(100% + 4px);
+      z-index: 20;
+      min-width: 168px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      padding: 6px;
+    }}
+    .menu-list a {{
+      display: block;
+      border-radius: 6px;
+      color: var(--text);
+      padding: 8px 10px;
+      text-decoration: none;
+      white-space: nowrap;
+    }}
+    .menu-list a:hover {{
+      background: var(--surface-2);
     }}
     label {{
       display: block;
@@ -890,6 +1368,15 @@ CONSOLE_HTML = f"""<!doctype html>
       </div>
       <div class="row">
         <input id="dateInput" type="date" aria-label="日期">
+        <div class="menu-wrap">
+          <button class="menu-button" id="menuBtn" type="button" aria-haspopup="menu" aria-expanded="false">
+            <span>发布</span>
+            <span class="chevron" aria-hidden="true"></span>
+          </button>
+          <div class="menu-list" id="mainMenu" hidden>
+            <a href="/xhs">发布小红书</a>
+          </div>
+        </div>
         <button class="secondary" id="refreshBtn">刷新</button>
         <button class="warn" id="stopBtn" hidden>停止</button>
       </div>
@@ -1225,6 +1712,21 @@ CONSOLE_HTML = f"""<!doctype html>
 
     $("refreshBtn").addEventListener("click", () => loadState());
     $("stopBtn").addEventListener("click", () => stopCurrentOperation());
+    $("menuBtn").addEventListener("click", (event) => {{
+      event.stopPropagation();
+      const menu = $("mainMenu");
+      const hidden = menu.hidden;
+      menu.hidden = !hidden;
+      $("menuBtn").setAttribute("aria-expanded", String(hidden));
+    }});
+    document.addEventListener("click", (event) => {{
+      const menu = $("mainMenu");
+      const button = $("menuBtn");
+      if (!menu.hidden && !menu.contains(event.target) && event.target !== button) {{
+        menu.hidden = true;
+        button.setAttribute("aria-expanded", "false");
+      }}
+    }});
     $("sloganInput").addEventListener("input", saveSlogan);
     $("reloadTasksBtn").addEventListener("click", () => loadState());
     $("openTasksBtn").addEventListener("click", () => runAction("打开文件", () =>
@@ -1284,6 +1786,506 @@ CONSOLE_HTML = f"""<!doctype html>
     loadSlogan();
     loadState();
     loadOperation().catch(() => null);
+  </script>
+</body>
+</html>
+"""
+
+
+XHS_HTML = """<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>发布小红书 - 修身炉</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f4ed;
+      --surface: #fffdf8;
+      --surface-2: #f1eee7;
+      --text: #24211d;
+      --muted: #6f6a60;
+      --line: #d8d1c5;
+      --accent: #2f6f5e;
+      --accent-dark: #245548;
+      --warn: #a15d18;
+      --danger: #a33b32;
+      --ok: #2f6f5e;
+      --shadow: 0 16px 36px rgba(37, 32, 25, 0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      border-bottom: 1px solid var(--line);
+      background: rgba(247, 244, 237, 0.94);
+      backdrop-filter: blur(10px);
+    }
+    .bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 14px 20px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 720;
+      letter-spacing: 0;
+    }
+    h2 {
+      margin: 0 0 12px;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+    main {
+      display: grid;
+      grid-template-columns: minmax(320px, 380px) minmax(420px, 1fr);
+      gap: 16px;
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 16px 20px 28px;
+    }
+    section {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 14px;
+    }
+    label {
+      display: block;
+      margin: 0 0 6px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    input, textarea, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fffefa;
+      color: var(--text);
+      font: inherit;
+      padding: 9px 10px;
+      outline: none;
+    }
+    input:focus, textarea:focus, select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(47, 111, 94, 0.14);
+    }
+    textarea {
+      min-height: 108px;
+      resize: vertical;
+    }
+    button {
+      border: 0;
+      border-radius: 7px;
+      background: var(--accent);
+      color: white;
+      cursor: pointer;
+      font: inherit;
+      font-weight: 650;
+      min-height: 38px;
+      padding: 8px 12px;
+      white-space: nowrap;
+    }
+    button:hover { background: var(--accent-dark); }
+    button.secondary {
+      background: var(--surface-2);
+      color: var(--text);
+      border: 1px solid var(--line);
+    }
+    button.secondary:hover { background: #e7e1d7; }
+    button.warn { background: var(--warn); }
+    button:disabled {
+      cursor: wait;
+      opacity: 0.65;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .stack {
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .status {
+      min-height: 24px;
+      color: var(--muted);
+      font-size: 13px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .status.ok { color: var(--ok); }
+    .status.error { color: var(--danger); }
+    .meta {
+      color: var(--muted);
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+    .field {
+      display: grid;
+      gap: 6px;
+    }
+    .inline-control {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text);
+    }
+    .inline-control input {
+      width: auto;
+      margin: 0;
+    }
+    .meta.ok { color: var(--ok); }
+    .meta.error { color: var(--danger); }
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 640px) {
+      .bar { align-items: flex-start; flex-direction: column; }
+      main { padding: 12px; }
+      .split { grid-template-columns: 1fr; }
+      button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <div>
+        <h1>发布小红书</h1>
+        <div class="meta">修身炉内容出口</div>
+      </div>
+      <div class="row">
+        <a href="/"><button class="secondary" type="button">返回控制台</button></a>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="stack">
+      <section>
+        <h2>MCP</h2>
+        <div class="status" id="xhsStatus">准备中</div>
+        <div class="row">
+          <button id="startMcpBtn" type="button">打开 MCP</button>
+        </div>
+      </section>
+    </div>
+    <section>
+      <h2>发布内容</h2>
+      <div class="stack">
+        <div class="field">
+          <label for="draftInput">文本路径</label>
+          <input id="draftInput" type="text" spellcheck="false">
+          <div class="meta" id="draftState"></div>
+        </div>
+        <div class="field">
+          <label for="imageInput">图片路径</label>
+          <textarea id="imageInput" spellcheck="false"></textarea>
+          <div class="meta" id="imageState"></div>
+        </div>
+        <div class="split">
+          <div class="field">
+            <label for="titleInput">标题（可选）</label>
+            <input id="titleInput" type="text" spellcheck="false">
+          </div>
+          <div class="field">
+            <label for="tagsInput">标签（可选）</label>
+            <input id="tagsInput" type="text" spellcheck="false">
+          </div>
+        </div>
+        <div class="split">
+          <div class="field">
+            <label for="visibilityInput">可见范围</label>
+            <select id="visibilityInput"></select>
+          </div>
+          <div class="field">
+            <label for="scheduleInput">定时发布（可选）</label>
+            <input id="scheduleInput" type="text" spellcheck="false">
+          </div>
+        </div>
+        <label class="inline-control">
+          <input id="originalInput" type="checkbox">
+          原创标记（可选）
+        </label>
+        <div class="row">
+          <button id="publishBtn" type="button" disabled>发布</button>
+        </div>
+        <div class="status" id="publishStatus"></div>
+      </div>
+    </section>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const state = {
+      busy: false,
+      loggedIn: false,
+      canStopMcp: false,
+      poller: null,
+      pathTimer: null,
+    };
+
+    function setBusy(value) {
+      state.busy = value;
+      updateControls();
+    }
+
+    function updateControls() {
+      const mcpButton = $("startMcpBtn");
+      mcpButton.disabled = state.busy;
+      mcpButton.textContent = state.canStopMcp ? "关闭 MCP" : "打开 MCP";
+      $("publishBtn").disabled = state.busy || !state.loggedIn;
+    }
+
+    function setStatus(id, text, kind = "") {
+      const el = $(id);
+      el.textContent = text || "";
+      el.className = kind ? `status ${kind}` : "status";
+    }
+
+    async function requestJson(url, options = {}) {
+      const response = await fetch(url, {
+        headers: { "Content-Type": "application/json" },
+        ...options,
+      });
+      const body = await response.json().catch(() => ({ detail: response.statusText }));
+      if (!response.ok) {
+        throw new Error(body.detail || response.statusText);
+      }
+      return body;
+    }
+
+    async function loadDefaults() {
+      const data = await requestJson("/api/xhs/defaults");
+      $("draftInput").value = data.draft_path;
+      $("imageInput").value = data.image_path;
+      $("titleInput").value = data.title;
+      $("tagsInput").value = data.tags.join(" ");
+      $("visibilityInput").innerHTML = data.visibility_options
+        .map((item) => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`)
+        .join("");
+      $("visibilityInput").value = data.visibility;
+      await updatePathStatus();
+    }
+
+    function schedulePathStatus() {
+      if (state.pathTimer) {
+        window.clearTimeout(state.pathTimer);
+      }
+      state.pathTimer = window.setTimeout(updatePathStatus, 250);
+    }
+
+    async function updatePathStatus() {
+      try {
+        const data = await requestJson("/api/xhs/path-status", {
+          method: "POST",
+          body: JSON.stringify({
+            draft: $("draftInput").value,
+            images: splitLines($("imageInput").value),
+          }),
+        });
+        renderPathStatus(data);
+      } catch (error) {
+        $("draftState").textContent = error.message;
+        $("draftState").className = "meta error";
+      }
+    }
+
+    function renderPathStatus(data) {
+      renderSinglePathStatus("draftState", data.draft);
+      const images = data.images || [];
+      const imageState = $("imageState");
+      if (!images.length) {
+        imageState.textContent = "未填写";
+        imageState.className = "meta error";
+        return;
+      }
+      imageState.textContent = images
+        .map((item, index) => `${index + 1}. ${item.message}`)
+        .join("\\n");
+      imageState.className = images.every(isUsablePathStatus) ? "meta ok" : "meta error";
+    }
+
+    function renderSinglePathStatus(id, item) {
+      const el = $(id);
+      el.textContent = item.message;
+      el.className = isUsablePathStatus(item) ? "meta ok" : "meta error";
+    }
+
+    function isUsablePathStatus(item) {
+      return item.kind === "url" || (item.exists && item.is_file);
+    }
+
+    async function checkStatus() {
+      const data = await requestJson("/api/xhs/status");
+      renderMcpStatus(data);
+      return data;
+    }
+
+    function renderMcpStatus(data) {
+      state.loggedIn = Boolean(data.logged_in);
+      state.canStopMcp = Boolean(data.can_stop);
+      if (!data.connected) {
+        setStatus("xhsStatus", data.error || "MCP 未连接");
+      } else if (data.error) {
+        setStatus("xhsStatus", data.error, "error");
+      } else if (data.logged_in) {
+        setStatus("xhsStatus", data.text || "已登录", "ok");
+      } else {
+        setStatus("xhsStatus", data.text || "未登录");
+      }
+      updateControls();
+    }
+
+    async function toggleMcp() {
+      if (state.canStopMcp) {
+        await stopMcp();
+      } else {
+        await startMcp();
+      }
+    }
+
+    async function startMcp() {
+      setBusy(true);
+      setStatus("xhsStatus", "打开 MCP 中...");
+      try {
+        const data = await requestJson("/api/xhs/start", { method: "POST" });
+        renderMcpStatus(data.result);
+        if (!data.result.logged_in && !data.result.error) {
+          startPollingLogin();
+        }
+      } catch (error) {
+        setStatus("xhsStatus", error.message, "error");
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function stopMcp() {
+      stopPollingLogin();
+      setBusy(true);
+      setStatus("xhsStatus", "关闭 MCP 中...");
+      try {
+        const data = await requestJson("/api/xhs/stop", { method: "POST" });
+        renderMcpStatus(data.result);
+      } catch (error) {
+        setStatus("xhsStatus", error.message, "error");
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    function startPollingLogin() {
+      if (state.poller) {
+        return;
+      }
+      state.poller = window.setInterval(async () => {
+        try {
+          const data = await checkStatus();
+          if (data.logged_in || data.error) {
+            stopPollingLogin();
+          }
+        } catch (error) {
+          setStatus("xhsStatus", error.message, "error");
+          stopPollingLogin();
+        }
+      }, 3000);
+    }
+
+    function stopPollingLogin() {
+      if (!state.poller) {
+        return;
+      }
+      window.clearInterval(state.poller);
+      state.poller = null;
+    }
+
+    function collectPublishRequest() {
+      return {
+        draft: $("draftInput").value,
+        title: $("titleInput").value,
+        images: splitLines($("imageInput").value),
+        tags: splitTags($("tagsInput").value),
+        visibility: $("visibilityInput").value,
+        schedule_at: $("scheduleInput").value,
+        is_original: $("originalInput").checked,
+        products: [],
+      };
+    }
+
+    async function publishXhs() {
+      const request = collectPublishRequest();
+      if (!window.confirm(`确认发布小红书？可见范围：${request.visibility}`)) {
+        return;
+      }
+      setBusy(true);
+      setStatus("publishStatus", "发布中...");
+      try {
+        const data = await requestJson("/api/xhs/publish", {
+          method: "POST",
+          body: JSON.stringify(request),
+        });
+        setStatus("publishStatus", data.message || "发布完成", "ok");
+      } catch (error) {
+        setStatus("publishStatus", error.message, "error");
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    function splitLines(text) {
+      return String(text || "")
+        .split(/\\r?\\n/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+
+    function splitTags(text) {
+      return String(text || "")
+        .split(/[\\s,，]+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    $("startMcpBtn").addEventListener("click", toggleMcp);
+    $("publishBtn").addEventListener("click", publishXhs);
+    $("draftInput").addEventListener("input", schedulePathStatus);
+    $("imageInput").addEventListener("input", schedulePathStatus);
+    loadDefaults()
+      .then(checkStatus)
+      .catch((error) => setStatus("xhsStatus", error.message, "error"));
   </script>
 </body>
 </html>

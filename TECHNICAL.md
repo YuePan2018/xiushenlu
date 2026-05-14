@@ -56,11 +56,72 @@ conda run --no-capture-output -n xiushenlu python app/main.py cost
 conda run --no-capture-output -n xiushenlu python app/main.py console
 ```
 
-控制台目前支持查看 daily、查看今日待办、保存今日待办、打开待办文件、写入记录、生成计划、日内局部更新、生成复盘、停止当前 LLM 操作和手动 token 统计。自动化、通知、审批、工具和知识区域只预留布局。
+控制台目前支持查看 daily、查看今日待办、保存今日待办、打开待办文件、写入记录、生成计划、日内局部更新、生成复盘、停止当前 LLM 操作、手动 token 统计和小红书图文发布。首页日期右侧的“发布”下拉菜单进入 `/xhs` 发布页。自动化、通知、审批、工具和知识区域只预留布局。
 
 控制台里的“保存待办”和“生成计划”是两个独立动作：“保存待办”只写入 `data/user_inputs/today_tasks.md`，不调用 LLM；“生成计划”等价于 `python app/main.py plan`。
 
 控制台里的“停止”是防误点的 v1 语义：它不会强行中断 DashScope SDK 正在进行的同步网络调用，但会标记当前操作为取消；如果 LLM 稍后返回，后端会在写入 daily、`today_tasks.md` 或事件日志前丢弃结果。同一时间后端只允许一个 LLM 操作运行。
+
+## 小红书发布
+
+小红书图文发布不内嵌第三方代码。第三方 `xiaohongshu-mcp` 应 clone 到本项目同级目录，例如：
+
+```text
+C:\Users\Ua Pan\Desktop\project\
+  xiushenlu\
+  xiaohongshu-mcp\
+```
+
+登录和 cookies 由 `xiaohongshu-mcp` 自己管理；修身炉只通过 `config/app.yaml` 中的 `xiaohongshu.*` 配置启动 release exe 并调用本地 MCP 服务。默认 MCP 地址是 `http://localhost:18060/mcp`。
+
+推荐操作顺序：
+
+```powershell
+# 1. 启动修身炉控制台。
+cd C:\Users\Ua Pan\Desktop\project\xiushenlu
+conda run --no-capture-output -n xiushenlu python app/main.py console
+
+# 2. 在控制台首页日期右侧，打开“发布”下拉菜单，进入“发布小红书”。
+
+# 3. 在 /xhs 页面点击“打开 MCP”。
+#    页面会按配置启动 xiaohongshu.mcp_exe，并自动检查登录状态。
+#    如果未登录，会启动 xiaohongshu.login_exe；登录完成后页面轮询到“已登录”。
+
+# 4. 选择文本路径、图片路径、标题、标签、可见范围等，点击“发布”并确认。
+```
+
+`/xhs` 页面行为：
+
+- MCP 状态接口会合并 HTTP 登录状态和本机进程状态。
+- 如果配置路径对应的 MCP exe 正在运行，按钮显示“关闭 MCP”；点击只关闭该配置路径对应进程，不按端口关闭其他服务。
+- 文本路径默认 `post/data/YYYY-MM-DD.txt`，文件不存在时只提示，不自动创建。
+- 图片路径默认 `post/images/xiushenlu-xhs-cover.png`，支持多行，每行一个本地绝对路径或 HTTP/HTTPS URL。
+- 标题、标签、定时发布和原创标记为可选；可见范围默认 `公开可见`。
+- 发布按钮会真实调用 `publish_content`，前端确认框通过后后端固定按 `approve=true` 执行。
+
+命令行仍可作为备用入口：
+
+```powershell
+# 检查修身炉能否连上 MCP，并确认小红书仍处于登录状态。
+conda run --no-capture-output -n xiushenlu python app/main.py xhs status
+
+# 先 dry-run：读取草稿、校验参数、写 post_publish_requested，不真实发布。
+conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draft post/data/2026-05-12.txt --title "修身炉进展" --image "C:\path\to\image.png" --tag 修身炉
+
+# 确认内容、图片和可见范围后，再追加 --approve 实发。
+conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draft post/data/2026-05-12.txt --title "修身炉进展" --image "C:\path\to\image.png" --tag 修身炉 --approve
+```
+
+参数说明：
+
+- `--draft`：必须指向 `post/data` 里的正文草稿。
+- `--title`：小红书标题，最多约 20 个中文字或英文单词。
+- `--image`：至少 1 张图片；支持本地绝对路径或 HTTP/HTTPS URL，本地路径更稳定。
+- `--tag`：话题标签，可重复传入，`#修身炉` 和 `修身炉` 都会归一化为 `修身炉`。
+- `--visibility`：默认 `仅自己可见`，可显式传 `公开可见` 或 `仅互关好友可见`。
+- `--approve`：真正调用 `publish_content` 的确认开关；不带时只做 dry-run。
+
+发布前会先调用 `check_login_status`。如果 cookies 失效或 MCP 未登录，修身炉会停止发布并记录 `post_failed`，不会自动重试。发布请求会记录 `post_publish_requested`；发布成功记录 `post_published`。
 
 ## 命令
 
@@ -76,6 +137,8 @@ conda run --no-capture-output -n xiushenlu python app/main.py console
 | `python app/main.py review --date YYYY-MM-DD --no-rollover` | 是 | 只对指定日期生成复盘，不滚动当前待办。 |
 | `python app/main.py status` | 否 | 打印今天的 daily。 |
 | `python app/main.py cost` | 否 | 汇总今日和本月 token，并覆盖 daily 的 token 统计区块。 |
+| `python app/main.py xhs status` | 否 | 通过本地 `xiaohongshu-mcp` 检查小红书登录状态。 |
+| `python app/main.py xhs publish ...` | 否 | 从 `post/data` 草稿发布小红书图文；不带 `--approve` 只记录请求。 |
 | `python app/main.py console` | 视操作而定 | 启动本地控制台，复用已有 pipeline 和本地读写能力。 |
 
 `plan --add` 要求模型返回严格 JSON，并逐字保留新增任务；程序会更新 `today_tasks.md`、替换 daily 里已有的“今日待办”原文，并把新增任务作为一行追加到时间安排表，`状态` 和 `备注` 两列保持为空。解析失败时不会写入 `today_tasks.md` 或 daily。
@@ -93,6 +156,12 @@ conda run --no-capture-output -n xiushenlu python app/main.py console
 | `llm.api_key_env` | 默认 `DASHSCOPE_API_KEY`，也可通过项目根目录 `.env` 加载。 |
 | `assistant.system_prompt` | Provider 发送给模型的 system prompt。 |
 | `paths.*` | daily、inbox、memory、logs、state、quarantine 等目录。 |
+| `paths.post_dir` | 小红书正文草稿目录，默认 `post/data`。 |
+| `paths.post_image_dir` | 小红书默认图片目录，默认 `post/images`。 |
+| `xiaohongshu.mcp_url` | 本地 `xiaohongshu-mcp` MCP 地址，默认 `http://localhost:18060/mcp`。 |
+| `xiaohongshu.mcp_exe` | 第三方 MCP release 主程序路径；控制台“打开/关闭 MCP”使用它。 |
+| `xiaohongshu.login_exe` | 第三方登录工具路径；未登录时控制台自动打开它。 |
+| `xiaohongshu.working_dir` | 运行第三方 exe 的工作目录，通常是同级 `xiaohongshu-mcp`。 |
 | `safety.allowed_dirs` | 允许读写的数据目录白名单。 |
 | `safety.protected_files` | 受保护文件，当前包含 `data/memory/goals.md`。 |
 
@@ -108,6 +177,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py console
 | `app/pipelines/log_schedule_update.py` | 写入记录后的时间安排表更新 pipeline；LLM 只返回补丁，代码只写 `状态` 和 `备注` 两列。 |
 | `app/pipelines/plan_update.py` | 日内计划局部更新 pipeline；更新待办原文并给时间安排表追加一行，解析失败时停止写入。 |
 | `app/pipelines/nightly_review.py` | 晚间复盘 pipeline；当天复盘成功后滚动待办并清空 `明日计划.md`。 |
+| `app/posting/` | 小红书图文发布轻量适配：读取 `post/data` 草稿、校验参数、调用本地 MCP 并记录事件。 |
 | `app/daily.py` | daily Markdown 路径、读取、区块替换和记录追加。 |
 | `app/inbox.py` | `today_tasks.md` 和 `明日计划.md` 的读写封装。 |
 | `app/logger.py` | 按日 JSON Lines 事件追加和读取。 |

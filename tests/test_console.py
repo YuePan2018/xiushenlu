@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from app.console import create_app
 from app.llm.provider import LLMCallUsage, LLMProvider
+from app.posting.xhs_mcp import XhsMcpError, XhsToolResult
 
 
 class FakeProvider(LLMProvider):
@@ -89,6 +90,25 @@ class ErrorProvider(FakeProvider):
         raise RuntimeError("DashScope 调用失败或返回为空：code=InvalidApiKey")
 
 
+class FakeXhsClient:
+    def __init__(self, *, logged_in: bool = True, connect_error: bool = False) -> None:
+        self.logged_in = logged_in
+        self.connect_error = connect_error
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def check_login_status(self) -> XhsToolResult:
+        self.calls.append(("check_login_status", {}))
+        if self.connect_error:
+            raise XhsMcpError("无法连接 xiaohongshu-mcp")
+        if self.logged_in:
+            return XhsToolResult("check_login_status", "已登录\n用户名: test-user", {})
+        return XhsToolResult("check_login_status", "未登录", {})
+
+    def publish_content(self, arguments: dict[str, object]) -> XhsToolResult:
+        self.calls.append(("publish_content", arguments))
+        return XhsToolResult("publish_content", "发布成功 note_id=abc", {})
+
+
 class ConsoleTests(unittest.TestCase):
     def test_index_uses_local_markdown_renderer_assets(self) -> None:
         with _temporary_directory() as temp_dir:
@@ -107,6 +127,13 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn('id="tokenBtn">token</button>', html)
             self.assertIn('id="openTasksBtn">打开文件</button>', html)
             self.assertIn('id="stopBtn"', html)
+            self.assertIn('id="menuBtn"', html)
+            self.assertIn('class="menu-button"', html)
+            self.assertIn('aria-haspopup="menu"', html)
+            self.assertIn('class="chevron" aria-hidden="true"', html)
+            self.assertIn('href="/xhs">发布小红书</a>', html)
+            self.assertLess(html.index('id="dateInput"'), html.index('id="menuBtn"'))
+            self.assertLess(html.index('id="menuBtn"'), html.index('id="refreshBtn"'))
             self.assertIn("AbortController", html)
             self.assertIn('/api/tasks/open', html)
             self.assertIn('/api/operation/stop', html)
@@ -115,6 +142,272 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn("DOMPurify.sanitize", html)
             self.assertNotIn('<pre id="dailyText"', html)
             self.assertNotIn("<h2>日内更新</h2>", html)
+
+    def test_xhs_page_contains_publish_controls(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+
+            response = client.get("/xhs")
+
+            self.assertEqual(response.status_code, 200)
+            html = response.text
+            self.assertIn("发布小红书", html)
+            self.assertIn('id="startMcpBtn"', html)
+            self.assertIn('id="publishBtn"', html)
+            self.assertIn('id="draftInput"', html)
+            self.assertIn('id="imageInput"', html)
+            self.assertIn('id="imageState"', html)
+            self.assertIn('id="visibilityInput"', html)
+            self.assertIn("可见范围", html)
+            self.assertIn("标题（可选）", html)
+            self.assertIn("标签（可选）", html)
+            self.assertIn("定时发布（可选）", html)
+            self.assertIn("原创标记（可选）", html)
+            self.assertNotIn('id="coverPreview"', html)
+            self.assertNotIn("默认封面", html)
+            self.assertIn("/api/xhs/start", html)
+            self.assertIn("/api/xhs/stop", html)
+            self.assertIn("/api/xhs/publish", html)
+            self.assertIn("/api/xhs/path-status", html)
+            self.assertIn("schedulePathStatus", html)
+            self.assertIn("toggleMcp", html)
+            self.assertIn("关闭 MCP", html)
+
+    def test_xhs_defaults_use_today_draft_and_default_cover(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            post_image_dir = Path(config["paths"]["post_image_dir"])
+            post_image_dir.mkdir(parents=True)
+            (post_image_dir / "xiushenlu-xhs-cover.png").write_bytes(b"fake")
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+
+            response = client.get("/api/xhs/defaults")
+
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            today = date.today().isoformat()
+            self.assertEqual(data["draft_path"], str((Path(config["paths"]["post_dir"]) / f"{today}.txt").resolve()))
+            self.assertEqual(data["image_path"], str((post_image_dir / "xiushenlu-xhs-cover.png").resolve()))
+            self.assertEqual(data["visibility"], "公开可见")
+            self.assertEqual(data["visibility_options"], ["仅自己可见", "公开可见", "仅互关好友可见"])
+            self.assertEqual(data["title"], "")
+            self.assertEqual(data["tags"], [])
+
+    def test_xhs_path_status_reports_local_files_and_urls(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            draft_path = Path(config["paths"]["post_dir"]) / "2026-05-14.txt"
+            image_path = Path(config["paths"]["post_image_dir"]) / "cover.png"
+            draft_path.parent.mkdir(parents=True)
+            image_path.parent.mkdir(parents=True)
+            draft_path.write_text("正文", encoding="utf-8")
+            image_path.write_bytes(b"fake")
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+
+            response = client.post(
+                "/api/xhs/path-status",
+                json={
+                    "draft": str(draft_path),
+                    "images": [str(image_path), "https://example.com/cover.png", str(image_path.parent / "missing.png")],
+                },
+            )
+
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertTrue(data["draft"]["exists"])
+            self.assertTrue(data["draft"]["is_file"])
+            self.assertTrue(data["images"][0]["exists"])
+            self.assertEqual(data["images"][1]["kind"], "url")
+            self.assertIsNone(data["images"][1]["exists"])
+            self.assertFalse(data["images"][2]["exists"])
+
+    def test_xhs_start_runs_login_when_mcp_is_available_but_not_logged_in(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            _create_fake_xhs_executables(config)
+            xhs_client = FakeXhsClient(logged_in=False)
+            starts: list[tuple[Path, Path, bool]] = []
+            client = TestClient(
+                create_app(
+                    config=config,
+                    provider_factory=FakeProvider,
+                    xhs_client_factory=lambda: xhs_client,  # type: ignore[arg-type]
+                    process_starter=lambda exe, cwd, hidden: starts.append((exe, cwd, hidden)),
+                )
+            )
+
+            response = client.post("/api/xhs/start")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("登录工具", response.json()["message"])
+            self.assertEqual(len(starts), 1)
+            self.assertEqual(starts[0][0], Path(config["xiaohongshu"]["login_exe"]).resolve())
+            self.assertFalse(starts[0][2])
+
+    def test_xhs_status_reports_configured_mcp_process(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            _create_fake_xhs_executables(config)
+            xhs_client = FakeXhsClient(logged_in=True)
+            client = TestClient(
+                create_app(
+                    config=config,
+                    provider_factory=FakeProvider,
+                    xhs_client_factory=lambda: xhs_client,  # type: ignore[arg-type]
+                    process_finder=lambda exe: [101, 102],
+                )
+            )
+
+            response = client.get("/api/xhs/status")
+
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertTrue(data["mcp_running"])
+            self.assertTrue(data["can_stop"])
+            self.assertEqual(data["pids"], [101, 102])
+
+    def test_xhs_stop_closes_configured_mcp_process(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            _create_fake_xhs_executables(config)
+            active_pids = [321]
+            stopped: list[int] = []
+            xhs_client = FakeXhsClient(logged_in=True)
+
+            def finder(exe: Path) -> list[int]:
+                return list(active_pids)
+
+            def stopper(pids: list[int]) -> None:
+                stopped.extend(pids)
+                active_pids.clear()
+
+            client = TestClient(
+                create_app(
+                    config=config,
+                    provider_factory=FakeProvider,
+                    xhs_client_factory=lambda: xhs_client,  # type: ignore[arg-type]
+                    process_finder=finder,
+                    process_stopper=stopper,
+                )
+            )
+
+            response = client.post("/api/xhs/stop")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(stopped, [321])
+            data = response.json()
+            self.assertIn("已关闭", data["message"])
+            self.assertFalse(data["result"]["mcp_running"])
+            self.assertFalse(data["result"]["can_stop"])
+            self.assertEqual(data["result"]["pids"], [])
+
+    def test_xhs_stop_is_friendly_when_no_configured_mcp_process_exists(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            _create_fake_xhs_executables(config)
+            stopped: list[int] = []
+            client = TestClient(
+                create_app(
+                    config=config,
+                    provider_factory=FakeProvider,
+                    xhs_client_factory=lambda: FakeXhsClient(logged_in=True),  # type: ignore[arg-type]
+                    process_finder=lambda exe: [],
+                    process_stopper=lambda pids: stopped.extend(pids),
+                )
+            )
+
+            response = client.post("/api/xhs/stop")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("没有找到", response.json()["message"])
+            self.assertEqual(stopped, [])
+
+    def test_xhs_stop_uses_configured_mcp_path_only(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            _create_fake_xhs_executables(config)
+            configured = Path(config["xiaohongshu"]["mcp_exe"]).resolve()
+            seen_paths: list[Path] = []
+
+            def finder(exe: Path) -> list[int]:
+                seen_paths.append(exe)
+                return []
+
+            client = TestClient(
+                create_app(
+                    config=config,
+                    provider_factory=FakeProvider,
+                    xhs_client_factory=lambda: FakeXhsClient(logged_in=True),  # type: ignore[arg-type]
+                    process_finder=finder,
+                    process_stopper=lambda pids: self.fail("不应关闭路径不匹配的进程"),
+                )
+            )
+
+            response = client.post("/api/xhs/stop")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(seen_paths, [configured, configured])
+
+    def test_xhs_start_runs_mcp_when_disconnected(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            _create_fake_xhs_executables(config)
+            clients = [
+                FakeXhsClient(connect_error=True),
+                FakeXhsClient(logged_in=True),
+            ]
+            starts: list[tuple[Path, Path, bool]] = []
+            client = TestClient(
+                create_app(
+                    config=config,
+                    provider_factory=FakeProvider,
+                    xhs_client_factory=lambda: clients.pop(0),  # type: ignore[arg-type]
+                    process_starter=lambda exe, cwd, hidden: starts.append((exe, cwd, hidden)),
+                )
+            )
+
+            response = client.post("/api/xhs/start")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("已登录", response.json()["message"])
+            self.assertEqual(len(starts), 1)
+            self.assertEqual(starts[0][0], Path(config["xiaohongshu"]["mcp_exe"]).resolve())
+            self.assertTrue(starts[0][2])
+
+    def test_xhs_publish_uses_approve_true_and_visibility(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            draft_path = Path(config["paths"]["post_dir"]) / "2026-05-14.txt"
+            draft_path.parent.mkdir(parents=True)
+            draft_path.write_text("发布页面测试正文。", encoding="utf-8")
+            xhs_client = FakeXhsClient(logged_in=True)
+            client = TestClient(
+                create_app(
+                    config=config,
+                    provider_factory=FakeProvider,
+                    xhs_client_factory=lambda: xhs_client,  # type: ignore[arg-type]
+                )
+            )
+
+            response = client.post(
+                "/api/xhs/publish",
+                json={
+                    "draft": str(draft_path),
+                    "title": "发布页面测试",
+                    "images": ["https://example.com/a.png"],
+                    "tags": ["修身炉"],
+                    "visibility": "公开可见",
+                },
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                [name for name, _ in xhs_client.calls],
+                ["check_login_status", "check_login_status", "publish_content"],
+            )
+            self.assertEqual(xhs_client.calls[-1][1]["visibility"], "公开可见")
+            self.assertEqual(response.json()["result"]["visibility"], "公开可见")
 
     def test_local_markdown_vendor_assets_are_served(self) -> None:
         with _temporary_directory() as temp_dir:
@@ -443,14 +736,32 @@ def _test_config(root: Path) -> dict[str, Any]:
         "logs_dir": str(root / "system_logs"),
         "state_dir": str(root / "state"),
         "quarantine_dir": str(root / "quarantine"),
+        "post_dir": str(root / "post" / "data"),
+        "post_image_dir": str(root / "post" / "images"),
     }
+    xhs_dir = root / "xiaohongshu-mcp"
     return {
         "paths": paths,
+        "xiaohongshu": {
+            "mcp_url": "http://localhost:18060/mcp",
+            "timeout": 1,
+            "working_dir": str(xhs_dir),
+            "mcp_exe": str(xhs_dir / "xiaohongshu-mcp.exe"),
+            "login_exe": str(xhs_dir / "xiaohongshu-login.exe"),
+        },
         "safety": {
             "allowed_dirs": list(paths.values()),
             "protected_files": [str(root / "memory" / "goals.md")],
         },
     }
+
+
+def _create_fake_xhs_executables(config: dict[str, Any]) -> None:
+    xhs = config["xiaohongshu"]
+    working_dir = Path(xhs["working_dir"])
+    working_dir.mkdir(parents=True, exist_ok=True)
+    Path(xhs["mcp_exe"]).write_text("fake mcp", encoding="utf-8")
+    Path(xhs["login_exe"]).write_text("fake login", encoding="utf-8")
 
 
 class _temporary_directory:
