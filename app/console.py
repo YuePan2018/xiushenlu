@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -41,6 +42,7 @@ from app.pipelines.nightly_review import NightlyReviewParseError, generate_night
 from app.pipelines.plan_update import PlanUpdateParseError, generate_plan_update
 from app.posting import publish_xhs_from_draft
 from app.posting.xhs_mcp import XhsMcpClient
+from app.safety import safe_write_text
 
 
 ProviderFactory = Callable[[], LLMProvider]
@@ -196,6 +198,13 @@ class XhsPublishRequest(BaseModel):
 class XhsPathStatusRequest(BaseModel):
     draft: str = ""
     images: list[str] = []
+
+    class Config:
+        extra = "forbid"
+
+
+class XhsOpenDraftRequest(BaseModel):
+    draft: str
 
     class Config:
         extra = "forbid"
@@ -459,7 +468,7 @@ class ConsoleService:
 
     def xhs_defaults(self) -> dict[str, Any]:
         today_text = date.today().isoformat()
-        draft_path = resolve_project_path(self.config.get("paths", {}).get("post_dir", "post/data")) / f"{today_text}.txt"
+        draft_path = _today_xhs_draft_path(self.config, today_text)
         image_path = (
             resolve_project_path(self.config.get("paths", {}).get("post_image_dir", "post/images"))
             / "xiushenlu-xhs-cover.png"
@@ -474,6 +483,20 @@ class ConsoleService:
             "visibility_options": ["仅自己可见", "公开可见", "仅互关好友可见"],
             "title": "",
             "tags": [],
+        }
+
+    def open_xhs_draft(self, request: XhsOpenDraftRequest) -> dict[str, Any]:
+        draft_path = _resolve_xhs_draft_path(self.config, request.draft)
+        created = not draft_path.exists()
+        if created:
+            safe_write_text(draft_path, "", self.config)
+        _open_path_with_vscode(draft_path)
+        return {
+            "message": "已用 VS Code 打开小红书草稿。",
+            "result": {
+                "draft_path": str(draft_path),
+                "created": created,
+            },
         }
 
     def xhs_status(self) -> dict[str, Any]:
@@ -651,6 +674,10 @@ def create_app(
     @app.get("/api/xhs/defaults")
     def api_xhs_defaults() -> dict[str, Any]:
         return _handle(service.xhs_defaults)
+
+    @app.post("/api/xhs/draft/open")
+    def api_xhs_open_draft(request: XhsOpenDraftRequest) -> dict[str, Any]:
+        return _handle(lambda: service.open_xhs_draft(request))
 
     @app.post("/api/xhs/path-status")
     def api_xhs_path_status(request: XhsPathStatusRequest) -> dict[str, Any]:
@@ -940,6 +967,32 @@ def _project_file(path: str) -> str:
     return str(resolve_project_path(Path(path)))
 
 
+def _today_xhs_draft_path(config: dict[str, Any], day: str | None = None) -> Path:
+    today_text = day or date.today().isoformat()
+    return (
+        resolve_project_path(config.get("paths", {}).get("post_dir", "post/data"))
+        / f"{today_text}.txt"
+    ).resolve()
+
+
+def _resolve_xhs_draft_path(config: dict[str, Any], path_text: str) -> Path:
+    value = path_text.strip()
+    if not value:
+        raise ValueError("文本路径不能为空。")
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = resolve_project_path(value)
+    resolved = path.resolve()
+    base_dir = resolve_project_path(config.get("paths", {}).get("post_dir", "post/data")).resolve()
+    if not _is_relative_to(resolved, base_dir):
+        raise ValueError(f"草稿必须位于 post/data 目录内：{resolved}")
+    return resolved
+
+
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    return path == parent or parent in path.parents
+
+
 def _open_path_with_default_app(path: Path) -> None:
     try:
         if sys.platform.startswith("win"):
@@ -951,6 +1004,24 @@ def _open_path_with_default_app(path: Path) -> None:
         subprocess.Popen(["xdg-open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError as exc:
         raise RuntimeError(f"无法打开文件：{exc}") from exc
+
+
+def _open_path_with_vscode(path: Path) -> None:
+    command = _find_vscode_command()
+    if command is None:
+        raise RuntimeError("未找到 VS Code 命令行 `code`。请先在 VS Code 中安装 Shell Command，或确认 code 已加入 PATH。")
+    try:
+        subprocess.Popen([command, str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError as exc:
+        raise RuntimeError(f"无法用 VS Code 打开文件：{exc}") from exc
+
+
+def _find_vscode_command() -> str | None:
+    for candidate in ("code", "code.cmd"):
+        command = shutil.which(candidate)
+        if command:
+            return command
+    return None
 
 
 CONSOLE_HTML = f"""<!doctype html>
@@ -2028,6 +2099,20 @@ XHS_HTML = """<!doctype html>
       display: grid;
       gap: 6px;
     }
+    .field-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .field-heading label {
+      margin: 0;
+    }
+    .field-heading button {
+      min-height: 32px;
+      padding: 5px 10px;
+    }
     .inline-control {
       display: inline-flex;
       align-items: center;
@@ -2077,9 +2162,13 @@ XHS_HTML = """<!doctype html>
       <h2>发布内容</h2>
       <div class="stack">
         <div class="field">
-          <label for="draftInput">文本路径</label>
+          <div class="field-heading">
+            <label for="draftInput">文本路径</label>
+            <button class="secondary" id="openDraftBtn" type="button">打开草稿</button>
+          </div>
           <input id="draftInput" type="text" spellcheck="false" required>
           <div class="meta" id="draftState"></div>
+          <div class="status" id="draftOpenStatus"></div>
         </div>
         <div class="field">
           <label for="imageInput">图片路径（每行一张）</label>
@@ -2141,6 +2230,7 @@ XHS_HTML = """<!doctype html>
       const mcpButton = $("startMcpBtn");
       mcpButton.disabled = state.busy || state.statusLoading;
       mcpButton.textContent = state.canStopMcp ? "关闭 MCP" : "打开 MCP";
+      $("openDraftBtn").disabled = state.busy;
       $("publishBtn").disabled = state.busy || !state.mcpConnected;
     }
 
@@ -2281,6 +2371,26 @@ XHS_HTML = """<!doctype html>
       }
     }
 
+    async function openDraft() {
+      setBusy(true);
+      setStatus("draftOpenStatus", "打开草稿中...");
+      try {
+        const data = await requestJson("/api/xhs/draft/open", {
+          method: "POST",
+          body: JSON.stringify({ draft: $("draftInput").value }),
+        });
+        if (data.result && data.result.draft_path) {
+          $("draftInput").value = data.result.draft_path;
+        }
+        await updatePathStatus();
+        setStatus("draftOpenStatus", data.message || "已打开草稿", "ok");
+      } catch (error) {
+        setStatus("draftOpenStatus", error.message, "error");
+      } finally {
+        setBusy(false);
+      }
+    }
+
     function collectPublishRequest() {
       return {
         draft: $("draftInput").value,
@@ -2357,6 +2467,7 @@ XHS_HTML = """<!doctype html>
     }
 
     $("startMcpBtn").addEventListener("click", toggleMcp);
+    $("openDraftBtn").addEventListener("click", openDraft);
     $("publishBtn").addEventListener("click", publishXhs);
     $("draftInput").addEventListener("input", schedulePathStatus);
     $("imageInput").addEventListener("input", schedulePathStatus);

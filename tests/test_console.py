@@ -160,6 +160,10 @@ class ConsoleTests(unittest.TestCase):
             html = response.text
             self.assertIn("发布小红书", html)
             self.assertIn('id="startMcpBtn"', html)
+            self.assertIn('id="openDraftBtn"', html)
+            self.assertIn("打开草稿", html)
+            self.assertLess(html.index("文本路径"), html.index('id="openDraftBtn"'))
+            self.assertLess(html.index('id="openDraftBtn"'), html.index("图片路径（每行一张）"))
             self.assertIn('id="publishBtn"', html)
             self.assertIn('id="draftInput"', html)
             self.assertIn('id="imageInput"', html)
@@ -179,6 +183,7 @@ class ConsoleTests(unittest.TestCase):
             self.assertNotIn("默认封面", html)
             self.assertIn("/api/xhs/start", html)
             self.assertIn("/api/xhs/stop", html)
+            self.assertIn("/api/xhs/draft/open", html)
             self.assertNotIn("/api/xhs/account/refresh", html)
             self.assertIn("/api/xhs/publish", html)
             self.assertIn("/api/xhs/path-status", html)
@@ -205,6 +210,64 @@ class ConsoleTests(unittest.TestCase):
             self.assertEqual(data["visibility_options"], ["仅自己可见", "公开可见", "仅互关好友可见"])
             self.assertEqual(data["title"], "")
             self.assertEqual(data["tags"], [])
+
+    def test_xhs_open_draft_creates_input_file_and_uses_vscode(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+            draft_path = (Path(config["paths"]["post_dir"]) / "manual-name.txt").resolve()
+
+            with patch("app.console._open_path_with_vscode") as open_path:
+                response = client.post("/api/xhs/draft/open", json={"draft": str(draft_path)})
+
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(Path(data["result"]["draft_path"]), draft_path)
+            self.assertTrue(data["result"]["created"])
+            self.assertTrue(draft_path.exists())
+            self.assertEqual(draft_path.read_text(encoding="utf-8"), "")
+            open_path.assert_called_once_with(draft_path)
+
+    def test_xhs_open_draft_preserves_existing_file(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            draft_path = Path(config["paths"]["post_dir"]) / "existing-name.txt"
+            draft_path.parent.mkdir(parents=True)
+            draft_path.write_text("已有草稿", encoding="utf-8")
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+
+            with patch("app.console._open_path_with_vscode") as open_path:
+                response = client.post("/api/xhs/draft/open", json={"draft": str(draft_path)})
+
+            self.assertEqual(response.status_code, 200)
+            self.assertFalse(response.json()["result"]["created"])
+            self.assertEqual(draft_path.read_text(encoding="utf-8"), "已有草稿")
+            open_path.assert_called_once_with(draft_path.resolve())
+
+    def test_xhs_open_draft_reports_vscode_error(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+            draft_path = Path(config["paths"]["post_dir"]) / "vscode-error.txt"
+
+            with patch("app.console._open_path_with_vscode", side_effect=RuntimeError("未找到 VS Code 命令行 `code`。")):
+                response = client.post("/api/xhs/draft/open", json={"draft": str(draft_path)})
+
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("VS Code", response.json()["detail"])
+
+    def test_xhs_open_draft_rejects_path_outside_post_dir(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+            outside_path = Path(config["paths"]["inbox_dir"]) / "not-post-draft.txt"
+
+            with patch("app.console._open_path_with_vscode") as open_path:
+                response = client.post("/api/xhs/draft/open", json={"draft": str(outside_path)})
+
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("post/data", response.json()["detail"])
+            open_path.assert_not_called()
 
     def test_xhs_path_status_reports_local_files_and_urls(self) -> None:
         with _temporary_directory() as temp_dir:

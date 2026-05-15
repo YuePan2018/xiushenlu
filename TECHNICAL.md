@@ -95,7 +95,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py console
 - MCP 状态接口只做 MCP URL 连通性检查并读取本地用户名缓存，不主动调用 `check_login_status`。
 - 如果 MCP URL 能连上，按钮显示“关闭 MCP”；平时状态加载不扫描 Windows 进程。点击“关闭 MCP”时才扫描并关闭本机所有 `xiaohongshu-mcp*` 进程，包括不是当前控制台启动的进程。
 - 用户名缓存到 `data/state/xhs_account.json`；常规 MCP 状态同步只读缓存，不调用 `/api/v1/user/me`，登录完成后才单独刷新一次用户名缓存。
-- 文本路径默认 `post/data/YYYY-MM-DD.txt`，文件不存在时只提示，不自动创建。
+- 文本路径默认 `post/data/YYYY-MM-DD.txt`；文本路径旁的“打开草稿”会按当前输入框路径创建缺失草稿，并用 VS Code 打开。草稿路径必须位于 `post/data`。
 - 图片路径默认 `post/images/xiushenlu-xhs-cover.png`，支持多行，每行一个本地绝对路径或 HTTP/HTTPS URL。
 - 标题为必填；标签、定时发布和原创标记为可选；可见范围默认 `公开可见`。
 - 发布按钮会真实调用 `publish_content`，前端确认框通过后后端固定按 `approve=true` 执行；发布前不再预检查登录状态，cookies 失效或未登录时由 MCP 发布接口返回错误。
