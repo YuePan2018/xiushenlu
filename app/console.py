@@ -307,7 +307,7 @@ class ConsoleService:
         if request.add is not None and not add:
             raise ValueError("新增任务不能为空。")
 
-        label = "局部更新计划" if add is not None else "生成计划"
+        label = "添加任务" if add is not None else "生成计划"
         token = self.operations.begin(label)
         try:
             return self._generate_plan_locked(add, token)
@@ -1505,12 +1505,12 @@ CONSOLE_HTML = f"""<!doctype html>
       </details>
       <details class="panel">
         <summary class="collapsible-summary">
-          <span class="panel-title">更新计划</span>
+          <span class="panel-title">添加任务</span>
         </summary>
         <div class="collapsible-body">
           <label for="addInput">新增任务</label>
           <textarea id="addInput" spellcheck="false"></textarea>
-          <button id="addBtn">局部更新计划</button>
+          <button id="addBtn">添加任务</button>
         </div>
       </details>
       <details class="panel">
