@@ -122,6 +122,8 @@ class XhsMcpClient:
                 raw = response.read().decode("utf-8")
         except urllib.error.URLError as exc:
             raise XhsMcpError(f"无法连接 xiaohongshu-mcp：{exc}") from exc
+        except TimeoutError as exc:
+            raise XhsMcpError(f"xiaohongshu-mcp 请求超时（{self.timeout:g}s）：{exc}") from exc
 
         if not raw.strip() and allow_empty:
             return {}

@@ -5,11 +5,12 @@ import unittest
 import uuid
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from app.logger import EventLogger
 from app.posting.publisher import publish_xhs_from_draft
 from app.posting.validation import build_xhs_payload
-from app.posting.xhs_mcp import XhsMcpError, XhsToolResult
+from app.posting.xhs_mcp import XhsMcpClient, XhsMcpError, XhsToolResult
 
 
 class FakeXhsClient:
@@ -132,6 +133,13 @@ class PostingTests(unittest.TestCase):
                 ["post_publish_requested", "post_failed"],
             )
             self.assertIn("cookies", events[1]["detail"]["error"])
+
+    def test_mcp_client_wraps_request_timeout(self) -> None:
+        client = XhsMcpClient("http://localhost:18060/mcp", timeout=0.5)
+
+        with patch("urllib.request.urlopen", side_effect=TimeoutError("timed out")):
+            with self.assertRaisesRegex(XhsMcpError, "请求超时"):
+                client.publish_content({"title": "超时测试"})
 
 
 def _write_draft(config: dict[str, Any], text: str) -> Path:
