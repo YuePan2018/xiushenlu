@@ -48,14 +48,15 @@ class FakeLogger:
 
 
 class LogScheduleUpdateTests(unittest.TestCase):
-    def test_update_schedule_changes_only_completion_and_note_columns(self) -> None:
+    def test_update_schedule_changes_status_on_standard_duration_table(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
             daily_file = _write_daily(
                 config,
                 _daily_text(
                     "| 计划表更新 | P1 | 30m |  |  |\n"
-                    "| 复盘 | P2 | 20m |  |  |"
+                    "| 复盘 | P2 | 20m |  |  |",
+                    records="- 10:10:00 完成计划表更新。\n",
                 ),
             )
             reply = json.dumps(
@@ -64,8 +65,7 @@ class LogScheduleUpdateTests(unittest.TestCase):
                         {
                             "row_index": 1,
                             "completed": True,
-                            "note": "下次先验表头",
-                            "evidence": "后续注意：下次先验表头",
+                            "evidence": "完成计划表更新",
                             "task": "不要改任务名",
                             "priority": "P9",
                             "estimate": "999h",
@@ -78,7 +78,7 @@ class LogScheduleUpdateTests(unittest.TestCase):
 
             result = update_schedule_from_log(
                 FakeProvider(reply),
-                "完成计划表更新。后续注意：下次先验表头。",
+                "完成计划表更新。",
                 config=config,
                 target_date=date(2026, 5, 10),
                 logger=logger,  # type: ignore[arg-type]
@@ -86,29 +86,40 @@ class LogScheduleUpdateTests(unittest.TestCase):
 
             self.assertTrue(result.updated)
             daily_text = daily_file.read_text(encoding="utf-8")
-            self.assertIn("| 任务 | 优先级 | 预计 | 状态 | 备注 |", daily_text)
-            self.assertIn("| 计划表更新 | P1 | 30m | ✓ | 下次先验表头 |", daily_text)
+            self.assertIn("| 任务 | 优先级 | 预计 | 状态 | 用时 |", daily_text)
+            self.assertIn("| 计划表更新 | P1 | 30m | ✓ |  |", daily_text)
             self.assertIn("| 复盘 | P2 | 20m |  |  |", daily_text)
             self.assertNotIn("不要改任务名", daily_text)
             self.assertNotIn("P9", daily_text)
             self.assertNotIn("999h", daily_text)
             self.assertEqual([event["type"] for event in logger.events], ["llm_call", "schedule_updated_from_log"])
 
-    def test_completion_and_note_can_be_rewritten_or_cleared(self) -> None:
+    def test_record_intervals_are_summed_by_segment(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
             daily_file = _write_daily(
                 config,
-                _daily_text("| 复盘 | P0 | 20m | ✓ | 先补证据 |"),
+                _daily_text(
+                    "| 计划表更新 | P1 | 2h | ○ | 15m |",
+                    records=(
+                        "- 10:00:00 开始计划表更新。\n"
+                        "- 10:30:00 暂停计划表更新。\n"
+                        "- 11:00:00 继续计划表更新。\n"
+                        "- 11:45:00 完成计划表更新。\n"
+                    ),
+                ),
             )
             reply = json.dumps(
                 {
                     "updates": [
                         {
                             "row_index": 1,
-                            "completed": False,
-                            "note": "",
-                            "evidence": "",
+                            "status": "completed",
+                            "evidence": "完成计划表更新",
+                            "time_entries": [
+                                {"type": "record_interval", "start_record": 1, "end_record": 2},
+                                {"type": "record_interval", "start_record": 3, "end_record": 4},
+                            ],
                         }
                     ]
                 },
@@ -117,34 +128,36 @@ class LogScheduleUpdateTests(unittest.TestCase):
 
             result = update_schedule_from_log(
                 FakeProvider(reply),
-                "复盘还没做完，需要重新打开。",
+                "完成计划表更新。",
                 config=config,
                 target_date=date(2026, 5, 10),
                 logger=FakeLogger(),  # type: ignore[arg-type]
             )
 
             self.assertTrue(result.updated)
-            self.assertIn("| 复盘 | P0 | 20m |  |  |", daily_file.read_text(encoding="utf-8"))
+            self.assertIn("| 计划表更新 | P1 | 2h | ✓ | 1h15m |", daily_file.read_text(encoding="utf-8"))
 
-    def test_status_field_supports_in_progress_completed_not_started_and_dropped(self) -> None:
+    def test_direct_duration_does_not_use_timestamp_diff(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
             daily_file = _write_daily(
                 config,
                 _daily_text(
-                    "| 计划表更新 | P1 | 30m |  |  |\n"
-                    "| 复盘 | P2 | 20m | ○ | 旧备注 |\n"
-                    "| 收尾 | P3 | 10m | ✓ | 已完成 |\n"
-                    "| 临时任务 | P3 | 10m |  |  |"
+                    "| 计划表更新 | P1 | 2h |  |  |",
+                    records="- 10:00:00 计划表更新用时40分钟，14:00开始15:00结束。\n",
                 ),
             )
             reply = json.dumps(
                 {
                     "updates": [
-                        {"row_index": 1, "status": "in_progress", "note": "", "evidence": ""},
-                        {"row_index": 2, "status": "completed", "note": "", "evidence": ""},
-                        {"row_index": 3, "status": "not_started", "note": "", "evidence": ""},
-                        {"row_index": 4, "status": "dropped", "note": "", "evidence": ""},
+                        {
+                            "row_index": 1,
+                            "status": "keep",
+                            "evidence": "计划表更新用时40分钟",
+                            "time_entries": [
+                                {"type": "direct_duration", "record": 1, "duration": "40分钟"},
+                            ],
+                        }
                     ]
                 },
                 ensure_ascii=False,
@@ -152,7 +165,182 @@ class LogScheduleUpdateTests(unittest.TestCase):
 
             result = update_schedule_from_log(
                 FakeProvider(reply),
-                "开始做计划表更新。复盘已经完成。收尾还没开始。删除临时任务，不再追踪。",
+                "计划表更新用时40分钟，14:00开始15:00结束。",
+                config=config,
+                target_date=date(2026, 5, 10),
+                logger=FakeLogger(),  # type: ignore[arg-type]
+            )
+
+            self.assertTrue(result.updated)
+            self.assertIn("| 计划表更新 | P1 | 2h |  | 40m |", daily_file.read_text(encoding="utf-8"))
+
+    def test_multiple_direct_durations_are_summed(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            daily_file = _write_daily(
+                config,
+                _daily_text(
+                    "| 计划表更新 | P1 | 2h |  |  |",
+                    records=(
+                        "- 10:00:00 计划表更新用时10分钟。\n"
+                        "- 11:00:00 计划表更新又花了20分钟。\n"
+                    ),
+                ),
+            )
+            reply = json.dumps(
+                {
+                    "updates": [
+                        {
+                            "row_index": 1,
+                            "status": "keep",
+                            "evidence": "计划表更新又花了20分钟",
+                            "time_entries": [
+                                {"type": "direct_duration", "record": 1, "duration": "10分钟"},
+                                {"type": "direct_duration", "record": 2, "duration": "20分钟"},
+                            ],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+            result = update_schedule_from_log(
+                FakeProvider(reply),
+                "计划表更新又花了20分钟。",
+                config=config,
+                target_date=date(2026, 5, 10),
+                logger=FakeLogger(),  # type: ignore[arg-type]
+            )
+
+            self.assertTrue(result.updated)
+            self.assertIn("| 计划表更新 | P1 | 2h |  | 30m |", daily_file.read_text(encoding="utf-8"))
+
+    def test_direct_duration_and_record_intervals_are_summed_with_endpoint_dedupe(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            daily_file = _write_daily(
+                config,
+                _daily_text(
+                    "| 计划表更新 | P1 | 2h |  |  |",
+                    records=(
+                        "- 10:00:00 开始计划表更新。\n"
+                        "- 10:20:00 计划表更新用时10分钟。\n"
+                        "- 10:40:00 继续计划表更新。\n"
+                        "- 10:50:00 计划表更新完成。\n"
+                    ),
+                ),
+            )
+            reply = json.dumps(
+                {
+                    "updates": [
+                        {
+                            "row_index": 1,
+                            "status": "completed",
+                            "evidence": "计划表更新完成",
+                            "time_entries": [
+                                {"type": "record_interval", "start_record": 1, "end_record": 2},
+                                {"type": "direct_duration", "record": 2, "duration": "10分钟"},
+                                {"type": "record_interval", "start_record": 3, "end_record": 4},
+                            ],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+            result = update_schedule_from_log(
+                FakeProvider(reply),
+                "计划表更新完成。",
+                config=config,
+                target_date=date(2026, 5, 10),
+                logger=FakeLogger(),  # type: ignore[arg-type]
+            )
+
+            self.assertTrue(result.updated)
+            self.assertIn("| 计划表更新 | P1 | 2h | ✓ | 20m |", daily_file.read_text(encoding="utf-8"))
+
+    def test_overlapping_record_intervals_are_rejected(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            daily_file = _write_daily(
+                config,
+                _daily_text(
+                    "| 计划表更新 | P1 | 2h |  |  |",
+                    records=(
+                        "- 10:00:00 开始计划表更新。\n"
+                        "- 10:10:00 继续计划表更新。\n"
+                        "- 10:30:00 暂停计划表更新。\n"
+                        "- 10:40:00 完成计划表更新。\n"
+                    ),
+                ),
+            )
+            original = daily_file.read_text(encoding="utf-8")
+            reply = json.dumps(
+                {
+                    "updates": [
+                        {
+                            "row_index": 1,
+                            "status": "completed",
+                            "evidence": "完成计划表更新",
+                            "time_entries": [
+                                {"type": "record_interval", "start_record": 1, "end_record": 3},
+                                {"type": "record_interval", "start_record": 2, "end_record": 4},
+                            ],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+            result = update_schedule_from_log(
+                FakeProvider(reply),
+                "完成计划表更新。",
+                config=config,
+                target_date=date(2026, 5, 10),
+                logger=FakeLogger(),  # type: ignore[arg-type]
+            )
+
+            self.assertFalse(result.updated)
+            self.assertIn("record intervals overlap", result.reason)
+            self.assertEqual(daily_file.read_text(encoding="utf-8"), original)
+
+    def test_status_field_supports_in_progress_completed_not_started_dropped_and_keep(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            daily_file = _write_daily(
+                config,
+                _daily_text(
+                    "| 计划表更新 | P1 | 30m |  |  |\n"
+                    "| 复盘 | P2 | 20m | ○ |  |\n"
+                    "| 收尾 | P3 | 10m | ✓ |  |\n"
+                    "| 临时任务 | P3 | 10m |  |  |\n"
+                    "| 保持状态 | P3 | 10m | ○ |  |",
+                    records=(
+                        "- 10:00:00 开始做计划表更新。复盘已经完成。收尾还没开始。删除临时任务，不再追踪。保持状态用时20m。\n"
+                    ),
+                ),
+            )
+            reply = json.dumps(
+                {
+                    "updates": [
+                        {"row_index": 1, "status": "in_progress", "evidence": "开始做计划表更新"},
+                        {"row_index": 2, "status": "completed", "evidence": "复盘已经完成"},
+                        {"row_index": 3, "status": "not_started", "evidence": "收尾还没开始"},
+                        {"row_index": 4, "status": "dropped", "evidence": "删除临时任务"},
+                        {
+                            "row_index": 5,
+                            "status": "keep",
+                            "evidence": "保持状态用时20m",
+                            "time_entries": [{"type": "direct_duration", "record": 1, "duration": "20m"}],
+                        },
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+            result = update_schedule_from_log(
+                FakeProvider(reply),
+                "开始做计划表更新。复盘已经完成。收尾还没开始。删除临时任务，不再追踪。保持状态用时20m。",
                 config=config,
                 target_date=date(2026, 5, 10),
                 logger=FakeLogger(),  # type: ignore[arg-type]
@@ -164,38 +352,7 @@ class LogScheduleUpdateTests(unittest.TestCase):
             self.assertIn("| 复盘 | P2 | 20m | ✓ |  |", daily_text)
             self.assertIn("| 收尾 | P3 | 10m |  |  |", daily_text)
             self.assertIn("| 临时任务 | P3 | 10m | × |  |", daily_text)
-
-    def test_existing_dropped_status_can_be_parsed_and_updated(self) -> None:
-        with _temporary_directory() as temp_dir:
-            config = _test_config(Path(temp_dir))
-            daily_file = _write_daily(
-                config,
-                _daily_text(
-                    "| 临时任务 | P3 | 10m | × | 不再追踪 |\n"
-                    "| 复盘 | P2 | 20m |  |  |"
-                ),
-            )
-            reply = json.dumps(
-                {
-                    "updates": [
-                        {"row_index": 2, "status": "completed", "note": "", "evidence": ""},
-                    ]
-                },
-                ensure_ascii=False,
-            )
-
-            result = update_schedule_from_log(
-                FakeProvider(reply),
-                "复盘已经完成。",
-                config=config,
-                target_date=date(2026, 5, 10),
-                logger=FakeLogger(),  # type: ignore[arg-type]
-            )
-
-            self.assertTrue(result.updated)
-            daily_text = daily_file.read_text(encoding="utf-8")
-            self.assertIn("| 临时任务 | P3 | 10m | × | 不再追踪 |", daily_text)
-            self.assertIn("| 复盘 | P2 | 20m | ✓ |  |", daily_text)
+            self.assertIn("| 保持状态 | P3 | 10m | ○ | 20m |", daily_text)
 
     def test_invalid_status_is_rejected(self) -> None:
         with self.assertRaisesRegex(LogScheduleUpdateParseError, "status must be one of"):
@@ -203,36 +360,63 @@ class LogScheduleUpdateTests(unittest.TestCase):
                 json.dumps(
                     {
                         "updates": [
-                            {"row_index": 1, "status": "paused", "note": "", "evidence": ""}
+                            {"row_index": 1, "status": "paused", "evidence": ""}
                         ]
                     }
                 ),
                 record_content="计划表更新暂停。",
             )
 
-    def test_prompt_explains_partial_completion_status_rules(self) -> None:
+    def test_prompt_explains_timing_rules(self) -> None:
         prompt = build_schedule_patch_prompt(
             "2026-05-10",
             "计划表更新完成了一部分，剩余短期内不做。",
-            _daily_text("| 计划表更新 | P1 | 30m |  |  |"),
+            _schedule_table("| 计划表更新 | P1 | 30m |  |  |"),
         )
 
+        self.assertIn("keep", prompt)
         self.assertIn("not_started", prompt)
         self.assertIn("in_progress", prompt)
         self.assertIn("completed", prompt)
         self.assertIn("dropped", prompt)
-        self.assertIn("×", prompt)
-        self.assertIn("完成了一部分但任务还会继续", prompt)
-        self.assertIn("短期内不做", prompt)
-        self.assertIn("删除这个任务", prompt)
-        self.assertIn("不再追踪", prompt)
+        self.assertIn("用时列是派生值", prompt)
+        self.assertIn("不要把旧表格里的用时当作累计变量", prompt)
+        self.assertIn("direct_duration", prompt)
+        self.assertIn("record_interval", prompt)
+        self.assertNotIn("clock_range", prompt)
+        self.assertNotIn("start_time", prompt)
+        self.assertNotIn("end_time", prompt)
+        self.assertIn("如果记录明确写了“用时/耗时/花了”等直接用时", prompt)
+        self.assertIn("time_entries 可以包含多个 direct_duration 和多个 record_interval", prompt)
+
+    def test_clock_range_time_entry_is_rejected(self) -> None:
+        with self.assertRaisesRegex(LogScheduleUpdateParseError, "record_interval or direct_duration"):
+            parse_schedule_patch_response(
+                json.dumps(
+                    {
+                        "updates": [
+                            {
+                                "row_index": 1,
+                                "status": "keep",
+                                "evidence": "",
+                                "time_entries": [
+                                    {"type": "clock_range", "record": 1, "start_time": "14:00", "end_time": "15:00"}
+                                ],
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                record_content="14:00开始15:00结束。",
+                records=(),
+            )
 
     def test_invalid_json_does_not_write_schedule(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
             daily_file = _write_daily(
                 config,
-                _daily_text("| 计划表更新 | P1 | 30m |  |  |"),
+                _daily_text("| 计划表更新 | P1 | 30m |  |  |", records="- 10:00:00 完成计划表更新。\n"),
             )
             original = daily_file.read_text(encoding="utf-8")
             logger = FakeLogger()
@@ -254,7 +438,7 @@ class LogScheduleUpdateTests(unittest.TestCase):
             config = _test_config(Path(temp_dir))
             daily_file = _write_daily(
                 config,
-                _daily_text("| 计划表更新 | P1 | 30m |  |  |"),
+                _daily_text("| 计划表更新 | P1 | 30m |  |  |", records="- 10:00:00 只是记录一下。\n"),
             )
             original = daily_file.read_text(encoding="utf-8")
 
@@ -271,16 +455,16 @@ class LogScheduleUpdateTests(unittest.TestCase):
             self.assertEqual(daily_file.read_text(encoding="utf-8"), original)
 
     def test_row_index_out_of_range_does_not_write_schedule(self) -> None:
-        daily = _daily_text("| 计划表更新 | P1 | 30m |  |  |")
+        daily = _daily_text("| 计划表更新 | P1 | 30m |  |  |", records="- 10:00:00 完成计划表更新。\n")
         parsed = parse_schedule_patch_response(
-            json.dumps({"updates": [{"row_index": 2, "completed": True, "note": "", "evidence": ""}]}),
+            json.dumps({"updates": [{"row_index": 2, "completed": True, "evidence": "完成计划表更新"}]}),
             record_content="完成计划表更新。",
         )
 
         with self.assertRaisesRegex(LogScheduleUpdateParseError, "out of range"):
             apply_schedule_patch(daily, parsed)
 
-    def test_non_empty_note_must_have_record_evidence(self) -> None:
+    def test_non_empty_evidence_must_match_daily_record(self) -> None:
         with self.assertRaisesRegex(LogScheduleUpdateParseError, "exact substring"):
             parse_schedule_patch_response(
                 json.dumps(
@@ -289,7 +473,6 @@ class LogScheduleUpdateTests(unittest.TestCase):
                             {
                                 "row_index": 1,
                                 "completed": True,
-                                "note": "下次先验表头",
                                 "evidence": "记录里不存在",
                             }
                         ]
@@ -311,7 +494,7 @@ class LogScheduleUpdateTests(unittest.TestCase):
                 "|---|---|---|\n"
                 "| 旧表 | P1 | 30m |\n\n"
                 "## 记录\n\n"
-                "- 已有记录\n",
+                "- 10:00:00 已有记录\n",
             )
             original = daily_file.read_text(encoding="utf-8")
             provider = FakeProvider(json.dumps({"updates": []}))
@@ -328,19 +511,57 @@ class LogScheduleUpdateTests(unittest.TestCase):
             self.assertEqual(provider.prompts, [])
             self.assertEqual(daily_file.read_text(encoding="utf-8"), original)
 
+    def test_legacy_note_header_skips_llm_and_keeps_daily(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            daily_file = _write_daily(
+                config,
+                "# 2026-05-10\n\n"
+                "## 计划\n\n"
+                "**任务管理**\n\n"
+                "| 任务 | 优先级 | 预计 | 状态 | 备注 |\n"
+                "|---|---|---|---|---|\n"
+                "| 旧表 | P1 | 30m |  | 旧备注 |\n\n"
+                "## 记录\n\n"
+                "- 10:00:00 已有记录\n",
+            )
+            original = daily_file.read_text(encoding="utf-8")
+            provider = FakeProvider(json.dumps({"updates": []}))
 
-def _daily_text(rows: str) -> str:
+            result = update_schedule_from_log(
+                provider,
+                "完成旧表。",
+                config=config,
+                target_date=date(2026, 5, 10),
+                logger=FakeLogger(),  # type: ignore[arg-type]
+            )
+
+            self.assertFalse(result.updated)
+            self.assertIn("header is not the expected", result.reason)
+            self.assertEqual(provider.prompts, [])
+            self.assertEqual(daily_file.read_text(encoding="utf-8"), original)
+
+
+def _schedule_table(rows: str) -> str:
+    return (
+        "| 任务 | 优先级 | 预计 | 状态 | 用时 |\n"
+        "|---|---|---|---|---|\n"
+        f"{rows}"
+    )
+
+
+def _daily_text(rows: str, *, records: str = "- 09:00:00 已有记录\n") -> str:
     return (
         "# 2026-05-10\n\n"
         "## 计划\n\n"
         "**今日待办**\n\n"
         "修身炉：\n"
         "1. 计划表更新\n\n"
-        "| 任务 | 优先级 | 预估时间 | 完成 | 备注 |\n"
+        "| 任务 | 优先级 | 预计 | 状态 | 用时 |\n"
         "|---|---|---|---|---|\n"
         f"{rows}\n\n"
         "## 记录\n\n"
-        "- 已有记录\n"
+        f"{records}"
     )
 
 

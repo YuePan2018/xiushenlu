@@ -63,8 +63,7 @@ class FakeProvider(LLMProvider):
                         {
                             "row_index": 1,
                             "completed": True,
-                            "note": "保留两列白名单",
-                            "evidence": "后续注意：保留两列白名单",
+                            "evidence": "完成控制台任务",
                         }
                     ]
                 },
@@ -879,7 +878,7 @@ class ConsoleTests(unittest.TestCase):
                 "## 计划\n\n"
                 "**今日待办**\n\n"
                 "原任务\n\n"
-                "| 任务 | 优先级 | 预计 | 状态 | 备注 |\n"
+                "| 任务 | 优先级 | 预计 | 状态 | 用时 |\n"
                 "|---|---|---|---|---|\n"
                 "| 原任务 | P1 | 1h |  |  |\n",
                 encoding="utf-8",
@@ -938,7 +937,7 @@ class ConsoleTests(unittest.TestCase):
                 "**今日待办**\n\n"
                 "控制台任务\n\n"
                 "**时间安排**\n\n"
-                "| 任务 | 优先级 | 预估时间 | 完成 | 备注 |\n"
+                "| 任务 | 优先级 | 预计 | 状态 | 用时 |\n"
                 "|---|---|---|---|---|\n"
                 "| 控制台任务 | P1 | 30m |  |  |\n\n"
                 "## 记录\n\n",
@@ -947,14 +946,14 @@ class ConsoleTests(unittest.TestCase):
             provider = FakeProvider()
             client = TestClient(create_app(config=config, provider_factory=lambda: provider))
 
-            response = client.post("/api/log", json={"content": "完成控制台任务。后续注意：保留两列白名单。"})
+            response = client.post("/api/log", json={"content": "完成控制台任务。"})
 
             self.assertEqual(response.status_code, 200)
             data = response.json()
             self.assertIn("任务表已更新", data["message"])
             self.assertTrue(data["result"]["schedule_updated"])
             daily_text = data["state"]["daily"]["text"]
-            self.assertIn("| 控制台任务 | P1 | 30m | ✓ | 保留两列白名单 |", daily_text)
+            self.assertIn("| 控制台任务 | P1 | 30m | ✓ |  |", daily_text)
             self.assertEqual(len(provider.prompts), 1)
 
     def test_review_endpoint_rolls_over_today_tasks(self) -> None:

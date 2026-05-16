@@ -26,8 +26,7 @@ REQUIRED_RESPONSE_KEYS = (
     "schedule_priority",
     "schedule_estimate",
 )
-SCHEDULE_HEADERS = ("任务", "优先级", "预计", "状态", "备注")
-LEGACY_SCHEDULE_HEADERS = ("任务", "优先级", "预估时间", "完成", "备注")
+SCHEDULE_HEADERS = ("任务", "优先级", "预计", "状态", "用时")
 
 
 class PlanUpdateParseError(ValueError):
@@ -410,7 +409,7 @@ def _is_schedule_table_start(lines: list[str], index: int) -> bool:
     if index + 1 >= len(lines) or not _is_table_line(lines[index]):
         return False
     headers = _split_table_row(lines[index])
-    if tuple(headers) not in (SCHEDULE_HEADERS, LEGACY_SCHEDULE_HEADERS):
+    if tuple(headers) != SCHEDULE_HEADERS:
         return False
     separator = _split_table_row(lines[index + 1])
     return len(separator) == len(SCHEDULE_HEADERS) and all(_is_separator_cell(cell) for cell in separator)
@@ -420,7 +419,7 @@ def _parse_schedule_table(table_lines: list[str]) -> list[tuple[str, str, str, s
     if len(table_lines) < 2:
         raise PlanUpdateParseError("schedule table must contain header and separator.")
     headers = _split_table_row(table_lines[0])
-    if tuple(headers) not in (SCHEDULE_HEADERS, LEGACY_SCHEDULE_HEADERS):
+    if tuple(headers) != SCHEDULE_HEADERS:
         raise PlanUpdateParseError("schedule table header is not the expected five columns.")
 
     rows: list[tuple[str, str, str, str, str]] = []
@@ -428,13 +427,14 @@ def _parse_schedule_table(table_lines: list[str]) -> list[tuple[str, str, str, s
         cells = _split_table_row(line)
         if len(cells) != len(SCHEDULE_HEADERS):
             raise PlanUpdateParseError("schedule table row does not match the expected columns.")
+        cells[4] = _normalize_duration_cell(cells[4])
         rows.append(tuple(cells))  # type: ignore[arg-type]
     return rows
 
 
 def _render_schedule_table(rows: list[tuple[str, str, str, str, str]]) -> str:
     lines = [
-        "| 任务 | 优先级 | 预计 | 状态 | 备注 |",
+        "| 任务 | 优先级 | 预计 | 状态 | 用时 |",
         "|---|---|---|---|---|",
     ]
     for row in rows:
@@ -444,6 +444,15 @@ def _render_schedule_table(rows: list[tuple[str, str, str, str, str]]) -> str:
 
 def _schedule_row_to_cells(schedule_row: ScheduleRow) -> tuple[str, str, str, str, str]:
     return (schedule_row.task, schedule_row.priority, schedule_row.estimate, "", "")
+
+
+def _normalize_duration_cell(text: str) -> str:
+    from app.pipelines.log_schedule_update import _format_duration, _parse_duration_seconds
+
+    duration_seconds = _parse_duration_seconds(text)
+    if duration_seconds is None:
+        return ""
+    return _format_duration(duration_seconds)
 
 
 def _is_table_line(line: str) -> bool:
@@ -478,7 +487,7 @@ def _build_prompt(
 你的任务：
 1. 把“新增任务”逐字插入 today_tasks.md，不能改写、概括或扩写。
 2. 同步更新 daily 里的“今日待办”小节，只更新待办快照，不重写原有计划建议。
-3. 为时间安排表提供一行新增任务的任务名、优先级和预计耗时；状态和备注由程序写空。
+3. 为时间安排表提供一行新增任务的任务名、优先级和预计耗时；状态和用时由程序写空。
 
 日期：{date_text}
 
@@ -506,7 +515,7 @@ def _build_prompt(
 - `schedule_task` 是写入时间安排表“任务”列的短任务名，可以比新增任务原文更短，但不能包含换行或 `|`。
 - `schedule_priority` 是“优先级”列，例如 P0、P1、P2、P3，不能包含换行或 `|`。
 - `schedule_estimate` 是“预计”列，例如 30m、1h、1.5h，不能包含换行或 `|`。
-- 不要输出状态、备注、单独建议正文、“新任务”标题或“### 新增”。
+- 不要输出状态、用时、单独建议正文、“新任务”标题或“### 新增”。
 
 插入格式示例：
 - 如果“修身炉：”下面已有“1.”到“5.”，新增“灵感：优化codex规则”应写成“【修身炉】”分组下的“6. 灵感：优化codex规则”。

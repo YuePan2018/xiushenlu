@@ -74,7 +74,7 @@ class PlanUpdateTests(unittest.TestCase):
             daily_text=(
                 "## 计划\n\n**今日待办**\n\n"
                 "修身炉：\n1. 原任务\n2. 继续任务\n\n"
-                "| 任务 | 优先级 | 预计 | 状态 | 备注 |\n"
+                "| 任务 | 优先级 | 预计 | 状态 | 用时 |\n"
                 "|---|---|---|---|---|\n"
                 "| 原任务 | P1 | 1h |  |  |"
             ),
@@ -86,13 +86,13 @@ class PlanUpdateTests(unittest.TestCase):
         self.assertIn("schedule_task", prompt)
         self.assertIn("schedule_priority", prompt)
         self.assertIn("schedule_estimate", prompt)
-        self.assertIn("状态和备注由程序写空", prompt)
+        self.assertIn("状态和用时由程序写空", prompt)
         self.assertIn("冒号前是目标分组标题", prompt)
         self.assertIn("分组展示必须统一为“【分组】”", prompt)
         self.assertIn("新增“杂事： 游泳”，必须新建或使用“【杂事】”", prompt)
-        self.assertIn("不要输出状态、备注、单独建议正文", prompt)
+        self.assertIn("不要输出状态、用时、单独建议正文", prompt)
         self.assertNotIn("new_task_advice", prompt)
-        self.assertIn("不要输出状态、备注、单独建议正文、“新任务”标题或“### 新增”", prompt)
+        self.assertIn("不要输出状态、用时、单独建议正文、“新任务”标题或“### 新增”", prompt)
 
     def test_parse_plan_update_response_rejects_non_json(self) -> None:
         with self.assertRaises(PlanUpdateParseError):
@@ -150,7 +150,7 @@ class PlanUpdateTests(unittest.TestCase):
 学习：
 视频：Pencil + Codex 实现 AI 日程助理 App
 
-| 任务 | 优先级 | 预计 | 状态 | 备注 |
+| 任务 | 优先级 | 预计 | 状态 | 用时 |
 |---|---|---|---|---|
 | 看视频 | P1 | 1h | ○ | 保持节奏 |
 
@@ -167,12 +167,12 @@ class PlanUpdateTests(unittest.TestCase):
         )
 
         self.assertIn("学习python", updated)
-        self.assertIn("| 看视频 | P1 | 1h | ○ | 保持节奏 |", updated)
+        self.assertIn("| 看视频 | P1 | 1h | ○ |  |", updated)
         self.assertIn("| 学习python | P2 | 45m |  |  |", updated)
         self.assertIn("## 记录", updated)
         self.assertNotIn("**新任务**", updated)
         self.assertNotIn("### 新增", updated)
-        self.assertLess(updated.index("学习python"), updated.index("| 任务 | 优先级 | 预计 | 状态 | 备注 |"))
+        self.assertLess(updated.index("学习python"), updated.index("| 任务 | 优先级 | 预计 | 状态 | 用时 |"))
 
     def test_update_daily_adds_schedule_table_when_missing(self) -> None:
         daily = """# 2026-04-30
@@ -231,7 +231,7 @@ class PlanUpdateTests(unittest.TestCase):
                 "## 计划\n\n"
                 "**今日待办**\n\n"
                 "学习：\n视频\n\n"
-                "| 任务 | 优先级 | 预计 | 状态 | 备注 |\n"
+                "| 任务 | 优先级 | 预计 | 状态 | 用时 |\n"
                 "|---|---|---|---|---|\n"
                 "| 视频 | P1 | 1h |  |  |\n",
                 encoding="utf-8",
@@ -285,7 +285,7 @@ class PlanUpdateTests(unittest.TestCase):
                 "重点：\n学习最新的知识库\n\n"
                 "【工作与自动化】\n"
                 "1. 配置Codex每日自动化任务\n\n"
-                "| 任务 | 优先级 | 预计 | 状态 | 备注 |\n"
+                "| 任务 | 优先级 | 预计 | 状态 | 用时 |\n"
                 "|---|---|---|---|---|\n"
                 "| 配置Codex每日自动化任务 | P1 | 30m |  |  |\n",
                 encoding="utf-8",
@@ -344,7 +344,7 @@ class PlanUpdateTests(unittest.TestCase):
                 "## 计划\n\n"
                 "**今日待办**\n\n"
                 "杂事：\n扫地拖地\n\n"
-                "| 任务 | 优先级 | 预计 | 状态 | 备注 |\n"
+                "| 任务 | 优先级 | 预计 | 状态 | 用时 |\n"
                 "|---|---|---|---|---|\n"
                 "| 扫地拖地 | P3 | 30m |  |  |\n",
                 encoding="utf-8",
@@ -416,7 +416,7 @@ class PlanUpdateTests(unittest.TestCase):
                 "## 计划\n\n"
                 "**今日待办**\n\n"
                 "学习：\n视频\n\n"
-                "| 任务 | 优先级 | 预计 | 状态 | 备注 |\n"
+                "| 任务 | 优先级 | 预计 | 状态 | 用时 |\n"
                 "|---|---|---|---|---|\n"
                 "| 破损行 | P1 |\n",
                 encoding="utf-8",

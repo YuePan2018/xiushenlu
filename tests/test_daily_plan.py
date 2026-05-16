@@ -50,7 +50,7 @@ class DailyPlanTests(unittest.TestCase):
             "视频：学习agent\n"
         )
         schedule = (
-            "| 任务 | 优先级 | 预计 | 状态 | 备注 |\n"
+            "| 任务 | 优先级 | 预计 | 状态 | 用时 |\n"
             "|---|---|---|---|---|\n"
             "| 小红书post功能 | P0 | 1.5h |  |  |"
         )
@@ -69,7 +69,7 @@ class DailyPlanTests(unittest.TestCase):
             "1. 思考：如何提速？\n"
             "2. 视频：学习agent\n\n"
             "**任务管理**\n"
-            "| 任务 | 优先级 | 预计 | 状态 | 备注 |\n"
+            "| 任务 | 优先级 | 预计 | 状态 | 用时 |\n"
             "|---|---|---|---|---|\n"
             "| 小红书post功能 | P0 | 1.5h |  |  |",
         )
@@ -89,20 +89,20 @@ class DailyPlanTests(unittest.TestCase):
             "修身炉：\n1. 修复表格渲染",
             (
                 "时间安排\n\n"
-                "| 任务｜优先级｜预估时间｜完成｜备注 |\n"
+                "| 任务｜优先级｜预计｜状态｜用时 |\n"
                 "| :--- | :--- | :--- | :--- | :--- |\n"
-                "| 修复表格渲染｜P0｜30m｜✓｜先看 marked 渲染 |"
+                "| 修复表格渲染｜P0｜30m｜✓｜40m |"
             ),
         )
 
-        self.assertIn("| 任务 | 优先级 | 预计 | 状态 | 备注 |", plan)
-        self.assertIn("**任务管理**\n| 任务 | 优先级 | 预计 | 状态 | 备注 |", plan)
+        self.assertIn("| 任务 | 优先级 | 预计 | 状态 | 用时 |", plan)
+        self.assertIn("**任务管理**\n| 任务 | 优先级 | 预计 | 状态 | 用时 |", plan)
         self.assertIn("| 修复表格渲染 | P0 | 30m |  |  |", plan)
         self.assertNotIn("｜", plan)
         self.assertNotIn("时间安排", plan)
-        self.assertNotIn("先看 marked 渲染", plan)
+        self.assertNotIn("40m", plan)
 
-    def test_build_plan_expands_three_column_schedule_table(self) -> None:
+    def test_build_plan_does_not_normalize_three_column_schedule_table(self) -> None:
         plan = _build_plan(
             "修身炉：\n1. 修复表格渲染",
             (
@@ -112,19 +112,18 @@ class DailyPlanTests(unittest.TestCase):
             ),
         )
 
-        self.assertIn("| 任务 | 优先级 | 预计 | 状态 | 备注 |", plan)
-        self.assertIn("**任务管理**\n| 任务 | 优先级 | 预计 | 状态 | 备注 |", plan)
-        self.assertIn("| 修复表格渲染 | P0 | 30m |  |  |", plan)
-        self.assertNotIn("时间安排", plan)
+        self.assertNotIn("| 任务 | 优先级 | 预计 | 状态 | 用时 |", plan)
+        self.assertIn("| 任务 | 优先级 | 预估时间 |", plan)
+        self.assertIn("| 修复表格渲染 | P0 | 30m |", plan)
 
     def test_build_prompt_only_requests_schedule_table(self) -> None:
         prompt = _build_prompt("2026-05-09", "长期目标", "修身炉：\n1. 只写待办")
 
         self.assertIn('只输出"**任务管理**"和 markdown 表格', prompt)
         self.assertIn("任务管理表格前固定输出一行：**任务管理**", prompt)
-        self.assertIn("| 任务 | 优先级 | 预计 | 状态 | 备注 |", prompt)
+        self.assertIn("| 任务 | 优先级 | 预计 | 状态 | 用时 |", prompt)
         self.assertIn("必须使用英文竖线", prompt)
-        self.assertIn("“状态”和“备注”两列都不填", prompt)
+        self.assertIn("“状态”和“用时”两列都不填", prompt)
         self.assertNotIn("建议时段", prompt)
         self.assertNotIn("调度风险与调整规则", prompt)
         self.assertNotIn("晚间收口动作", prompt)
@@ -134,7 +133,7 @@ class DailyPlanTests(unittest.TestCase):
             config = _test_config(Path(temp_dir))
             Path(config["paths"]["daily_dir"]).mkdir(parents=True)
             provider = FakeProvider(
-                "| 任务 | 优先级 | 预计 | 状态 | 备注 |\n"
+                "| 任务 | 优先级 | 预计 | 状态 | 用时 |\n"
                 "|---|---|---|---|---|\n"
                 "| 学习python | P2 | 45m |  |  |"
             )
