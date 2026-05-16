@@ -97,6 +97,8 @@ conda run --no-capture-output -n xiushenlu python app/main.py console
 - 用户名缓存到 `data/state/xhs_account.json`；常规 MCP 状态同步只读缓存，不调用 `/api/v1/user/me`，登录完成后才单独刷新一次用户名缓存。
 - 文本路径默认 `post/data/YYYY-MM-DD.txt`；文本路径旁的“打开草稿”会按当前输入框路径创建缺失草稿，并用 VS Code 打开。草稿路径必须位于 `post/data`。
 - 图片路径默认 `post/images/xiushenlu-xhs-cover.png`，支持多行，每行一个本地绝对路径或 HTTP/HTTPS URL。
+- 点击“生成封面”会读取文本路径对应的整篇草稿，调用 DashScope 图片模型生成 1 张 PNG，下载保存到 `post/images`，并用本地图片路径替换图片路径输入框。
+- 点击“打开图片”会按图片路径逐项调用系统默认应用打开；本地文件必须存在，HTTP/HTTPS 图片会交给系统默认浏览器或处理器。
 - 标题为必填；标签、定时发布和原创标记为可选；可见范围默认 `公开可见`。
 - 发布按钮会真实调用 `publish_content`，前端确认框通过后后端固定按 `approve=true` 执行；发布前不再预检查登录状态，cookies 失效或未登录时由 MCP 发布接口返回错误。
 
@@ -160,6 +162,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 | `paths.post_dir` | 小红书正文草稿目录，默认 `post/data`。 |
 | `paths.post_image_dir` | 小红书默认图片目录，默认 `post/images`。 |
 | `xiaohongshu.mcp_url` | 本地 `xiaohongshu-mcp` MCP 地址，默认 `http://localhost:18060/mcp`。 |
+| `xiaohongshu.cover_model` | 小红书封面生成模型，默认 `qwen-image-2.0`。 |
 | `xiaohongshu.mcp_exe` | 第三方 MCP release 主程序路径；控制台“打开/关闭 MCP”使用它。 |
 | `xiaohongshu.login_exe` | 第三方登录工具路径；需要重新登录时可手动使用它。 |
 | `xiaohongshu.working_dir` | 运行第三方 exe 的工作目录，通常是同级 `xiaohongshu-mcp`。 |
@@ -178,11 +181,11 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 | `app/pipelines/log_schedule_update.py` | 写入记录后的时间安排表更新 pipeline；LLM 只返回补丁，代码只写 `状态` 和 `备注` 两列。 |
 | `app/pipelines/plan_update.py` | 日内计划局部更新 pipeline；更新待办原文并给时间安排表追加一行，解析失败时停止写入。 |
 | `app/pipelines/nightly_review.py` | 晚间复盘 pipeline；当天复盘成功后滚动待办并清空 `明日计划.md`。 |
-| `app/posting/` | 小红书图文发布轻量适配：读取 `post/data` 草稿、校验参数、调用本地 MCP 并记录事件。 |
+| `app/posting/` | 小红书图文发布与封面生成适配：读取 `post/data` 草稿、校验参数、调用本地 MCP、调用 DashScope 图片模型并记录事件。 |
 | `app/daily.py` | daily Markdown 路径、读取、区块替换和记录追加。 |
 | `app/inbox.py` | `today_tasks.md` 和 `明日计划.md` 的读写封装。 |
 | `app/logger.py` | 按日 JSON Lines 事件追加和读取。 |
-| `app/cost.py` | 汇总本地 `llm_call` 事件，统计 token。 |
+| `app/cost.py` | 汇总本地 `llm_call` 事件统计 token，并汇总 `image_generation_usage` 事件统计文生图图片数。 |
 | `app/safety.py` | 路径白名单、protected file 检查和安全读写封装。 |
 
 ## 数据规则

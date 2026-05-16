@@ -8,6 +8,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -166,14 +167,23 @@ class ConsoleTests(unittest.TestCase):
             self.assertLess(html.index('id="openDraftBtn"'), html.index("图片路径（每行一张）"))
             self.assertIn('id="publishBtn"', html)
             self.assertIn('id="draftInput"', html)
+            self.assertNotIn('id="draftPreview"', html)
+            self.assertNotIn('id="draftPreviewState"', html)
             self.assertIn('id="imageInput"', html)
             self.assertIn('id="imageState"', html)
+            self.assertIn('id="generateCoverBtn"', html)
+            self.assertIn("生成封面", html)
+            self.assertIn('id="openImagesBtn"', html)
+            self.assertIn("打开图片", html)
             self.assertIn('id="visibilityInput"', html)
             self.assertIn("可见范围", html)
             self.assertIn("图片路径（每行一张）", html)
             self.assertIn("标题</label>", html)
             self.assertIn("标签（可选）", html)
             self.assertIn("定时发布（可选）", html)
+            self.assertLess(html.index("标题</label>"), html.index("可见范围"))
+            self.assertLess(html.index("可见范围"), html.index("标签（可选）"))
+            self.assertLess(html.index("标签（可选）"), html.index("定时发布（可选）"))
             self.assertIn("原创标记（可选）", html)
             self.assertIn('id="startMcpBtn" type="button" disabled', html)
             self.assertIn("statusLoading", html)
@@ -184,10 +194,16 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn("/api/xhs/start", html)
             self.assertIn("/api/xhs/stop", html)
             self.assertIn("/api/xhs/draft/open", html)
+            self.assertNotIn("/api/xhs/draft/read", html)
+            self.assertIn("/api/xhs/cover/generate", html)
+            self.assertIn("/api/xhs/images/open", html)
             self.assertNotIn("/api/xhs/account/refresh", html)
             self.assertIn("/api/xhs/publish", html)
             self.assertIn("/api/xhs/path-status", html)
             self.assertIn("schedulePathStatus", html)
+            self.assertIn("openImages", html)
+            self.assertNotIn("loadDraftPreview", html)
+            self.assertNotIn("selectedDraftText", html)
             self.assertIn("toggleMcp", html)
             self.assertIn("关闭 MCP", html)
 
@@ -269,6 +285,136 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn("post/data", response.json()["detail"])
             open_path.assert_not_called()
 
+    def test_xhs_generate_cover_downloads_image_and_returns_local_path(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            draft_path = Path(config["paths"]["post_dir"]) / "cover-source.txt"
+            draft_path.parent.mkdir(parents=True)
+            draft_text = "封面第一行\n封面内容"
+            draft_path.write_text(draft_text, encoding="utf-8")
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+            image_url = "https://example.com/generated.png"
+            response_payload = SimpleNamespace(
+                status_code=200,
+                request_id="req-cover-1",
+                output=SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            message=SimpleNamespace(content=[{"image": image_url}])
+                        )
+                    ]
+                ),
+                usage={"image_count": 1, "width": 2048, "height": 2048},
+            )
+
+            with (
+                patch.dict("os.environ", {"DASHSCOPE_API_KEY": "test-key"}),
+                patch(
+                    "app.posting.xhs_cover.MultiModalConversation.call",
+                    return_value=response_payload,
+                ) as dashscope_call,
+                patch("app.posting.xhs_cover._download_image_bytes", return_value=b"png-bytes") as download,
+            ):
+                response = client.post("/api/xhs/cover/generate", json={"draft": str(draft_path)})
+
+            self.assertEqual(response.status_code, 200)
+            result = response.json()["result"]
+            expected_path = (
+                Path(config["paths"]["post_image_dir"]) / f"{date.today().isoformat()}_封面第一行.png"
+            ).resolve()
+            self.assertEqual(Path(result["image_path"]), expected_path)
+            self.assertEqual(result["model"], "fake-cover-model")
+            self.assertEqual(result["image_count"], 1)
+            self.assertEqual(expected_path.read_bytes(), b"png-bytes")
+            download.assert_called_once_with(image_url, 30.0)
+            log_path = Path(config["paths"]["logs_dir"]) / f"{date.today().isoformat()}.jsonl"
+            events = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual([event["type"] for event in events], ["xhs_cover_generated", "image_generation_usage"])
+            self.assertEqual(events[1]["detail"]["image_count"], 1)
+            self.assertEqual(events[1]["detail"]["width"], 2048)
+            self.assertEqual(events[1]["detail"]["height"], 2048)
+            self.assertEqual(events[1]["detail"]["request_id"], "req-cover-1")
+            kwargs = dashscope_call.call_args.kwargs
+            self.assertEqual(kwargs["api_key"], "test-key")
+            self.assertEqual(kwargs["model"], "fake-cover-model")
+            self.assertEqual(kwargs["n"], 1)
+            self.assertTrue(kwargs["watermark"])
+            self.assertEqual(kwargs["negative_prompt"], "")
+            self.assertIn(draft_text, kwargs["messages"][0]["content"][0]["text"])
+
+    def test_xhs_generate_cover_uses_suffix_when_name_exists(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            image_dir = Path(config["paths"]["post_image_dir"])
+            image_dir.mkdir(parents=True)
+            first_path = image_dir / f"{date.today().isoformat()}_重复标题.png"
+            first_path.write_bytes(b"old")
+            draft_path = Path(config["paths"]["post_dir"]) / "duplicate-title.txt"
+            draft_path.parent.mkdir(parents=True)
+            draft_path.write_text("重复标题\n内容", encoding="utf-8")
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+            response_payload = SimpleNamespace(
+                status_code=200,
+                output=SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            message=SimpleNamespace(content=[{"image": "https://example.com/generated.png"}])
+                        )
+                    ]
+                ),
+            )
+
+            with (
+                patch.dict("os.environ", {"DASHSCOPE_API_KEY": "test-key"}),
+                patch("app.posting.xhs_cover.MultiModalConversation.call", return_value=response_payload),
+                patch("app.posting.xhs_cover._download_image_bytes", return_value=b"new"),
+            ):
+                response = client.post("/api/xhs/cover/generate", json={"draft": str(draft_path)})
+
+            self.assertEqual(response.status_code, 200)
+            expected_path = (image_dir / f"{date.today().isoformat()}_重复标题-2.png").resolve()
+            self.assertEqual(Path(response.json()["result"]["image_path"]), expected_path)
+            self.assertEqual(first_path.read_bytes(), b"old")
+            self.assertEqual(expected_path.read_bytes(), b"new")
+
+    def test_xhs_generate_cover_rejects_empty_draft(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            draft_path = Path(config["paths"]["post_dir"]) / "empty.txt"
+            draft_path.parent.mkdir(parents=True)
+            draft_path.write_text("  ", encoding="utf-8")
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+
+            response = client.post("/api/xhs/cover/generate", json={"draft": str(draft_path)})
+
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("草稿正文为空", response.json()["detail"])
+
+    def test_xhs_generate_cover_reports_missing_image_url(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            draft_path = Path(config["paths"]["post_dir"]) / "no-image-url.txt"
+            draft_path.parent.mkdir(parents=True)
+            draft_path.write_text("封面标题", encoding="utf-8")
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+            response_payload = SimpleNamespace(
+                status_code=200,
+                output=SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(message=SimpleNamespace(content=[{"text": "no image"}]))
+                    ]
+                ),
+            )
+
+            with (
+                patch.dict("os.environ", {"DASHSCOPE_API_KEY": "test-key"}),
+                patch("app.posting.xhs_cover.MultiModalConversation.call", return_value=response_payload),
+            ):
+                response = client.post("/api/xhs/cover/generate", json={"draft": str(draft_path)})
+
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("未返回图片", response.json()["detail"])
+
     def test_xhs_path_status_reports_local_files_and_urls(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
@@ -300,6 +446,40 @@ class ConsoleTests(unittest.TestCase):
             self.assertIsNone(data["images"][1]["exists"])
             self.assertFalse(data["images"][2]["exists"])
             self.assertEqual(data["images"][2]["message"], "文件不存在")
+
+    def test_xhs_open_images_opens_all_local_files_and_urls(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            image_a = Path(config["paths"]["post_image_dir"]) / "cover-a.png"
+            image_b = Path(config["paths"]["post_image_dir"]) / "cover-b.png"
+            image_a.parent.mkdir(parents=True)
+            image_a.write_bytes(b"a")
+            image_b.write_bytes(b"b")
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+
+            opened: list[str] = []
+            with patch("app.console._open_value_with_default_app", side_effect=lambda value: opened.append(value)):
+                response = client.post(
+                    "/api/xhs/images/open",
+                    json={"images": [str(image_a), "https://example.com/cover.png", str(image_b)]},
+                )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["result"]["images_count"], 3)
+            self.assertEqual(opened, [str(image_a.resolve()), "https://example.com/cover.png", str(image_b.resolve())])
+
+    def test_xhs_open_images_rejects_missing_local_file(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            missing = Path(config["paths"]["post_image_dir"]) / "missing.png"
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+
+            with patch("app.console._open_value_with_default_app") as opener:
+                response = client.post("/api/xhs/images/open", json={"images": [str(missing)]})
+
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("图片文件不存在", response.json()["detail"])
+            opener.assert_not_called()
 
     def test_xhs_start_does_not_open_login_when_mcp_is_available(self) -> None:
         with _temporary_directory() as temp_dir:
@@ -850,8 +1030,46 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn("今日 token 数：18", daily_text)
             self.assertIn("本月 LLM 调用：1 次", daily_text)
             self.assertIn("本月 token 数：18", daily_text)
+            self.assertIn("今日文生图图片数：0 张", daily_text)
+            self.assertIn("本月文生图图片数：0 张", daily_text)
             self.assertNotIn("输入 token", daily_text)
             self.assertNotIn("输出 token", daily_text)
+
+    def test_cost_endpoint_reports_image_generation_count_without_call_count(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            logs_dir = Path(config["paths"]["logs_dir"])
+            logs_dir.mkdir(parents=True)
+            today = date.today().isoformat()
+            events = [
+                {
+                    "ts": f"{today}T08:00:00+00:00",
+                    "type": "image_generation_usage",
+                    "summary": "文生图生成图片",
+                    "detail": {"model": "fake-cover-model", "image_count": 2},
+                },
+                {
+                    "ts": f"{today}T08:01:00+00:00",
+                    "type": "xhs_cover_generated",
+                    "summary": "小红书封面已生成",
+                    "detail": {"model": "fake-cover-model", "image_count": 2},
+                },
+            ]
+            (logs_dir / f"{today}.jsonl").write_text(
+                "\n".join(json.dumps(event, ensure_ascii=False) for event in events) + "\n",
+                encoding="utf-8",
+            )
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+
+            response = client.post("/api/cost", json={})
+
+            self.assertEqual(response.status_code, 200)
+            daily_text = response.json()["state"]["daily"]["text"]
+            self.assertIn("今日 LLM 调用：0 次", daily_text)
+            self.assertIn("今日 token 数：0", daily_text)
+            self.assertIn("今日文生图图片数：2 张", daily_text)
+            self.assertIn("本月文生图图片数：2 张", daily_text)
+            self.assertNotIn("文生图调用", daily_text)
 
     def test_plan_update_rejects_empty_add(self) -> None:
         with _temporary_directory() as temp_dir:
@@ -886,10 +1104,15 @@ def _test_config(root: Path) -> dict[str, Any]:
     }
     xhs_dir = root / "xiaohongshu-mcp"
     return {
+        "llm": {
+            "api_key_env": "DASHSCOPE_API_KEY",
+            "timeout": 30,
+        },
         "paths": paths,
         "xiaohongshu": {
             "mcp_url": "http://localhost:18060/mcp",
             "timeout": 1,
+            "cover_model": "fake-cover-model",
             "working_dir": str(xhs_dir),
             "mcp_exe": str(xhs_dir / "xiaohongshu-mcp.exe"),
             "login_exe": str(xhs_dir / "xiaohongshu-login.exe"),

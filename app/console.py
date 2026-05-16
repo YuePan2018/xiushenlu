@@ -41,8 +41,9 @@ from app.pipelines.log_schedule_update import update_schedule_from_log
 from app.pipelines.nightly_review import NightlyReviewParseError, generate_nightly_review
 from app.pipelines.plan_update import PlanUpdateParseError, generate_plan_update
 from app.posting import publish_xhs_from_draft
+from app.posting.xhs_cover import generate_xhs_cover_from_text
 from app.posting.xhs_mcp import XhsMcpClient
-from app.safety import safe_write_text
+from app.safety import safe_read_text, safe_write_text
 
 
 ProviderFactory = Callable[[], LLMProvider]
@@ -205,6 +206,20 @@ class XhsPathStatusRequest(BaseModel):
 
 class XhsOpenDraftRequest(BaseModel):
     draft: str
+
+    class Config:
+        extra = "forbid"
+
+
+class XhsCoverGenerateRequest(BaseModel):
+    draft: str = ""
+
+    class Config:
+        extra = "forbid"
+
+
+class XhsOpenImagesRequest(BaseModel):
+    images: list[str] = []
 
     class Config:
         extra = "forbid"
@@ -508,6 +523,57 @@ class ConsoleService:
             "images": [_describe_publish_path(path) for path in request.images],
         }
 
+    def generate_xhs_cover(self, request: XhsCoverGenerateRequest) -> dict[str, Any]:
+        draft_path, text = _read_xhs_draft_text(request.draft, self.config)
+        result = generate_xhs_cover_from_text(text, self.config)
+        logger = EventLogger(config=self.config)
+        logger.append_event(
+            "xhs_cover_generated",
+            "小红书封面已生成",
+            {
+                "draft_path": str(draft_path),
+                "image_path": str(result.image_path),
+                "image_count": result.image_count,
+                "width": result.width,
+                "height": result.height,
+                "model": result.model,
+                "request_id": result.request_id,
+            },
+        )
+        logger.append_event(
+            "image_generation_usage",
+            "文生图生成图片",
+            {
+                "task": "xhs_cover",
+                "model": result.model,
+                "image_count": result.image_count,
+                "width": result.width,
+                "height": result.height,
+                "request_id": result.request_id,
+                "image_path": str(result.image_path),
+            },
+        )
+        return {
+            "message": "小红书封面已生成。",
+            "result": {
+                "image_path": str(result.image_path),
+                "image_count": result.image_count,
+                "model": result.model,
+            },
+        }
+
+    def open_xhs_images(self, request: XhsOpenImagesRequest) -> dict[str, Any]:
+        image_targets = _resolve_image_open_targets(request.images)
+        for image_target in image_targets:
+            _open_value_with_default_app(image_target)
+        return {
+            "message": f"已打开 {len(image_targets)} 张图片。",
+            "result": {
+                "image_paths": image_targets,
+                "images_count": len(image_targets),
+            },
+        }
+
     def start_xhs_mcp(self) -> dict[str, Any]:
         status = self.xhs_status()
         if not status["connected"]:
@@ -682,6 +748,14 @@ def create_app(
     @app.post("/api/xhs/path-status")
     def api_xhs_path_status(request: XhsPathStatusRequest) -> dict[str, Any]:
         return _handle(lambda: service.xhs_path_status(request))
+
+    @app.post("/api/xhs/cover/generate")
+    def api_xhs_generate_cover(request: XhsCoverGenerateRequest) -> dict[str, Any]:
+        return _handle(lambda: service.generate_xhs_cover(request))
+
+    @app.post("/api/xhs/images/open")
+    def api_xhs_open_images(request: XhsOpenImagesRequest) -> dict[str, Any]:
+        return _handle(lambda: service.open_xhs_images(request))
 
     @app.get("/api/xhs/cover")
     def api_xhs_cover() -> FileResponse:
@@ -926,6 +1000,8 @@ def _handle(operation: Callable[[], dict[str, Any]]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def _message_with_llm_elapsed(message: str, provider: LLMProvider) -> str:
@@ -989,19 +1065,55 @@ def _resolve_xhs_draft_path(config: dict[str, Any], path_text: str) -> Path:
     return resolved
 
 
+def _read_xhs_draft_text(path_text: str, config: dict[str, Any]) -> tuple[Path, str]:
+    resolved = _resolve_xhs_draft_path(config, path_text)
+    if not resolved.exists():
+        raise ValueError(f"草稿文件不存在：{resolved}")
+    if not resolved.is_file():
+        raise ValueError(f"草稿路径不是文件：{resolved}")
+    return resolved, safe_read_text(resolved, config)
+
+
+def _resolve_image_open_targets(image_values: list[str]) -> list[str]:
+    clean_values = [value.strip() for value in image_values if value and value.strip()]
+    if not clean_values:
+        raise ValueError("请先填写图片路径。")
+
+    targets: list[str] = []
+    for value in clean_values:
+        if value.startswith(("http://", "https://")):
+            targets.append(value)
+            continue
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = resolve_project_path(value)
+        resolved = path.resolve()
+        if not resolved.exists():
+            raise ValueError(f"图片文件不存在：{resolved}")
+        if not resolved.is_file():
+            raise ValueError(f"图片路径不是文件：{resolved}")
+        targets.append(str(resolved))
+
+    return targets
+
+
 def _is_relative_to(path: Path, parent: Path) -> bool:
     return path == parent or parent in path.parents
 
 
 def _open_path_with_default_app(path: Path) -> None:
+    _open_value_with_default_app(str(path))
+
+
+def _open_value_with_default_app(value: str) -> None:
     try:
         if sys.platform.startswith("win"):
-            os.startfile(str(path))  # type: ignore[attr-defined]
+            os.startfile(value)  # type: ignore[attr-defined]
             return
         if sys.platform == "darwin":
-            subprocess.Popen(["open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(["open", value], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return
-        subprocess.Popen(["xdg-open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen(["xdg-open", value], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError as exc:
         raise RuntimeError(f"无法打开文件：{exc}") from exc
 
@@ -2171,9 +2283,16 @@ XHS_HTML = """<!doctype html>
           <div class="status" id="draftOpenStatus"></div>
         </div>
         <div class="field">
-          <label for="imageInput">图片路径（每行一张）</label>
+          <div class="field-heading">
+            <label for="imageInput">图片路径（每行一张）</label>
+            <div class="row">
+              <button class="secondary" id="generateCoverBtn" type="button">生成封面</button>
+              <button class="secondary" id="openImagesBtn" type="button">打开图片</button>
+            </div>
+          </div>
           <textarea id="imageInput" spellcheck="false" required></textarea>
           <div class="meta" id="imageState"></div>
+          <div class="status" id="coverStatus"></div>
         </div>
         <div class="split">
           <div class="field">
@@ -2181,14 +2300,14 @@ XHS_HTML = """<!doctype html>
             <input id="titleInput" type="text" spellcheck="false" required>
           </div>
           <div class="field">
-            <label for="tagsInput">标签（可选）</label>
-            <input id="tagsInput" type="text" spellcheck="false">
+            <label for="visibilityInput">可见范围</label>
+            <select id="visibilityInput"></select>
           </div>
         </div>
         <div class="split">
           <div class="field">
-            <label for="visibilityInput">可见范围</label>
-            <select id="visibilityInput"></select>
+            <label for="tagsInput">标签（可选）</label>
+            <input id="tagsInput" type="text" spellcheck="false">
           </div>
           <div class="field">
             <label for="scheduleInput">定时发布（可选）</label>
@@ -2231,6 +2350,8 @@ XHS_HTML = """<!doctype html>
       mcpButton.disabled = state.busy || state.statusLoading;
       mcpButton.textContent = state.canStopMcp ? "关闭 MCP" : "打开 MCP";
       $("openDraftBtn").disabled = state.busy;
+      $("generateCoverBtn").disabled = state.busy;
+      $("openImagesBtn").disabled = state.busy;
       $("publishBtn").disabled = state.busy || !state.mcpConnected;
     }
 
@@ -2391,6 +2512,52 @@ XHS_HTML = """<!doctype html>
       }
     }
 
+    async function generateCover() {
+      const draft = $("draftInput").value.trim();
+      if (!draft) {
+        setStatus("coverStatus", "请先填写文本路径。", "error");
+        return;
+      }
+      setBusy(true);
+      setStatus("coverStatus", "生成封面中...");
+      try {
+        const data = await requestJson("/api/xhs/cover/generate", {
+          method: "POST",
+          body: JSON.stringify({ draft }),
+        });
+        if (data.result && data.result.image_path) {
+          $("imageInput").value = data.result.image_path;
+        }
+        await updatePathStatus();
+        setStatus("coverStatus", data.message || "封面已生成", "ok");
+      } catch (error) {
+        setStatus("coverStatus", error.message, "error");
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function openImages() {
+      const images = splitLines($("imageInput").value);
+      if (!images.length) {
+        setStatus("coverStatus", "请先填写图片路径。", "error");
+        return;
+      }
+      setBusy(true);
+      setStatus("coverStatus", "打开图片中...");
+      try {
+        const data = await requestJson("/api/xhs/images/open", {
+          method: "POST",
+          body: JSON.stringify({ images }),
+        });
+        setStatus("coverStatus", data.message || "已打开图片", "ok");
+      } catch (error) {
+        setStatus("coverStatus", error.message, "error");
+      } finally {
+        setBusy(false);
+      }
+    }
+
     function collectPublishRequest() {
       return {
         draft: $("draftInput").value,
@@ -2468,6 +2635,8 @@ XHS_HTML = """<!doctype html>
 
     $("startMcpBtn").addEventListener("click", toggleMcp);
     $("openDraftBtn").addEventListener("click", openDraft);
+    $("generateCoverBtn").addEventListener("click", generateCover);
+    $("openImagesBtn").addEventListener("click", openImages);
     $("publishBtn").addEventListener("click", publishXhs);
     $("draftInput").addEventListener("input", schedulePathStatus);
     $("imageInput").addEventListener("input", schedulePathStatus);

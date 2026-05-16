@@ -154,6 +154,8 @@ class NightlyReviewTests(unittest.TestCase):
             self.assertIn("今日 token 数：30", daily_text)
             self.assertIn("本月 LLM 调用：1 次", daily_text)
             self.assertIn("本月 token 数：30", daily_text)
+            self.assertIn("今日文生图图片数：0 张", daily_text)
+            self.assertIn("本月文生图图片数：0 张", daily_text)
             self.assertNotIn("输入 token", daily_text)
             self.assertNotIn("输出 token", daily_text)
             saved_tasks = today_tasks.read_text(encoding="utf-8")

@@ -43,6 +43,12 @@ def safe_write_text(path: str | Path, text: str, config: dict[str, Any] | None =
     resolved.write_text(text, encoding="utf-8")
 
 
+def safe_write_bytes(path: str | Path, data: bytes, config: dict[str, Any] | None = None) -> None:
+    resolved = validate_path(path, config, for_write=True)
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    resolved.write_bytes(data)
+
+
 def safe_append_text(path: str | Path, text: str, config: dict[str, Any] | None = None) -> None:
     resolved = validate_path(path, config, for_write=True)
     resolved.parent.mkdir(parents=True, exist_ok=True)
@@ -69,4 +75,3 @@ def _resolve_config_path(path: str | Path) -> Path:
 
 def _is_relative_to(path: Path, parent: Path) -> bool:
     return path == parent or parent in path.parents
-
