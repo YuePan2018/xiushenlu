@@ -94,7 +94,7 @@ class LogScheduleUpdateTests(unittest.TestCase):
             self.assertNotIn("999h", daily_text)
             self.assertEqual([event["type"] for event in logger.events], ["llm_call", "schedule_updated_from_log"])
 
-    def test_record_intervals_are_summed_by_segment(self) -> None:
+    def test_time_records_use_first_and_last_record_when_no_duration(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
             daily_file = _write_daily(
@@ -116,10 +116,7 @@ class LogScheduleUpdateTests(unittest.TestCase):
                             "row_index": 1,
                             "status": "completed",
                             "evidence": "完成计划表更新",
-                            "time_entries": [
-                                {"type": "record_interval", "start_record": 1, "end_record": 2},
-                                {"type": "record_interval", "start_record": 3, "end_record": 4},
-                            ],
+                            "time_records": [1, 2, 3, 4],
                         }
                     ]
                 },
@@ -135,9 +132,9 @@ class LogScheduleUpdateTests(unittest.TestCase):
             )
 
             self.assertTrue(result.updated)
-            self.assertIn("| 计划表更新 | P1 | 2h | ✓ | 1h15m |", daily_file.read_text(encoding="utf-8"))
+            self.assertIn("| 计划表更新 | P1 | 2h | ✓ | 1h45m |", daily_file.read_text(encoding="utf-8"))
 
-    def test_direct_duration_does_not_use_timestamp_diff(self) -> None:
+    def test_last_explicit_duration_wins_over_timestamp_diff(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
             daily_file = _write_daily(
@@ -154,9 +151,7 @@ class LogScheduleUpdateTests(unittest.TestCase):
                             "row_index": 1,
                             "status": "keep",
                             "evidence": "计划表更新用时40分钟",
-                            "time_entries": [
-                                {"type": "direct_duration", "record": 1, "duration": "40分钟"},
-                            ],
+                            "time_records": [1],
                         }
                     ]
                 },
@@ -174,7 +169,7 @@ class LogScheduleUpdateTests(unittest.TestCase):
             self.assertTrue(result.updated)
             self.assertIn("| 计划表更新 | P1 | 2h |  | 40m |", daily_file.read_text(encoding="utf-8"))
 
-    def test_multiple_direct_durations_are_summed(self) -> None:
+    def test_multiple_explicit_durations_use_last_one_only(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
             daily_file = _write_daily(
@@ -194,10 +189,7 @@ class LogScheduleUpdateTests(unittest.TestCase):
                             "row_index": 1,
                             "status": "keep",
                             "evidence": "计划表更新又花了20分钟",
-                            "time_entries": [
-                                {"type": "direct_duration", "record": 1, "duration": "10分钟"},
-                                {"type": "direct_duration", "record": 2, "duration": "20分钟"},
-                            ],
+                            "time_records": [1, 2],
                         }
                     ]
                 },
@@ -213,9 +205,9 @@ class LogScheduleUpdateTests(unittest.TestCase):
             )
 
             self.assertTrue(result.updated)
-            self.assertIn("| 计划表更新 | P1 | 2h |  | 30m |", daily_file.read_text(encoding="utf-8"))
+            self.assertIn("| 计划表更新 | P1 | 2h |  | 20m |", daily_file.read_text(encoding="utf-8"))
 
-    def test_direct_duration_and_record_intervals_are_summed_with_endpoint_dedupe(self) -> None:
+    def test_later_records_do_not_override_last_explicit_duration(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
             daily_file = _write_daily(
@@ -223,10 +215,14 @@ class LogScheduleUpdateTests(unittest.TestCase):
                 _daily_text(
                     "| 计划表更新 | P1 | 2h |  |  |",
                     records=(
-                        "- 10:00:00 开始计划表更新。\n"
-                        "- 10:20:00 计划表更新用时10分钟。\n"
-                        "- 10:40:00 继续计划表更新。\n"
-                        "- 10:50:00 计划表更新完成。\n"
+                        "- 15:09:45 计划表更新。\n"
+                        "- 15:13:31 计划表更新20分钟。\n"
+                        "- 15:13:54 继续计划表更新。\n"
+                        "- 15:14:54 计划表更新结束。\n"
+                        "- 15:15:15 计划表更新39分钟。\n"
+                        "- 15:15:38 开始计划表更新。\n"
+                        "- 15:21:41 结束计划表更新。\n"
+                        "- 15:22:34 计划表更新再次开始。\n"
                     ),
                 ),
             )
@@ -235,13 +231,9 @@ class LogScheduleUpdateTests(unittest.TestCase):
                     "updates": [
                         {
                             "row_index": 1,
-                            "status": "completed",
-                            "evidence": "计划表更新完成",
-                            "time_entries": [
-                                {"type": "record_interval", "start_record": 1, "end_record": 2},
-                                {"type": "direct_duration", "record": 2, "duration": "10分钟"},
-                                {"type": "record_interval", "start_record": 3, "end_record": 4},
-                            ],
+                            "status": "in_progress",
+                            "evidence": "计划表更新再次开始",
+                            "time_records": [1, 2, 3, 4, 5, 6, 7, 8],
                         }
                     ]
                 },
@@ -250,42 +242,33 @@ class LogScheduleUpdateTests(unittest.TestCase):
 
             result = update_schedule_from_log(
                 FakeProvider(reply),
-                "计划表更新完成。",
+                "计划表更新再次开始。",
                 config=config,
                 target_date=date(2026, 5, 10),
                 logger=FakeLogger(),  # type: ignore[arg-type]
             )
 
             self.assertTrue(result.updated)
-            self.assertIn("| 计划表更新 | P1 | 2h | ✓ | 20m |", daily_file.read_text(encoding="utf-8"))
+            self.assertIn("| 计划表更新 | P1 | 2h | ○ | 39m |", daily_file.read_text(encoding="utf-8"))
 
-    def test_overlapping_record_intervals_are_rejected(self) -> None:
+    def test_single_record_without_explicit_duration_clears_duration(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
             daily_file = _write_daily(
                 config,
                 _daily_text(
-                    "| 计划表更新 | P1 | 2h |  |  |",
-                    records=(
-                        "- 10:00:00 开始计划表更新。\n"
-                        "- 10:10:00 继续计划表更新。\n"
-                        "- 10:30:00 暂停计划表更新。\n"
-                        "- 10:40:00 完成计划表更新。\n"
-                    ),
+                    "| 计划表更新 | P1 | 2h |  | 15m |",
+                    records="- 10:00:00 开始计划表更新。\n",
                 ),
             )
-            original = daily_file.read_text(encoding="utf-8")
             reply = json.dumps(
                 {
                     "updates": [
                         {
                             "row_index": 1,
-                            "status": "completed",
-                            "evidence": "完成计划表更新",
-                            "time_entries": [
-                                {"type": "record_interval", "start_record": 1, "end_record": 3},
-                                {"type": "record_interval", "start_record": 2, "end_record": 4},
-                            ],
+                            "status": "in_progress",
+                            "evidence": "开始计划表更新",
+                            "time_records": [1],
                         }
                     ]
                 },
@@ -294,15 +277,14 @@ class LogScheduleUpdateTests(unittest.TestCase):
 
             result = update_schedule_from_log(
                 FakeProvider(reply),
-                "完成计划表更新。",
+                "开始计划表更新。",
                 config=config,
                 target_date=date(2026, 5, 10),
                 logger=FakeLogger(),  # type: ignore[arg-type]
             )
 
-            self.assertFalse(result.updated)
-            self.assertIn("record intervals overlap", result.reason)
-            self.assertEqual(daily_file.read_text(encoding="utf-8"), original)
+            self.assertTrue(result.updated)
+            self.assertIn("| 计划表更新 | P1 | 2h | ○ |  |", daily_file.read_text(encoding="utf-8"))
 
     def test_status_field_supports_in_progress_completed_not_started_dropped_and_keep(self) -> None:
         with _temporary_directory() as temp_dir:
@@ -331,7 +313,7 @@ class LogScheduleUpdateTests(unittest.TestCase):
                             "row_index": 5,
                             "status": "keep",
                             "evidence": "保持状态用时20m",
-                            "time_entries": [{"type": "direct_duration", "record": 1, "duration": "20m"}],
+                            "time_records": [1],
                         },
                     ]
                 },
@@ -381,16 +363,17 @@ class LogScheduleUpdateTests(unittest.TestCase):
         self.assertIn("dropped", prompt)
         self.assertIn("用时列是派生值", prompt)
         self.assertIn("不要把旧表格里的用时当作累计变量", prompt)
-        self.assertIn("direct_duration", prompt)
-        self.assertIn("record_interval", prompt)
+        self.assertIn("time_records", prompt)
+        self.assertIn("最后一次明确时长", prompt)
+        self.assertNotIn("direct_duration", prompt)
+        self.assertNotIn("record_interval", prompt)
+        self.assertNotIn("time_entries", prompt)
         self.assertNotIn("clock_range", prompt)
         self.assertNotIn("start_time", prompt)
         self.assertNotIn("end_time", prompt)
-        self.assertIn("如果记录明确写了“用时/耗时/花了”等直接用时", prompt)
-        self.assertIn("time_entries 可以包含多个 direct_duration 和多个 record_interval", prompt)
 
-    def test_clock_range_time_entry_is_rejected(self) -> None:
-        with self.assertRaisesRegex(LogScheduleUpdateParseError, "record_interval or direct_duration"):
+    def test_legacy_time_entries_are_rejected(self) -> None:
+        with self.assertRaisesRegex(LogScheduleUpdateParseError, "time_entries is no longer supported"):
             parse_schedule_patch_response(
                 json.dumps(
                     {

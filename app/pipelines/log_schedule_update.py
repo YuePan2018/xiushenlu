@@ -51,20 +51,11 @@ class DailyRecord:
 
 
 @dataclass(frozen=True)
-class TimingEntry:
-    entry_type: str
-    start_record: int | None = None
-    end_record: int | None = None
-    record: int | None = None
-    duration_seconds: int | None = None
-
-
-@dataclass(frozen=True)
 class SchedulePatch:
     row_index: int
     completion_mark: str | None
     evidence: str
-    timing_entries: tuple[TimingEntry, ...] | None = None
+    time_record_ids: tuple[int, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -228,7 +219,7 @@ def parse_schedule_patch_response(
         row_index = item.get("row_index")
         completion_mark = _parse_completion_mark(item)
         evidence = item.get("evidence", "")
-        timing_entries = _parse_timing_entries(item.get("time_entries"), records)
+        time_record_ids = _parse_time_record_ids(item, records)
 
         if not isinstance(row_index, int):
             raise LogScheduleUpdateParseError("row_index must be an integer.")
@@ -244,7 +235,7 @@ def parse_schedule_patch_response(
                 row_index=row_index,
                 completion_mark=completion_mark,
                 evidence=evidence_text,
-                timing_entries=timing_entries,
+                time_record_ids=time_record_ids,
             )
         )
 
@@ -268,8 +259,8 @@ def apply_schedule_patch(daily_text: str, parsed: ParsedSchedulePatch) -> tuple[
         row = rows[update.row_index - 1]
         if update.completion_mark is not None:
             row[3] = update.completion_mark
-        if update.timing_entries is not None:
-            total_seconds = _calculate_total_duration_seconds(update.timing_entries, records)
+        if update.time_record_ids is not None:
+            total_seconds = _calculate_duration_seconds(update.time_record_ids, records)
             row[4] = _format_duration(total_seconds)
 
     new_table_lines = _render_table(tuple(tuple(row) for row in rows)).splitlines()
@@ -307,18 +298,17 @@ def build_schedule_patch_prompt(
 - status 使用五种值：keep 表示状态列不变，not_started 表示状态列清空，in_progress 表示写为“{IN_PROGRESS_MARK}”，completed 表示写为“{CHECK_MARK}”，dropped 表示写为“{DROPPED_MARK}”。
 - 记录没有提到任务开始或推进时，用 keep 或不输出更新；记录提到开始做、正在做、推进中、完成了一部分但任务还会继续，使用 in_progress；记录明确完成，使用 completed。
 - 记录说删除这个任务、取消、不再追踪、不再纳入今天任务、短期内不做或这个任务今天不管了，使用 dropped；dropped 表示任务退出追踪，不等同于 completed。
-- 用时列是派生值：每次都从当天全部记录重新找出该任务相关的完整用时条目，不要把旧表格里的用时当作累计变量。
-- 如果记录明确写了“用时/耗时/花了”等直接用时，使用 direct_duration，record 填这条记录 ID，duration 原样提取。
-- 如果两条记录形成明确的开始/结束区间，使用 record_interval；start_record 填开始记录 ID，end_record 填结束记录 ID。
-- time_entries 可以包含多个 direct_duration 和多个 record_interval；程序会累加明确用时和闭合区间，并按 direct_duration 的 record 端点去重。
-- 无法判断是开始或结束的记录不要作为 record_interval 边界；开放中的开始记录不要计入用时。
+- 用时列是派生值：每次都从当天全部记录重新找出该任务相关记录，不要把旧表格里的用时当作累计变量。
+- time_records 填所有与该任务当天执行相关的记录 ID；不要判断哪条是开始或结束，程序只看这些记录的首尾时间。
+- 如果相关记录里有明确写出的时长，例如“20分钟”“用时40m”“耗时1.5h”，程序只使用最后一次明确时长作为最终用时，不累加，也不再计算首尾时间差。
+- 如果相关记录里没有明确时长，程序使用最后一条相关记录的 HH:MM:SS 减去第一条相关记录的 HH:MM:SS；只有一条相关记录时用时留空。
 - evidence 如果填写，必须是当天记录里的原文片段；没有可靠证据时用空字符串。
 - 不要新增任务行，不要删除任务行，不要改任务名、优先级、预计或行顺序。
 
 你必须只输出一个严格 JSON 对象，不要使用代码块，不要输出解释文字。
 JSON 格式固定为：
-{{"updates":[{{"row_index":1,"status":"completed","evidence":"完成原文","time_entries":[{{"type":"record_interval","start_record":2,"end_record":5}},{{"type":"direct_duration","record":6,"duration":"40m"}}]}}]}}
-如果只需要改状态且不改用时，可以省略 time_entries。
+{{"updates":[{{"row_index":1,"status":"completed","evidence":"完成原文","time_records":[2,3,5,6]}}]}}
+如果只需要改状态且不改用时，可以省略 time_records。
 如果只需要重算用时且状态不变，status 使用 keep。
 如果没有任何任务行需要变化，输出 {{"updates":[]}}。
 """
@@ -368,45 +358,23 @@ def _parse_completion_mark(item: dict[str, Any]) -> str | None:
     return None
 
 
-def _parse_timing_entries(
-    value: Any,
+def _parse_time_record_ids(
+    item: dict[str, Any],
     records: tuple[DailyRecord, ...],
-) -> tuple[TimingEntry, ...] | None:
+) -> tuple[int, ...] | None:
+    if "time_entries" in item or "time_entry" in item:
+        raise LogScheduleUpdateParseError("time_entries is no longer supported; use time_records.")
+
+    value = item.get("time_records")
     if value is None:
         return None
     if not isinstance(value, list):
-        raise LogScheduleUpdateParseError("time_entries must be a list.")
+        raise LogScheduleUpdateParseError("time_records must be a list.")
+    if not value:
+        raise LogScheduleUpdateParseError("time_records must not be empty.")
 
-    entries: list[TimingEntry] = []
-    for item in value:
-        if not isinstance(item, dict):
-            raise LogScheduleUpdateParseError("Each time entry must be a JSON object.")
-        entry_type = item.get("type") or item.get("kind")
-        if not isinstance(entry_type, str):
-            raise LogScheduleUpdateParseError("time entry type must be a string.")
-        entry_type = entry_type.strip()
-
-        if entry_type == "record_interval":
-            start_record = _parse_record_index(item.get("start_record"), records, "start_record")
-            end_record = _parse_record_index(item.get("end_record"), records, "end_record")
-            if end_record <= start_record:
-                raise LogScheduleUpdateParseError("end_record must be greater than start_record.")
-            entries.append(TimingEntry(entry_type=entry_type, start_record=start_record, end_record=end_record))
-        elif entry_type == "direct_duration":
-            record = _parse_record_index(item.get("record"), records, "record")
-            duration = item.get("duration")
-            if not isinstance(duration, str):
-                raise LogScheduleUpdateParseError("direct duration must be a string.")
-            duration_seconds = _parse_duration_seconds(duration)
-            if duration_seconds is None or duration_seconds <= 0:
-                raise LogScheduleUpdateParseError("direct duration is not parseable.")
-            entries.append(
-                TimingEntry(entry_type=entry_type, record=record, duration_seconds=duration_seconds)
-            )
-        else:
-            raise LogScheduleUpdateParseError("time entry type must be record_interval or direct_duration.")
-
-    return tuple(entries)
+    record_ids = [_parse_record_index(record_id, records, "time_records") for record_id in value]
+    return tuple(sorted(set(record_ids)))
 
 
 def _parse_record_index(value: Any, records: tuple[DailyRecord, ...], field_name: str) -> int:
@@ -417,41 +385,24 @@ def _parse_record_index(value: Any, records: tuple[DailyRecord, ...], field_name
     return value
 
 
-def _calculate_total_duration_seconds(
-    timing_entries: tuple[TimingEntry, ...],
+def _calculate_duration_seconds(
+    time_record_ids: tuple[int, ...],
     records: tuple[DailyRecord, ...],
 ) -> int:
     records_by_index = {record.index: record for record in records}
-    direct_entries = [entry for entry in timing_entries if entry.entry_type == "direct_duration"]
-    direct_records = {entry.record for entry in direct_entries if entry.record is not None}
-    total = sum(entry.duration_seconds or 0 for entry in direct_entries)
+    selected_records = [records_by_index[record_id] for record_id in time_record_ids]
+    last_duration_seconds: int | None = None
+    for record in selected_records:
+        duration_seconds = _parse_duration_seconds(record.content)
+        if duration_seconds is not None and duration_seconds > 0:
+            last_duration_seconds = duration_seconds
+    if last_duration_seconds is not None:
+        return last_duration_seconds
 
-    seen_intervals: set[tuple[int, int]] = set()
-    intervals: list[tuple[int, int]] = []
-    for entry in timing_entries:
-        if entry.entry_type != "record_interval":
-            continue
-        if entry.start_record is None or entry.end_record is None:
-            continue
-        if entry.start_record in direct_records or entry.end_record in direct_records:
-            continue
-        key = (entry.start_record, entry.end_record)
-        if key in seen_intervals:
-            continue
-        seen_intervals.add(key)
-        intervals.append(key)
+    if len(selected_records) < 2:
+        return 0
 
-    previous_end: int | None = None
-    for start_record, end_record in sorted(intervals):
-        if previous_end is not None and start_record < previous_end:
-            raise LogScheduleUpdateParseError("record intervals overlap.")
-        previous_end = end_record if previous_end is None else max(previous_end, end_record)
-
-        start = records_by_index[start_record]
-        end = records_by_index[end_record]
-        total += _seconds_between_clock_times(start.timestamp, end.timestamp)
-
-    return total
+    return _seconds_between_clock_times(selected_records[0].timestamp, selected_records[-1].timestamp)
 
 
 def _parse_duration_seconds(text: str) -> int | None:
