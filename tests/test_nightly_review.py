@@ -11,8 +11,12 @@ from typing import Any
 from app.llm.provider import LLMCallUsage, LLMProvider
 from app.pipelines.nightly_review import (
     NightlyReviewParseError,
+    _REVIEW_EVIDENCE_INSTRUCTION,
+    _REVIEW_PRAISE_INSTRUCTION,
+    _REVIEW_STRUCTURE_INSTRUCTION,
     _build_daily_review_context,
     _build_prompt,
+    _build_review_requirements,
     _build_rollover_prompt,
     generate_nightly_review,
     parse_nightly_review_response,
@@ -69,7 +73,7 @@ class NightlyReviewTests(unittest.TestCase):
         self.assertIn("完成复盘", parsed.review)
         self.assertIn("规划下一进度", parsed.next_today_tasks)
 
-    def test_review_prompts_request_three_sentence_natural_praise(self) -> None:
+    def test_review_prompts_share_review_requirements(self) -> None:
         daily_text = (
             "# 2026-05-16\n\n"
             "## 计划\n\n"
@@ -85,13 +89,25 @@ class NightlyReviewTests(unittest.TestCase):
             _build_prompt("2026-05-16", context),
             _build_rollover_prompt("2026-05-16", context, "继续验证控制台"),
         ]
+        shared_requirements = _build_review_requirements()
 
         for prompt in prompts:
-            self.assertIn("三句话表扬", prompt)
-            self.assertIn("独立段落", prompt)
-            self.assertIn("自然真诚", prompt)
-            self.assertIn("贴合当天记录", prompt)
+            self.assertIn(shared_requirements, prompt)
+            self.assertIn(_REVIEW_STRUCTURE_INSTRUCTION, prompt)
+            self.assertIn(_REVIEW_EVIDENCE_INSTRUCTION, prompt)
+            self.assertIn(_REVIEW_PRAISE_INSTRUCTION, prompt)
+            self.assertEqual(prompt.count(shared_requirements), 1)
+            self.assertEqual(prompt.count(_REVIEW_PRAISE_INSTRUCTION), 1)
             self.assertNotIn("一句话", prompt)
+
+        normal_prompt, rollover_prompt = prompts
+        self.assertNotIn("严格 JSON", normal_prompt)
+        self.assertNotIn("next_today_tasks", normal_prompt)
+        self.assertIn("严格 JSON", rollover_prompt)
+        self.assertIn("review", rollover_prompt)
+        self.assertIn("next_today_tasks", rollover_prompt)
+        self.assertIn("明日计划.md（只用于 next_today_tasks，不用于 review）", rollover_prompt)
+        self.assertIn("禁止从记录内容新增、派生或沉淀任务", rollover_prompt)
 
     def test_daily_review_context_uses_original_tasks_snapshot(self) -> None:
         daily_text = (

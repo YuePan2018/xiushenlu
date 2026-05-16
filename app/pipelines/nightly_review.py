@@ -20,6 +20,12 @@ from app.logger import EventLogger
 
 
 REQUIRED_ROLLOVER_KEYS = ("review", "next_today_tasks")
+_REVIEW_STRUCTURE_INSTRUCTION = "输出“完成了什么”“改进建议”“值得肯定的行为”三部分；重点分析学习工作的安排和工程经验，而不是每个目标的技术实现。"
+_REVIEW_EVIDENCE_INSTRUCTION = "daily记录的“##记录”标题下，没有的内容，说明没有完成。记录的内容，可能包含不是原定计划。"
+_REVIEW_PRAISE_INSTRUCTION = "最后另起一个独立段落，基于事实给三句话表扬；表扬要自然真诚，贴合当天记录。"
+_RECORD_TAGS_INSTRUCTION = """“记录”的标签：
+“临时：”代表临时插入的任务，不在当天任务计划内
+“经验：”代表学习和工作中产生的心得，需要在review中总结归纳。"""
 
 
 class NightlyReviewParseError(ValueError):
@@ -153,31 +159,16 @@ class DailyReviewContext:
 
 
 def _build_prompt(date_text: str, daily_context: DailyReviewContext) -> str:
-    today_tasks = daily_context.today_tasks.strip() or "（daily 的“今日待办”为空）"
-    records = daily_context.records.strip() or "（今天还没有记录）"
-    plan_notes = daily_context.plan_notes.strip() or "（没有额外计划建议）"
     return f"""你是一个帮助用户复盘学习和工作的个人执行助手。
 
 请根据 {date_text} 的 daily 记录，生成review。
 
 要求：
-- 重点分析学习工作的安排和工程经验，而不是每个目标的技术实现!
-- 输出“完成了什么”“改进建议”“值得肯定的行为”三部分。
-- daily记录的“##记录”标题下，没有的内容，说明没有完成。记录的内容，可能包含不是原定计划。
-- 最后另起一个独立段落，基于事实给三句话表扬；表扬要自然真诚，贴合当天记录。
+{_build_review_requirements()}
 
-“记录”的标签：
-“临时：”代表临时插入的任务，不在当天任务计划内
-“经验：”代表学习和工作中产生的心得，需要在review中总结归纳。
+{_RECORD_TAGS_INSTRUCTION}
 
-今日待办（来自 daily 的当天快照）：
-{today_tasks}
-
-今日记录（完成证据只看这里）：
-{records}
-
-计划建议（只作为理解当天安排的辅助，不作为完成证据）：
-{plan_notes}
+{_build_daily_context_block(daily_context)}
 """
 
 
@@ -186,9 +177,6 @@ def _build_rollover_prompt(
     daily_context: DailyReviewContext,
     tomorrow_plan: str,
 ) -> str:
-    today_tasks_text = daily_context.today_tasks.strip() or "（daily 的“今日待办”为空）"
-    records_text = daily_context.records.strip() or "（今天还没有记录）"
-    plan_notes_text = daily_context.plan_notes.strip() or "（没有额外计划建议）"
     tomorrow_plan_text = tomorrow_plan.strip() or "（明日计划.md 为空）"
     return f"""你是一个帮助用户复盘学习和工作的个人执行助手。
 
@@ -196,8 +184,13 @@ def _build_rollover_prompt(
 
 你必须只输出一个严格 JSON 对象，不要使用代码块，不要输出解释文字。
 JSON 必须包含且只需要包含这些字符串字段：
-- review：晚间复盘正文。输出“完成了什么”“改进建议”“值得肯定的行为”三部分；重点分析学习工作的安排和工程经验；最后另起一个独立段落，基于事实给三句话表扬；表扬要自然真诚，贴合当天记录。
+- review：晚间复盘正文，必须遵守下面的“复盘要求”。
 - next_today_tasks：新的完整 today_tasks.md 内容。只能由“任务管理”里的未完成计划任务和“明日计划.md”的显式内容组成；保持中文分组、列表/编号习惯；不要输出任何 Markdown 标题行，禁止输出任何以 `#` 开头的标题行；不要生成口号、总结句或装饰性标题；不要判断优先级；未完成的任务，优先按“今日待办”的原小标题归类。
+
+复盘要求：
+{_build_review_requirements()}
+
+{_RECORD_TAGS_INSTRUCTION}
 
 判断未完成任务的规则：
 - 今日记录只作为完成证据、取消证据或 review 分析依据；禁止从记录内容新增、派生或沉淀任务。记录里的临时任务、开始做某事，如果不在“今日待办”中，也不能写入 next_today_tasks。
@@ -205,18 +198,39 @@ JSON 必须包含且只需要包含这些字符串字段：
 - 如果今天没有未完成任务且明日计划也为空，next_today_tasks 仍输出完整 today_tasks.md，保留中文分组风格或写出空任务占位，但不要输出任何 Markdown 标题行，禁止输出任何以 `#` 开头的标题行，也不要生成新的口号。
 - 生成 review 时不要引用“明日计划.md”；明日计划只允许用于生成 next_today_tasks。
 
-今日待办（来自 daily 的当天快照，不读取当前 today_tasks.md）：
-{today_tasks_text}
-
-今日记录（完成证据只看这里）：
-{records_text}
-
-计划建议（只作为理解当天安排的辅助，不作为完成证据）：
-{plan_notes_text}
+{_build_daily_context_block(daily_context, today_tasks_label="今日待办（来自 daily 的当天快照，不读取当前 today_tasks.md）")}
 
 明日计划.md（只用于 next_today_tasks，不用于 review）：
 {tomorrow_plan_text}
 """
+
+
+def _build_review_requirements() -> str:
+    return "\n".join(
+        [
+            f"- {_REVIEW_STRUCTURE_INSTRUCTION}",
+            f"- {_REVIEW_EVIDENCE_INSTRUCTION}",
+            f"- {_REVIEW_PRAISE_INSTRUCTION}",
+        ]
+    )
+
+
+def _build_daily_context_block(
+    daily_context: DailyReviewContext,
+    *,
+    today_tasks_label: str = "今日待办（来自 daily 的当天快照）",
+) -> str:
+    today_tasks = daily_context.today_tasks.strip() or "（daily 的“今日待办”为空）"
+    records = daily_context.records.strip() or "（今天还没有记录）"
+    plan_notes = daily_context.plan_notes.strip() or "（没有额外计划建议）"
+    return f"""{today_tasks_label}：
+{today_tasks}
+
+今日记录（完成证据只看这里）：
+{records}
+
+计划建议（只作为理解当天安排的辅助，不作为完成证据）：
+{plan_notes}"""
 
 
 def _build_daily_review_context(daily_text: str) -> DailyReviewContext:
