@@ -1957,6 +1957,11 @@ CONSOLE_HTML = f"""<!doctype html>
       window.localStorage.setItem(sloganStorageKey, $("sloganInput").value);
     }}
 
+    $("dateInput").addEventListener("change", () => {{
+      const selectedDate = $("dateInput").value;
+      $("reviewDateInput").value = selectedDate;
+      loadState(selectedDate);
+    }});
     $("refreshBtn").addEventListener("click", () => loadState());
     $("stopBtn").addEventListener("click", () => stopCurrentOperation());
     $("menuBtn").addEventListener("click", (event) => {{

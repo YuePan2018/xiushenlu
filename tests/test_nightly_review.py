@@ -12,6 +12,8 @@ from app.llm.provider import LLMCallUsage, LLMProvider
 from app.pipelines.nightly_review import (
     NightlyReviewParseError,
     _build_daily_review_context,
+    _build_prompt,
+    _build_rollover_prompt,
     generate_nightly_review,
     parse_nightly_review_response,
 )
@@ -66,6 +68,30 @@ class NightlyReviewTests(unittest.TestCase):
 
         self.assertIn("完成复盘", parsed.review)
         self.assertIn("规划下一进度", parsed.next_today_tasks)
+
+    def test_review_prompts_request_three_sentence_natural_praise(self) -> None:
+        daily_text = (
+            "# 2026-05-16\n\n"
+            "## 计划\n\n"
+            "1. 今日待办原文\n\n"
+            "修身炉：\n"
+            "1. 调整复盘提示词\n\n"
+            "## 记录\n\n"
+            "- 完成日期联动和复盘提示词调整\n"
+        )
+        context = _build_daily_review_context(daily_text)
+
+        prompts = [
+            _build_prompt("2026-05-16", context),
+            _build_rollover_prompt("2026-05-16", context, "继续验证控制台"),
+        ]
+
+        for prompt in prompts:
+            self.assertIn("三句话表扬", prompt)
+            self.assertIn("独立段落", prompt)
+            self.assertIn("自然真诚", prompt)
+            self.assertIn("贴合当天记录", prompt)
+            self.assertNotIn("一句话", prompt)
 
     def test_daily_review_context_uses_original_tasks_snapshot(self) -> None:
         daily_text = (
