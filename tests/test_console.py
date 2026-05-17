@@ -285,7 +285,7 @@ class ConsoleTests(unittest.TestCase):
                 response = client.post("/api/xhs/draft/open", json={"draft": str(outside_path)})
 
             self.assertEqual(response.status_code, 400)
-            self.assertIn("post/data", response.json()["detail"])
+            self.assertIn("data/post/data", response.json()["detail"])
             open_path.assert_not_called()
 
     def test_xhs_generate_cover_downloads_image_and_returns_local_path(self) -> None:
@@ -1102,8 +1102,8 @@ def _test_config(root: Path) -> dict[str, Any]:
         "logs_dir": str(root / "system_logs"),
         "state_dir": str(root / "state"),
         "quarantine_dir": str(root / "quarantine"),
-        "post_dir": str(root / "post" / "data"),
-        "post_image_dir": str(root / "post" / "images"),
+        "post_dir": str(root / "data" / "post" / "data"),
+        "post_image_dir": str(root / "data" / "post" / "images"),
     }
     xhs_dir = root / "xiaohongshu-mcp"
     return {

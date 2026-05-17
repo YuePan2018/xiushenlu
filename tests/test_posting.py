@@ -155,7 +155,7 @@ class _temporary_config:
         parent = Path("workspace") / "test_posting"
         parent.mkdir(parents=True, exist_ok=True)
         self.root = parent / uuid.uuid4().hex
-        post_dir = self.root / "post" / "data"
+        post_dir = self.root / "data" / "post" / "data"
         logs_dir = self.root / "system_logs"
         self.config = {
             "paths": {

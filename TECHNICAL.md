@@ -95,9 +95,9 @@ conda run --no-capture-output -n xiushenlu python app/main.py console
 - MCP 状态接口只做 MCP URL 连通性检查并读取本地用户名缓存，不主动调用 `check_login_status`。
 - 如果 MCP URL 能连上，按钮显示“关闭 MCP”；平时状态加载不扫描 Windows 进程。点击“关闭 MCP”时才扫描并关闭本机所有 `xiaohongshu-mcp*` 进程，包括不是当前控制台启动的进程。
 - 用户名缓存到 `data/state/xhs_account.json`；常规 MCP 状态同步只读缓存，不调用 `/api/v1/user/me`，登录完成后才单独刷新一次用户名缓存。
-- 文本路径默认 `post/data/YYYY-MM-DD.txt`；文本路径旁的“打开草稿”会按当前输入框路径创建缺失草稿，并用 VS Code 打开。草稿路径必须位于 `post/data`。
-- 图片路径默认 `post/images/xiushenlu-xhs-cover.png`，支持多行，每行一个本地绝对路径或 HTTP/HTTPS URL。
-- 点击“生成封面”会读取文本路径对应的整篇草稿，调用 DashScope 图片模型生成 1 张 PNG，下载保存到 `post/images`，并用本地图片路径替换图片路径输入框。
+- 文本路径默认 `data/post/data/YYYY-MM-DD.txt`；文本路径旁的“打开草稿”会按当前输入框路径创建缺失草稿，并用 VS Code 打开。草稿路径必须位于 `data/post/data`。
+- 图片路径默认 `data/post/images/xiushenlu-xhs-cover.png`，支持多行，每行一个本地绝对路径或 HTTP/HTTPS URL。
+- 点击“生成封面”会读取文本路径对应的整篇草稿，调用 DashScope 图片模型生成 1 张 PNG，下载保存到 `data/post/images`，并用本地图片路径替换图片路径输入框。
 - 点击“打开图片”会按图片路径逐项调用系统默认应用打开；本地文件必须存在，HTTP/HTTPS 图片会交给系统默认浏览器或处理器。
 - 标题为必填；标签、定时发布和原创标记为可选；可见范围默认 `公开可见`。
 - 发布按钮会真实调用 `publish_content`，前端确认框通过后后端固定按 `approve=true` 执行；发布前不再预检查登录状态，cookies 失效或未登录时由 MCP 发布接口返回错误。
@@ -109,15 +109,15 @@ conda run --no-capture-output -n xiushenlu python app/main.py console
 conda run --no-capture-output -n xiushenlu python app/main.py xhs status
 
 # 先 dry-run：读取草稿、校验参数、写 post_publish_requested，不真实发布。
-conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draft post/data/2026-05-12.txt --title "修身炉进展" --image "C:\path\to\image.png" --tag 修身炉
+conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draft data/post/data/2026-05-12.txt --title "修身炉进展" --image "C:\path\to\image.png" --tag 修身炉
 
 # 确认内容、图片和可见范围后，再追加 --approve 实发。
-conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draft post/data/2026-05-12.txt --title "修身炉进展" --image "C:\path\to\image.png" --tag 修身炉 --approve
+conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draft data/post/data/2026-05-12.txt --title "修身炉进展" --image "C:\path\to\image.png" --tag 修身炉 --approve
 ```
 
 参数说明：
 
-- `--draft`：必须指向 `post/data` 里的正文草稿。
+- `--draft`：必须指向 `data/post/data` 里的正文草稿。
 - `--title`：小红书标题，最多约 20 个中文字或英文单词。
 - `--image`：至少 1 张图片；支持本地绝对路径或 HTTP/HTTPS URL，本地路径更稳定。
 - `--tag`：话题标签，可重复传入，`#修身炉` 和 `修身炉` 都会归一化为 `修身炉`。
@@ -141,7 +141,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 | `python app/main.py status` | 否 | 打印今天的 daily。 |
 | `python app/main.py cost` | 否 | 汇总今日和本月 token，并覆盖 daily 的 token 统计区块。 |
 | `python app/main.py xhs status` | 否 | 通过本地 `xiaohongshu-mcp` 检查 MCP 连通性和本地缓存状态。 |
-| `python app/main.py xhs publish ...` | 否 | 从 `post/data` 草稿发布小红书图文；不带 `--approve` 只记录请求。 |
+| `python app/main.py xhs publish ...` | 否 | 从 `data/post/data` 草稿发布小红书图文；不带 `--approve` 只记录请求。 |
 | `python app/main.py console` | 视操作而定 | 启动本地控制台，复用已有 pipeline 和本地读写能力。 |
 
 `plan --add` 要求模型返回严格 JSON，并逐字保留新增任务；程序会更新 `today_tasks.md`、替换 daily 里已有的“今日待办”原文，并把新增任务作为一行追加到任务管理表，`状态` 和 `用时` 两列保持为空。解析失败时不会写入 `today_tasks.md` 或 daily。
@@ -163,8 +163,8 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 | `llm.api_key_env` | 默认 `DASHSCOPE_API_KEY`，也可通过项目根目录 `.env` 加载。 |
 | `assistant.system_prompt` | Provider 发送给模型的 system prompt。 |
 | `paths.*` | daily、inbox、memory、logs、state、quarantine 等目录。 |
-| `paths.post_dir` | 小红书正文草稿目录，默认 `post/data`。 |
-| `paths.post_image_dir` | 小红书默认图片目录，默认 `post/images`。 |
+| `paths.post_dir` | 小红书正文草稿目录，默认 `data/post/data`。 |
+| `paths.post_image_dir` | 小红书默认图片目录，默认 `data/post/images`。 |
 | `xiaohongshu.mcp_url` | 本地 `xiaohongshu-mcp` MCP 地址，默认 `http://localhost:18060/mcp`。 |
 | `xiaohongshu.cover_model` | 小红书封面生成模型，默认 `qwen-image-2.0`。 |
 | `xiaohongshu.mcp_exe` | 第三方 MCP release 主程序路径；控制台“打开/关闭 MCP”使用它。 |
@@ -185,7 +185,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 | `app/pipelines/log_schedule_update.py` | 写入记录后的任务管理表更新 pipeline；LLM 返回状态和计时线索，代码重算并写入 `状态` 和 `用时` 两列。 |
 | `app/pipelines/plan_update.py` | 日内计划局部更新 pipeline；更新待办原文并给任务管理表追加一行，解析失败时停止写入。 |
 | `app/pipelines/nightly_review.py` | 晚间复盘 pipeline；当天复盘成功后滚动待办并清空 `明日计划.md`。 |
-| `app/posting/` | 小红书图文发布与封面生成适配：读取 `post/data` 草稿、校验参数、调用本地 MCP、调用 DashScope 图片模型并记录事件。 |
+| `app/posting/` | 小红书图文发布与封面生成适配：读取 `data/post/data` 草稿、校验参数、调用本地 MCP、调用 DashScope 图片模型并记录事件。 |
 | `app/daily.py` | daily Markdown 路径、读取、区块替换和记录追加。 |
 | `app/inbox.py` | `today_tasks.md` 和 `明日计划.md` 的读写封装。 |
 | `app/logger.py` | 按日 JSON Lines 事件追加和读取。 |

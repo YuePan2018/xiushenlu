@@ -143,7 +143,7 @@ def _download_image_bytes(url: str, timeout: float) -> bytes:
 
 
 def _next_cover_path(text: str, config: dict[str, Any]) -> Path:
-    image_dir = resolve_project_path(config.get("paths", {}).get("post_image_dir", "post/images")).resolve()
+    image_dir = resolve_project_path(config.get("paths", {}).get("post_image_dir", "data/post/images")).resolve()
     stem = _cover_file_stem(text)
     candidate = image_dir / f"{stem}.png"
     if not candidate.exists():

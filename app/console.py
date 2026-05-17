@@ -485,7 +485,7 @@ class ConsoleService:
         today_text = date.today().isoformat()
         draft_path = _today_xhs_draft_path(self.config, today_text)
         image_path = (
-            resolve_project_path(self.config.get("paths", {}).get("post_image_dir", "post/images"))
+            resolve_project_path(self.config.get("paths", {}).get("post_image_dir", "data/post/images"))
             / "xiushenlu-xhs-cover.png"
         )
         return {
@@ -759,7 +759,7 @@ def create_app(
 
     @app.get("/api/xhs/cover")
     def api_xhs_cover() -> FileResponse:
-        path = resolve_project_path(cfg.get("paths", {}).get("post_image_dir", "post/images")) / "xiushenlu-xhs-cover.png"
+        path = resolve_project_path(cfg.get("paths", {}).get("post_image_dir", "data/post/images")) / "xiushenlu-xhs-cover.png"
         if not path.exists():
             raise HTTPException(status_code=404, detail="默认封面图不存在。")
         return FileResponse(path)
@@ -1046,7 +1046,7 @@ def _project_file(path: str) -> str:
 def _today_xhs_draft_path(config: dict[str, Any], day: str | None = None) -> Path:
     today_text = day or date.today().isoformat()
     return (
-        resolve_project_path(config.get("paths", {}).get("post_dir", "post/data"))
+        resolve_project_path(config.get("paths", {}).get("post_dir", "data/post/data"))
         / f"{today_text}.txt"
     ).resolve()
 
@@ -1059,9 +1059,9 @@ def _resolve_xhs_draft_path(config: dict[str, Any], path_text: str) -> Path:
     if not path.is_absolute():
         path = resolve_project_path(value)
     resolved = path.resolve()
-    base_dir = resolve_project_path(config.get("paths", {}).get("post_dir", "post/data")).resolve()
+    base_dir = resolve_project_path(config.get("paths", {}).get("post_dir", "data/post/data")).resolve()
     if not _is_relative_to(resolved, base_dir):
-        raise ValueError(f"草稿必须位于 post/data 目录内：{resolved}")
+        raise ValueError(f"草稿必须位于 data/post/data 目录内（当前配置：{base_dir}）：{resolved}")
     return resolved
 
 

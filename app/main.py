@@ -57,8 +57,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     xhs_subparsers.add_parser("status", help="检查 xiaohongshu-mcp 连接状态")
 
-    xhs_publish = xhs_subparsers.add_parser("publish", help="从 post/data 草稿发布小红书图文")
-    xhs_publish.add_argument("--draft", required=True, help="post/data 下的草稿文件路径")
+    xhs_publish = xhs_subparsers.add_parser("publish", help="从 data/post/data 草稿发布小红书图文")
+    xhs_publish.add_argument("--draft", required=True, help="data/post/data 下的草稿文件路径")
     xhs_publish.add_argument("--title", required=True, help="小红书标题")
     xhs_publish.add_argument("--image", action="append", required=True, help="图片绝对路径或 HTTP/HTTPS URL，可重复传入")
     xhs_publish.add_argument("--tag", action="append", default=[], help="话题标签，可重复传入")
