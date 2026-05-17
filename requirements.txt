@@ -6,3 +6,4 @@ websockets
 pyyaml
 python-dotenv
 numpy
+pillow

@@ -78,6 +78,13 @@ def build_parser() -> argparse.ArgumentParser:
     console.add_argument("--port", type=int, default=8765, help="监听端口")
     console.add_argument("--reload", action="store_true", help="开发时自动重载")
 
+    pet = subparsers.add_parser("pet", help="启动 Windows 桌面宠物")
+    pet.add_argument("--pet", default=None, help="宠物名称，默认读取 desktop_pet.default_pet")
+    pet.add_argument("--scale", type=float, default=None, help="宠物缩放比例，默认读取 desktop_pet.default_scale")
+    pet.add_argument("--asset-url", default=None, help="宠物 ZIP 素材下载地址")
+    pet.add_argument("--check", action="store_true", help="只检查素材，不打开桌宠窗口")
+    pet.add_argument("--no-download", action="store_true", help="素材缺失时不自动下载")
+
     return parser
 
 
@@ -243,6 +250,38 @@ def run_console(host: str = "127.0.0.1", port: int = 8765, reload: bool = False)
     return 0
 
 
+def run_pet(args: argparse.Namespace) -> int:
+    from app.desktop_pet import PetAssetError, check_desktop_pet, launch_desktop_pet
+
+    config = load_config()
+    try:
+        if args.check:
+            result = check_desktop_pet(
+                config,
+                pet=args.pet,
+                asset_url=args.asset_url,
+                scale=args.scale,
+                download=not args.no_download,
+            )
+            print(f"桌宠素材可用：{result.display_name} ({result.pet_id})")
+            print(f"spritesheet：{result.spritesheet_path}")
+            print(f"帧布局：{result.columns} x {result.rows}")
+            print(f"当前帧尺寸：{result.frame_size[0]} x {result.frame_size[1]}")
+            return 0
+
+        launch_desktop_pet(
+            config,
+            pet=args.pet,
+            asset_url=args.asset_url,
+            scale=args.scale,
+            download=not args.no_download,
+        )
+    except PetAssetError as exc:
+        print(f"桌宠启动失败：{exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     configure_output_encoding()
     parser = build_parser()
@@ -266,6 +305,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("xhs 需要指定子命令：status 或 publish")
     if args.command == "console":
         return run_console(host=args.host, port=args.port, reload=args.reload)
+    if args.command == "pet":
+        return run_pet(args)
 
     return smoke_test()
 

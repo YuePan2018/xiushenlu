@@ -62,6 +62,37 @@ conda run --no-capture-output -n xiushenlu python app/main.py console
 
 控制台里的“停止”是防误点的 v1 语义：它不会强行中断 DashScope SDK 正在进行的同步网络调用，但会标记当前操作为取消；如果 LLM 稍后返回，后端会在写入 daily、`today_tasks.md` 或事件日志前丢弃结果。同一时间后端只允许一个 LLM 操作运行。
 
+## 桌面宠物
+
+Windows 桌面宠物是一个轻量 Tkinter/Pillow 小窗口，独立于本地控制台运行。它不会读取浏览器、聊天软件、密钥、Codex 日志或 daily 内容，只读取配置和 `data/desktop_pet` 下的宠物素材与位置状态。
+
+默认宠物素材来自 OpenPets 的 fox 包。首次启动或检查时，如果 `data/desktop_pet/pets/fox` 缺少素材，会从 `desktop_pet.default_asset_url` 下载 ZIP，校验 `pet.json` 和 spritesheet 路径后解压到 `data/desktop_pet`。素材和状态属于本地运行数据，不提交到 Git。
+
+运行方式：
+
+```powershell
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
+
+conda run --no-capture-output -n xiushenlu python app/main.py pet --check
+conda run --no-capture-output -n xiushenlu python app/main.py pet
+```
+
+也可以双击 `run_pet.bat`。常用参数：
+
+- `--pet fox`：指定宠物目录名，默认读取 `desktop_pet.default_pet`。
+- `--scale 0.5`：调整显示尺寸，默认读取 `desktop_pet.default_scale`。
+- `--asset-url URL`：素材缺失时使用指定 ZIP 下载地址。
+- `--no-download`：素材缺失时直接报错，不联网下载。
+- `--check`：只检查素材和 spritesheet，不打开窗口。
+
+交互行为：
+
+- 鼠标靠近时，宠物会朝鼠标方向移动或转身。
+- 左键点击会触发短暂 poke/wave 动画。
+- 左键拖拽可以移动宠物，松手后记录位置。
+- 右键菜单可暂停、重新加载素材或退出。
+
 ## 小红书发布
 
 小红书图文发布不内嵌第三方代码。第三方 `xiaohongshu-mcp` 应 clone 到本项目同级目录，例如：
@@ -143,6 +174,8 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 | `python app/main.py xhs status` | 否 | 通过本地 `xiaohongshu-mcp` 检查 MCP 连通性和本地缓存状态。 |
 | `python app/main.py xhs publish ...` | 否 | 从 `data/post/data` 草稿发布小红书图文；不带 `--approve` 只记录请求。 |
 | `python app/main.py console` | 视操作而定 | 启动本地控制台，复用已有 pipeline 和本地读写能力。 |
+| `python app/main.py pet` | 否 | 启动轻量桌面宠物；首次运行会按配置下载默认素材。 |
+| `python app/main.py pet --check` | 否 | 检查桌宠素材与 spritesheet，不打开窗口。 |
 
 `plan --add` 要求模型返回严格 JSON，并逐字保留新增任务；程序会更新 `today_tasks.md`、替换 daily 里已有的“今日待办”原文，并把新增任务作为一行追加到任务管理表，`状态` 和 `用时` 两列保持为空。解析失败时不会写入 `today_tasks.md` 或 daily。
 
@@ -170,6 +203,12 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 | `xiaohongshu.mcp_exe` | 第三方 MCP release 主程序路径；控制台“打开/关闭 MCP”使用它。 |
 | `xiaohongshu.login_exe` | 第三方登录工具路径；需要重新登录时可手动使用它。 |
 | `xiaohongshu.working_dir` | 运行第三方 exe 的工作目录，通常是同级 `xiaohongshu-mcp`。 |
+| `desktop_pet.asset_dir` | 桌宠素材和状态目录，默认 `data/desktop_pet`。 |
+| `desktop_pet.default_pet` | 默认宠物目录名，当前为 `fox`。 |
+| `desktop_pet.default_asset_url` | 默认宠物 ZIP 下载地址。 |
+| `desktop_pet.default_scale` | 桌宠显示缩放比例。 |
+| `desktop_pet.move_speed` | 鼠标吸引移动速度。 |
+| `desktop_pet.attraction_radius` | 鼠标吸引半径，单位为像素。 |
 | `safety.allowed_dirs` | 允许读写的数据目录白名单。 |
 | `safety.protected_files` | 受保护文件，当前包含 `data/memory/goals.md`。 |
 
@@ -186,6 +225,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 | `app/pipelines/plan_update.py` | 日内计划局部更新 pipeline；更新待办原文并给任务管理表追加一行，解析失败时停止写入。 |
 | `app/pipelines/nightly_review.py` | 晚间复盘 pipeline；当天复盘成功后滚动待办并清空 `明日计划.md`。 |
 | `app/posting/` | 小红书图文发布与封面生成适配：读取 `data/post/data` 草稿、校验参数、调用本地 MCP、调用 DashScope 图片模型并记录事件。 |
+| `app/desktop_pet/` | 桌宠素材下载校验、spritesheet 切片、位置状态和 Tkinter 透明窗口。 |
 | `app/daily.py` | daily Markdown 路径、读取、区块替换和记录追加。 |
 | `app/inbox.py` | `today_tasks.md` 和 `明日计划.md` 的读写封装。 |
 | `app/logger.py` | 按日 JSON Lines 事件追加和读取。 |
@@ -210,6 +250,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 - `data/memory/goals.md`
 - `data/system_logs/*.jsonl`
 - `data/state/*`
+- `data/desktop_pet/*`
 - `data/quarantine/*`
 
 主要运行文件：
@@ -228,6 +269,8 @@ $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
 
 conda run -n xiushenlu python -m compileall app
+conda run -n xiushenlu python -m unittest tests.test_desktop_pet
+conda run --no-capture-output -n xiushenlu python app/main.py pet --check
 conda run --no-capture-output -n xiushenlu python app/main.py --help
 conda run --no-capture-output -n xiushenlu python app/main.py status
 ```

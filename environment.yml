@@ -13,3 +13,4 @@ dependencies:
       - pyyaml
       - python-dotenv
       - numpy
+      - pillow
