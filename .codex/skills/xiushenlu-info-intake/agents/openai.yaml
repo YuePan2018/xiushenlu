@@ -1,0 +1,6 @@
+interface:
+  display_name: "修身炉资讯源收录"
+  short_description: "显式调用后简单收录AI资讯源"
+  default_prompt: "Use $xiushenlu-info-intake to review and record an AI information source for future push links."
+policy:
+  allow_implicit_invocation: false
