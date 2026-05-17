@@ -105,7 +105,7 @@ class LogScheduleUpdateTests(unittest.TestCase):
                         "- 10:00:00 开始计划表更新。\n"
                         "- 10:30:00 暂停计划表更新。\n"
                         "- 11:00:00 继续计划表更新。\n"
-                        "- 11:45:00 完成计划表更新。\n"
+                        "- 11:45:00 完成计划表更新 &。\n"
                     ),
                 ),
             )
@@ -133,6 +133,44 @@ class LogScheduleUpdateTests(unittest.TestCase):
 
             self.assertTrue(result.updated)
             self.assertIn("| 计划表更新 | P1 | 2h | ✓ | 1h45m |", daily_file.read_text(encoding="utf-8"))
+
+    def test_interval_duration_requires_ampersand_on_last_record(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            daily_file = _write_daily(
+                config,
+                _daily_text(
+                    "| 计划表更新 | P1 | 2h | ○ | 15m |",
+                    records=(
+                        "- 10:00:00 开始计划表更新。\n"
+                        "- 11:45:00 完成计划表更新。\n"
+                    ),
+                ),
+            )
+            reply = json.dumps(
+                {
+                    "updates": [
+                        {
+                            "row_index": 1,
+                            "status": "completed",
+                            "evidence": "完成计划表更新",
+                            "time_records": [1, 2],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+            result = update_schedule_from_log(
+                FakeProvider(reply),
+                "完成计划表更新。",
+                config=config,
+                target_date=date(2026, 5, 10),
+                logger=FakeLogger(),  # type: ignore[arg-type]
+            )
+
+            self.assertTrue(result.updated)
+            self.assertIn("| 计划表更新 | P1 | 2h | ✓ |  |", daily_file.read_text(encoding="utf-8"))
 
     def test_last_explicit_duration_wins_over_timestamp_diff(self) -> None:
         with _temporary_directory() as temp_dir:
@@ -363,6 +401,9 @@ class LogScheduleUpdateTests(unittest.TestCase):
         self.assertIn("dropped", prompt)
         self.assertIn("用时列是派生值", prompt)
         self.assertIn("不要把旧表格里的用时当作累计变量", prompt)
+        self.assertIn("任务简称", prompt)
+        self.assertIn("核心关键词", prompt)
+        self.assertIn("最后一条记录内容包含“&”", prompt)
         self.assertIn("time_records", prompt)
         self.assertIn("最后一次明确时长", prompt)
         self.assertNotIn("direct_duration", prompt)

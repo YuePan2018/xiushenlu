@@ -37,6 +37,7 @@ DURATION_TOKEN_RE = re.compile(
     flags=re.IGNORECASE,
 )
 CLOCK_TIME_RE = re.compile(r"^(?P<hour>\d{1,2}):(?P<minute>\d{2})(?::(?P<second>\d{2}))?$")
+INTERVAL_DURATION_MARKER = "&"
 
 
 class LogScheduleUpdateParseError(ValueError):
@@ -298,10 +299,11 @@ def build_schedule_patch_prompt(
 - status 使用五种值：keep 表示状态列不变，not_started 表示状态列清空，in_progress 表示写为“{IN_PROGRESS_MARK}”，completed 表示写为“{CHECK_MARK}”，dropped 表示写为“{DROPPED_MARK}”。
 - 记录没有提到任务开始或推进时，用 keep 或不输出更新；记录提到开始做、正在做、推进中、完成了一部分但任务还会继续，使用 in_progress；记录明确完成，使用 completed。
 - 记录说删除这个任务、取消、不再追踪、不再纳入今天任务、短期内不做或这个任务今天不管了，使用 dropped；dropped 表示任务退出追踪，不等同于 completed。
+- 记录与计划任务的匹配：记录可能只写任务简称、删掉修饰词或只写核心关键词。但不要把没有共同核心词的记录强行匹配。
 - 用时列是派生值：每次都从当天全部记录重新找出该任务相关记录，不要把旧表格里的用时当作累计变量。
 - time_records 填所有与该任务当天执行相关的记录 ID；不要判断哪条是开始或结束，程序只看这些记录的首尾时间。
 - 如果相关记录里有明确写出的时长，例如“20分钟”“用时40m”“耗时1.5h”，程序只使用最后一次明确时长作为最终用时，不累加，也不再计算首尾时间差。
-- 如果相关记录里没有明确时长，程序使用最后一条相关记录的 HH:MM:SS 减去第一条相关记录的 HH:MM:SS；只有一条相关记录时用时留空。
+- 如果相关记录里没有明确时长，只有 time_records 最后一条记录内容包含“{INTERVAL_DURATION_MARKER}”时，程序才使用最后一条相关记录的 HH:MM:SS 减去第一条相关记录的 HH:MM:SS；最后一条不含“{INTERVAL_DURATION_MARKER}”或只有一条相关记录时，用时留空。
 - evidence 如果填写，必须是当天记录里的原文片段；没有可靠证据时用空字符串。
 - 不要新增任务行，不要删除任务行，不要改任务名、优先级、预计或行顺序。
 
@@ -400,6 +402,9 @@ def _calculate_duration_seconds(
         return last_duration_seconds
 
     if len(selected_records) < 2:
+        return 0
+
+    if INTERVAL_DURATION_MARKER not in selected_records[-1].content:
         return 0
 
     return _seconds_between_clock_times(selected_records[0].timestamp, selected_records[-1].timestamp)
