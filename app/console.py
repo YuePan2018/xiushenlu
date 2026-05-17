@@ -1290,33 +1290,43 @@ CONSOLE_HTML = f"""<!doctype html>
       gap: 8px;
       flex-wrap: wrap;
     }}
+    .header-actions {{
+      flex: 0 0 auto;
+      justify-content: flex-end;
+    }}
+    .header-actions input[type="date"] {{
+      width: 132px;
+      min-width: 132px;
+    }}
     .menu-wrap {{
       position: relative;
     }}
     .menu-button {{
       display: inline-flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 9px;
-      min-width: 86px;
+      justify-content: center;
+      flex: 0 0 auto;
+      width: 38px;
+      min-width: 38px;
+      height: 38px;
       border: 1px solid var(--line);
       background: #fffefa;
       color: var(--text);
-      padding: 8px 10px 8px 12px;
+      padding: 0;
     }}
     .menu-button:hover {{
       background: var(--surface-2);
     }}
-    .menu-button .chevron {{
-      width: 8px;
-      height: 8px;
-      border-right: 2px solid currentColor;
-      border-bottom: 2px solid currentColor;
-      transform: rotate(45deg) translateY(-2px);
-      transition: transform 0.14s ease;
+    .menu-icon {{
+      display: grid;
+      gap: 4px;
+      width: 16px;
     }}
-    .menu-button[aria-expanded="true"] .chevron {{
-      transform: rotate(225deg) translateY(-2px);
+    .menu-icon span {{
+      display: block;
+      height: 2px;
+      border-radius: 999px;
+      background: currentColor;
     }}
     .menu-list {{
       position: absolute;
@@ -1340,6 +1350,10 @@ CONSOLE_HTML = f"""<!doctype html>
     }}
     .menu-list a:hover {{
       background: var(--surface-2);
+    }}
+    .reserved-action.is-placeholder {{
+      visibility: hidden;
+      pointer-events: none;
     }}
     label {{
       display: block;
@@ -1587,19 +1601,22 @@ CONSOLE_HTML = f"""<!doctype html>
         <h2>运行状态</h2>
         <div class="status" id="statusText">准备中</div>
       </div>
-      <div class="row">
+      <div class="row header-actions">
         <input id="dateInput" type="date" aria-label="日期">
+        <button class="secondary" id="refreshBtn">刷新</button>
+        <button class="warn reserved-action is-placeholder" id="stopBtn" aria-hidden="true" disabled>停止</button>
         <div class="menu-wrap">
-          <button class="menu-button" id="menuBtn" type="button" aria-haspopup="menu" aria-expanded="false">
-            <span>发布</span>
-            <span class="chevron" aria-hidden="true"></span>
+          <button class="menu-button" id="menuBtn" type="button" aria-label="菜单" title="菜单" aria-haspopup="menu" aria-expanded="false">
+            <span class="menu-icon" aria-hidden="true">
+              <span></span>
+              <span></span>
+              <span></span>
+            </span>
           </button>
           <div class="menu-list" id="mainMenu" hidden>
             <a href="/xhs">发布小红书</a>
           </div>
         </div>
-        <button class="secondary" id="refreshBtn">刷新</button>
-        <button class="warn" id="stopBtn" hidden>停止</button>
       </div>
     </div>
   </header>
@@ -1739,7 +1756,8 @@ CONSOLE_HTML = f"""<!doctype html>
       const cancelRequested = Boolean(state.operation && state.operation.cancel_requested);
       for (const button of document.querySelectorAll("button")) {{
         if (button.id === "stopBtn") {{
-          button.hidden = !operationActive;
+          button.classList.toggle("is-placeholder", !operationActive);
+          button.setAttribute("aria-hidden", String(!operationActive));
           button.disabled = !operationActive || cancelRequested;
           continue;
         }}
