@@ -83,5 +83,17 @@
 - 不要假设 `conda activate xiushenlu` 会跨工具调用或跨 shell 生效；如果使用 `conda activate`，必须和实际 Python 命令放在同一条 PowerShell 调用中。
 - 文档改动通常不需要跑 Python 测试；代码或 pipeline 改动按 `TECHNICAL.md` 的验证建议执行。
 
+## Codex 测试失败记录
+
+Codex 运行任何项目测试、验证或检查命令失败后，必须先把失败信息追加记录到 `data/test_fail.txt`，再继续分析、修复或向用户汇报。
+
+记录规则：
+
+- 只在命令失败时记录；成功时不记录。
+- 使用追加写入，不覆盖历史内容。
+- 使用 UTF-8 编码。
+- 如果输出很长，只记录关键失败信息，不需要完整复制全部日志。
+- `data/test_fail.txt` 是运行数据，不提交 Git。
+
 ## Git子仓库
 - `data/`、`config/`、`docs/`都是独立子仓库，同时也包含受保护路径。git操作必须分清在子仓库还是根仓库。
