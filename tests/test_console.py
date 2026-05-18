@@ -1173,14 +1173,20 @@ class ConsoleTests(unittest.TestCase):
             self.assertEqual(response.status_code, 400)
             self.assertIn("新增任务不能为空", response.json()["detail"])
 
-    def test_plan_endpoint_rejects_tasks_field(self) -> None:
+    def test_plan_endpoint_saves_submitted_tasks_before_generating(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
-            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+            provider = FakeProvider()
+            client = TestClient(create_app(config=config, provider_factory=lambda: provider))
 
-            response = client.post("/api/plan", json={"tasks": "旧的 plan tasks 模式"})
+            response = client.post("/api/plan", json={"tasks": "输入框里的新任务"})
 
-            self.assertEqual(response.status_code, 422)
+            self.assertEqual(response.status_code, 200)
+            inbox_dir = Path(config["paths"]["inbox_dir"])
+            self.assertEqual((inbox_dir / "today_tasks.md").read_text(encoding="utf-8"), "输入框里的新任务\n")
+            self.assertEqual(len(provider.prompts), 1)
+            self.assertIn("输入框里的新任务", provider.prompts[0])
+            self.assertIn("输入框里的新任务", response.json()["state"]["daily"]["text"])
 
 
 def _test_config(root: Path) -> dict[str, Any]:

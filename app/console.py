@@ -146,6 +146,7 @@ class OperationManager:
 
 class PlanRequest(BaseModel):
     add: str | None = None
+    tasks: str | None = None
 
     class Config:
         extra = "forbid"
@@ -335,21 +336,31 @@ class ConsoleService:
         add = request.add.strip() if request.add is not None else None
         if request.add is not None and not add:
             raise ValueError("新增任务不能为空。")
+        tasks = request.tasks.strip() if request.tasks is not None else None
+        if request.tasks is not None and not tasks:
+            raise ValueError("今日待办不能为空。")
+        if add is not None and tasks is not None:
+            raise ValueError("新增任务和今日待办不能同时提交。")
 
         label = "添加任务" if add is not None else "生成计划"
         token = self.operations.begin(label)
         try:
-            return self._generate_plan_locked(add, token)
+            return self._generate_plan_locked(add, tasks, token)
         finally:
             self.operations.finish(token)
 
     def _generate_plan_locked(
         self,
         add: str | None,
+        tasks: str | None,
         token: OperationToken,
     ) -> dict[str, Any]:
-        provider = self.provider_factory()
         event_logger = EventLogger(config=self.config)
+        saved_tasks_path = None
+        if add is None and tasks is not None:
+            saved_tasks_path = write_today_tasks(tasks, self.config)
+
+        provider = self.provider_factory()
         if add is not None:
             result = generate_plan_update(
                 provider,
@@ -381,6 +392,7 @@ class ConsoleService:
                 "date": result.date,
                 "daily_path": str(result.path),
                 "plan": result.plan,
+                "today_tasks_path": str(saved_tasks_path) if saved_tasks_path else None,
             },
             "state": self.snapshot(result.date),
         }
@@ -1716,12 +1728,10 @@ CONSOLE_HTML = f"""<!doctype html>
           <span class="panel-title">生成计划</span>
         </summary>
         <div class="collapsible-body">
-          <label for="tasksInput">today_tasks.md</label>
+          <label for="tasksInput">今日待办</label>
           <textarea id="tasksInput" spellcheck="false"></textarea>
           <div class="row">
-            <button class="secondary" id="saveTasksBtn">保存待办</button>
             <button id="planBtn">生成计划</button>
-            <button class="secondary" id="reloadTasksBtn">读取待办</button>
             <button class="secondary" id="openTasksBtn">打开文件</button>
           </div>
           <div class="path" id="tasksPath"></div>
@@ -2067,16 +2077,9 @@ CONSOLE_HTML = f"""<!doctype html>
       }}
     }});
     $("sloganInput").addEventListener("input", saveSlogan);
-    $("reloadTasksBtn").addEventListener("click", () => loadState());
     $("openTasksBtn").addEventListener("click", () => runAction("打开文件", () =>
       requestJson("/api/tasks/open", {{
         method: "POST",
-      }})
-    ));
-    $("saveTasksBtn").addEventListener("click", () => runAction("保存待办", () =>
-      requestJson("/api/tasks", {{
-        method: "POST",
-        body: JSON.stringify({{ tasks: $("tasksInput").value }}),
       }})
     ));
     function saveUserNotes(label) {{
@@ -2096,7 +2099,7 @@ CONSOLE_HTML = f"""<!doctype html>
       requestJson("/api/plan", {{
         method: "POST",
         signal,
-        body: JSON.stringify({{}}),
+        body: JSON.stringify({{ tasks: $("tasksInput").value }}),
       }})
     ));
     $("addBtn").addEventListener("click", () => runLongAction("局部更新", async (signal) => {{
