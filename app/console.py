@@ -44,6 +44,12 @@ from app.posting import publish_xhs_from_draft
 from app.posting.xhs_cover import generate_xhs_cover_from_text
 from app.posting.xhs_mcp import XhsMcpClient
 from app.safety import safe_read_text, safe_write_text
+from app.task_tree import (
+    list_task_trees,
+    read_task_tree,
+    save_task_tree as persist_task_tree,
+    task_tree_dir,
+)
 
 
 ProviderFactory = Callable[[], LLMProvider]
@@ -177,6 +183,14 @@ class ReviewRequest(BaseModel):
 
 class CostRequest(BaseModel):
     date: str | None = None
+
+    class Config:
+        extra = "forbid"
+
+
+class TaskTreeRequest(BaseModel):
+    title: str = ""
+    text: str
 
     class Config:
         extra = "forbid"
@@ -481,6 +495,30 @@ class ConsoleService:
     def stop_operation(self) -> dict[str, Any]:
         return self.operations.stop()
 
+    def task_tree_state(self, title: str | None = None) -> dict[str, Any]:
+        items = list_task_trees(self.config)
+        selected_title = (title or "").strip()
+        selected = None
+        if selected_title:
+            selected = _task_tree_document_payload(read_task_tree(selected_title, self.config))
+        elif items:
+            selected = _task_tree_document_payload(read_task_tree(items[0].title, self.config))
+
+        return {
+            "directory": str(task_tree_dir(self.config)),
+            "items": [_task_tree_file_payload(item) for item in items],
+            "selected": selected,
+            "sample": TASK_TREE_SAMPLE_JSON,
+        }
+
+    def save_task_tree(self, request: TaskTreeRequest) -> dict[str, Any]:
+        document = persist_task_tree(request.title, request.text, self.config)
+        return {
+            "message": f"任务树已保存：{document.filename}",
+            "result": _task_tree_document_payload(document),
+            "state": self.task_tree_state(document.title),
+        }
+
     def xhs_defaults(self) -> dict[str, Any]:
         today_text = date.today().isoformat()
         draft_path = _today_xhs_draft_path(self.config, today_text)
@@ -697,6 +735,10 @@ def create_app(
     def xhs_page() -> HTMLResponse:
         return HTMLResponse(XHS_HTML)
 
+    @app.get("/task-tree", response_class=HTMLResponse)
+    def task_tree_page() -> HTMLResponse:
+        return HTMLResponse(TASK_TREE_HTML)
+
     @app.get("/api/state")
     def api_state(date: str | None = None) -> dict[str, Any]:
         return _handle(lambda: service.snapshot(date))
@@ -736,6 +778,14 @@ def create_app(
     @app.post("/api/cost")
     def api_cost(request: CostRequest) -> dict[str, Any]:
         return _handle(lambda: service.report_tokens(request))
+
+    @app.get("/api/task-tree")
+    def api_task_tree(title: str | None = None) -> dict[str, Any]:
+        return _handle(lambda: service.task_tree_state(title))
+
+    @app.post("/api/task-tree")
+    def api_save_task_tree(request: TaskTreeRequest) -> dict[str, Any]:
+        return _handle(lambda: service.save_task_tree(request))
 
     @app.get("/api/xhs/defaults")
     def api_xhs_defaults() -> dict[str, Any]:
@@ -989,6 +1039,24 @@ def _stop_process_ids(pids: list[int]) -> None:
     remaining = result.stdout.strip()
     if remaining:
         raise RuntimeError(f"xiaohongshu-mcp 进程未能关闭：{remaining}")
+
+
+def _task_tree_file_payload(item: Any) -> dict[str, Any]:
+    return {
+        "title": item.title,
+        "filename": item.filename,
+        "path": str(item.path),
+    }
+
+
+def _task_tree_document_payload(document: Any) -> dict[str, Any]:
+    return {
+        "title": document.title,
+        "filename": document.filename,
+        "path": str(document.path),
+        "text": document.text,
+        "tree": document.tree,
+    }
 
 
 def _handle(operation: Callable[[], dict[str, Any]]) -> dict[str, Any]:
@@ -1614,6 +1682,7 @@ CONSOLE_HTML = f"""<!doctype html>
             </span>
           </button>
           <div class="menu-list" id="mainMenu" hidden>
+            <a href="/task-tree">长期任务树</a>
             <a href="/xhs">发布小红书</a>
           </div>
         </div>
@@ -2071,6 +2140,599 @@ CONSOLE_HTML = f"""<!doctype html>
     loadSlogan();
     loadState();
     loadOperation().catch(() => null);
+  </script>
+</body>
+</html>
+"""
+
+
+TASK_TREE_SAMPLE_JSON = """{
+  "version": 1,
+  "title": "示例长期任务",
+  "summary": "把一个长期目标拆成阶段、检查点、任务和习惯。",
+  "nodes": [
+    {
+      "id": "phase-1",
+      "title": "第一阶段：明确方向",
+      "kind": "phase",
+      "cadence": "phase",
+      "status": "todo",
+      "note": "先把目标边界、资料和验收标准定清楚。",
+      "tags": ["阶段性"],
+      "children": [
+        {
+          "id": "daily-review",
+          "title": "每天记录 10 分钟推进情况",
+          "kind": "habit",
+          "cadence": "daily",
+          "status": "todo",
+          "tags": ["每日重复"],
+          "children": []
+        }
+      ]
+    }
+  ]
+}"""
+
+
+TASK_TREE_HTML = """<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>长期任务树 - 修身炉</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f4ed;
+      --surface: #fffdf8;
+      --surface-2: #f1eee7;
+      --text: #24211d;
+      --muted: #6f6a60;
+      --line: #d8d1c5;
+      --accent: #2f6f5e;
+      --accent-dark: #245548;
+      --danger: #a33b32;
+      --ok: #2f6f5e;
+      --habit: #7b4d97;
+      --phase: #8a5a22;
+      --shadow: 0 16px 36px rgba(37, 32, 25, 0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      border-bottom: 1px solid var(--line);
+      background: rgba(247, 244, 237, 0.94);
+      backdrop-filter: blur(10px);
+    }
+    .bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      max-width: 1360px;
+      margin: 0 auto;
+      padding: 14px 20px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 720;
+      letter-spacing: 0;
+    }
+    h2 {
+      margin: 0 0 12px;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+    main {
+      display: grid;
+      grid-template-columns: minmax(340px, 480px) minmax(420px, 1fr);
+      gap: 16px;
+      max-width: 1360px;
+      margin: 0 auto;
+      padding: 16px 20px 28px;
+    }
+    section {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 14px;
+    }
+    label {
+      display: block;
+      margin: 0 0 6px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    input, textarea, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fffefa;
+      color: var(--text);
+      font: inherit;
+      padding: 9px 10px;
+      outline: none;
+    }
+    textarea {
+      min-height: 480px;
+      resize: vertical;
+      font-family: Consolas, "Cascadia Mono", "Microsoft YaHei UI", monospace;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    input:focus, textarea:focus, select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(47, 111, 94, 0.14);
+    }
+    button {
+      border: 0;
+      border-radius: 7px;
+      background: var(--accent);
+      color: white;
+      cursor: pointer;
+      font: inherit;
+      font-weight: 650;
+      min-height: 38px;
+      padding: 8px 12px;
+      white-space: nowrap;
+    }
+    button:hover { background: var(--accent-dark); }
+    button.secondary {
+      background: var(--surface-2);
+      color: var(--text);
+      border: 1px solid var(--line);
+    }
+    button.secondary:hover { background: #e7e1d7; }
+    button:disabled {
+      cursor: wait;
+      opacity: 0.65;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .stack {
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .meta {
+      color: var(--muted);
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+    .status {
+      min-height: 24px;
+      color: var(--muted);
+      font-size: 13px;
+      white-space: pre-wrap;
+    }
+    .status.ok { color: var(--ok); }
+    .status.error { color: var(--danger); }
+    .tree-root {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fffcf4;
+      min-height: 560px;
+      max-height: calc(100vh - 162px);
+      overflow: auto;
+      padding: 14px;
+    }
+    .root-title {
+      margin: 0 0 6px;
+      font-size: 20px;
+      font-weight: 720;
+    }
+    .root-summary {
+      margin: 0 0 14px;
+      color: var(--muted);
+    }
+    .tree-list {
+      list-style: none;
+      margin: 0;
+      padding-left: 0;
+    }
+    .tree-list .tree-list {
+      border-left: 1px solid var(--line);
+      margin-left: 13px;
+      padding-left: 16px;
+    }
+    .tree-node {
+      margin: 7px 0;
+    }
+    .tree-node.collapsed > .tree-list {
+      display: none;
+    }
+    .node-row {
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr);
+      gap: 7px;
+      align-items: start;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      padding: 7px 8px;
+      cursor: default;
+    }
+    .tree-node.has-children > .node-row {
+      cursor: pointer;
+    }
+    .node-row:hover {
+      border-color: var(--line);
+      background: #fffefa;
+    }
+    .node-row:focus-visible {
+      outline: 3px solid rgba(47, 111, 94, 0.18);
+      outline-offset: 2px;
+    }
+    .twisty {
+      width: 8px;
+      height: 8px;
+      border-right: 2px solid var(--muted);
+      border-bottom: 2px solid var(--muted);
+      transform: rotate(45deg);
+      margin-top: 7px;
+    }
+    .tree-node.collapsed > .node-row .twisty {
+      transform: rotate(-45deg);
+    }
+    .tree-node:not(.has-children) .twisty {
+      border-color: transparent;
+    }
+    .node-title {
+      font-weight: 680;
+      overflow-wrap: anywhere;
+    }
+    .node-note {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+    .badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 5px;
+    }
+    .badge {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.2;
+      padding: 3px 7px;
+    }
+    .badge.daily {
+      border-color: rgba(123, 77, 151, 0.3);
+      background: rgba(123, 77, 151, 0.1);
+      color: var(--habit);
+    }
+    .badge.phase {
+      border-color: rgba(138, 90, 34, 0.3);
+      background: rgba(138, 90, 34, 0.1);
+      color: var(--phase);
+    }
+    .empty-tree {
+      color: var(--muted);
+    }
+    @media (max-width: 980px) {
+      main { grid-template-columns: 1fr; }
+      .tree-root { max-height: none; }
+    }
+    @media (max-width: 640px) {
+      .bar { align-items: flex-start; flex-direction: column; }
+      main { padding: 12px; }
+      .split { grid-template-columns: 1fr; }
+      button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <div>
+        <h1>长期任务树</h1>
+        <div class="meta">Codex 拆分 JSON -> 本地树状图</div>
+      </div>
+      <div class="row">
+        <a href="/"><button class="secondary" type="button">返回控制台</button></a>
+      </div>
+    </div>
+  </header>
+  <main>
+    <section class="stack">
+      <h2>输入</h2>
+      <div class="split">
+        <div>
+          <label for="treeTitleInput">保存标题</label>
+          <input id="treeTitleInput" type="text" spellcheck="false" placeholder="标题会作为 JSON 文件名">
+        </div>
+        <div>
+          <label for="treeSelect">已保存</label>
+          <select id="treeSelect"></select>
+        </div>
+      </div>
+      <div class="row">
+        <button id="renderBtn" type="button">渲染</button>
+        <button id="saveBtn" type="button">保存</button>
+        <button class="secondary" id="reloadBtn" type="button">重新读取</button>
+        <button class="secondary" id="expandBtn" type="button">全部展开</button>
+        <button class="secondary" id="collapseBtn" type="button">全部收起</button>
+      </div>
+      <div class="status" id="statusText">准备中</div>
+      <div class="meta" id="pathText"></div>
+      <div>
+        <label for="treeJsonInput">任务树 JSON</label>
+        <textarea id="treeJsonInput" spellcheck="false"></textarea>
+      </div>
+    </section>
+    <section>
+      <h2>树状图</h2>
+      <div class="tree-root" id="treeView">
+        <div class="empty-tree">等待渲染。</div>
+      </div>
+    </section>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const state = {
+      busy: false,
+      sample: "",
+    };
+    const kindLabels = {
+      phase: "阶段",
+      milestone: "里程碑",
+      task: "任务",
+      habit: "习惯",
+      checkpoint: "检查点",
+    };
+    const cadenceLabels = {
+      none: "",
+      daily: "每日重复",
+      weekly: "每周重复",
+      monthly: "每月重复",
+      phase: "阶段性",
+      one_off: "一次性",
+    };
+    const statusLabels = {
+      todo: "待办",
+      doing: "进行中",
+      done: "完成",
+      paused: "暂停",
+    };
+
+    function setBusy(value) {
+      state.busy = value;
+      for (const button of document.querySelectorAll("button")) {
+        button.disabled = value;
+      }
+      $("treeSelect").disabled = value || $("treeSelect").options.length === 0;
+    }
+
+    function setStatus(text, kind = "") {
+      const el = $("statusText");
+      el.textContent = text || "";
+      el.className = kind ? `status ${kind}` : "status";
+    }
+
+    async function requestJson(url, options = {}) {
+      const response = await fetch(url, {
+        headers: { "Content-Type": "application/json" },
+        ...options,
+      });
+      const body = await response.json().catch(() => ({ detail: response.statusText }));
+      if (!response.ok) {
+        throw new Error(body.detail || response.statusText);
+      }
+      return body;
+    }
+
+    async function loadState(title = "") {
+      setBusy(true);
+      try {
+        const query = title ? `?title=${encodeURIComponent(title)}` : "";
+        const data = await requestJson(`/api/task-tree${query}`);
+        renderState(data);
+        setStatus(data.selected ? `已读取 ${data.selected.filename}` : "还没有保存的任务树。", "ok");
+      } catch (error) {
+        setStatus(error.message, "error");
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    function renderState(data) {
+      state.sample = data.sample || "";
+      const items = data.items || [];
+      $("treeSelect").innerHTML = items.length
+        ? items.map((item) => `<option value="${escapeHtml(item.title)}">${escapeHtml(item.filename)}</option>`).join("")
+        : '<option value="">暂无</option>';
+      $("treeSelect").disabled = items.length === 0;
+
+      if (data.selected) {
+        $("treeTitleInput").value = data.selected.title;
+        $("treeJsonInput").value = data.selected.text;
+        $("pathText").textContent = data.selected.path;
+        $("treeSelect").value = data.selected.title;
+        renderTree(data.selected.tree);
+        return;
+      }
+
+      $("treeTitleInput").value = "";
+      $("treeJsonInput").value = state.sample;
+      $("pathText").textContent = data.directory || "";
+      renderEmptyTree("粘贴 Codex 输出的 JSON 后点击渲染。");
+    }
+
+    function renderFromEditor() {
+      try {
+        const tree = parseTreeText($("treeJsonInput").value);
+        if (!$("treeTitleInput").value.trim() && tree.title) {
+          $("treeTitleInput").value = tree.title;
+        }
+        renderTree(tree);
+        setStatus("已渲染，尚未保存。", "ok");
+      } catch (error) {
+        setStatus(error.message, "error");
+      }
+    }
+
+    async function saveTree() {
+      setBusy(true);
+      setStatus("保存中...");
+      try {
+        const data = await requestJson("/api/task-tree", {
+          method: "POST",
+          body: JSON.stringify({
+            title: $("treeTitleInput").value,
+            text: $("treeJsonInput").value,
+          }),
+        });
+        renderState(data.state);
+        setStatus(data.message || "任务树已保存。", "ok");
+      } catch (error) {
+        setStatus(error.message, "error");
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    function parseTreeText(text) {
+      const stripped = String(text || "").trim();
+      const match = stripped.match(/^```(?:json)?\\s*([\\s\\S]*?)\\s*```$/i);
+      const source = match ? match[1].trim() : stripped;
+      if (!source) {
+        throw new Error("任务树 JSON 不能为空。");
+      }
+      return JSON.parse(source);
+    }
+
+    function renderTree(tree) {
+      const nodes = Array.isArray(tree.nodes) ? tree.nodes : [];
+      const summary = tree.summary ? `<p class="root-summary">${escapeHtml(tree.summary)}</p>` : "";
+      $("treeView").innerHTML = `
+        <h3 class="root-title">${escapeHtml(tree.title || "未命名任务树")}</h3>
+        ${summary}
+        ${nodes.length ? `<ul class="tree-list">${nodes.map(renderNode).join("")}</ul>` : '<div class="empty-tree">没有节点。</div>'}
+      `;
+    }
+
+    function renderNode(node) {
+      const children = Array.isArray(node.children) ? node.children : [];
+      const hasChildren = children.length > 0;
+      const badges = nodeBadges(node);
+      return `
+        <li class="tree-node ${hasChildren ? "has-children" : ""}">
+          <div class="node-row" role="${hasChildren ? "button" : "group"}" tabindex="0" aria-expanded="${hasChildren ? "true" : "false"}">
+            <span class="twisty" aria-hidden="true"></span>
+            <div>
+              <div class="node-title">${escapeHtml(node.title || "未命名节点")}</div>
+              ${node.note ? `<div class="node-note">${escapeHtml(node.note)}</div>` : ""}
+              ${badges ? `<div class="badges">${badges}</div>` : ""}
+            </div>
+          </div>
+          ${hasChildren ? `<ul class="tree-list">${children.map(renderNode).join("")}</ul>` : ""}
+        </li>
+      `;
+    }
+
+    function nodeBadges(node) {
+      const values = [];
+      const kind = kindLabels[node.kind] || node.kind || "";
+      const cadence = cadenceLabels[node.cadence] || node.cadence || "";
+      const status = statusLabels[node.status] || node.status || "";
+      if (kind) {
+        values.push({ text: kind, cls: node.kind === "phase" ? "phase" : "" });
+      }
+      if (cadence) {
+        values.push({ text: cadence, cls: node.cadence === "daily" ? "daily" : node.cadence === "phase" ? "phase" : "" });
+      }
+      if (status) {
+        values.push({ text: status, cls: "" });
+      }
+      for (const tag of Array.isArray(node.tags) ? node.tags : []) {
+        values.push({ text: tag, cls: tag.includes("每日") ? "daily" : tag.includes("阶段") ? "phase" : "" });
+      }
+      return values.map((item) => `<span class="badge ${item.cls}">${escapeHtml(item.text)}</span>`).join("");
+    }
+
+    function renderEmptyTree(text) {
+      $("treeView").innerHTML = `<div class="empty-tree">${escapeHtml(text)}</div>`;
+    }
+
+    function setAllCollapsed(collapsed) {
+      for (const node of document.querySelectorAll(".tree-node.has-children")) {
+        node.classList.toggle("collapsed", collapsed);
+        const row = node.querySelector(":scope > .node-row");
+        if (row) {
+          row.setAttribute("aria-expanded", String(!collapsed));
+        }
+      }
+    }
+
+    function toggleNode(row) {
+      const node = row.closest(".tree-node");
+      if (!node || !node.classList.contains("has-children")) {
+        return;
+      }
+      const collapsed = node.classList.toggle("collapsed");
+      row.setAttribute("aria-expanded", String(!collapsed));
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    $("treeView").addEventListener("click", (event) => {
+      const row = event.target.closest(".node-row");
+      if (row) {
+        toggleNode(row);
+      }
+    });
+    $("treeView").addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+      const row = event.target.closest(".node-row");
+      if (row) {
+        event.preventDefault();
+        toggleNode(row);
+      }
+    });
+    $("treeSelect").addEventListener("change", () => loadState($("treeSelect").value));
+    $("renderBtn").addEventListener("click", renderFromEditor);
+    $("saveBtn").addEventListener("click", saveTree);
+    $("reloadBtn").addEventListener("click", () => loadState($("treeTitleInput").value));
+    $("expandBtn").addEventListener("click", () => setAllCollapsed(false));
+    $("collapseBtn").addEventListener("click", () => setAllCollapsed(true));
+    loadState();
   </script>
 </body>
 </html>

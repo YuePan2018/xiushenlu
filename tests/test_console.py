@@ -142,6 +142,7 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn('aria-haspopup="menu"', html)
             self.assertIn('class="menu-icon" aria-hidden="true"', html)
             self.assertNotIn("<span>发布</span>", html)
+            self.assertIn('href="/task-tree">长期任务树</a>', html)
             self.assertIn('href="/xhs">发布小红书</a>', html)
             self.assertIn('width: 132px;', html)
             self.assertLess(html.index('id="dateInput"'), html.index('id="menuBtn"'))
@@ -160,6 +161,86 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn("DOMPurify.sanitize", html)
             self.assertNotIn('<pre id="dailyText"', html)
             self.assertNotIn("<h2>日内更新</h2>", html)
+
+    def test_task_tree_page_contains_editor_and_tree_controls(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+
+            response = client.get("/task-tree")
+
+            self.assertEqual(response.status_code, 200)
+            html = response.text
+            self.assertIn("长期任务树", html)
+            self.assertIn('id="treeTitleInput"', html)
+            self.assertIn('id="treeJsonInput"', html)
+            self.assertIn('id="treeSelect"', html)
+            self.assertIn('id="treeView"', html)
+            self.assertIn('id="renderBtn"', html)
+            self.assertIn('id="saveBtn"', html)
+            self.assertIn('id="expandBtn"', html)
+            self.assertIn('id="collapseBtn"', html)
+            self.assertIn("/api/task-tree", html)
+            self.assertIn("每日重复", html)
+            self.assertIn("阶段性", html)
+
+    def test_task_tree_api_saves_title_named_json_file(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+            text = json.dumps(
+                {
+                    "title": "JSON 内标题",
+                    "nodes": [
+                        {
+                            "title": "每日记录",
+                            "kind": "habit",
+                            "cadence": "daily",
+                            "status": "todo",
+                            "children": [],
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            )
+
+            save_response = client.post(
+                "/api/task-tree",
+                json={"title": "我的长期任务", "text": text},
+            )
+            load_response = client.get("/api/task-tree?title=我的长期任务")
+
+            self.assertEqual(save_response.status_code, 200)
+            self.assertEqual(load_response.status_code, 200)
+            data = save_response.json()
+            result = data["result"]
+            expected_path = Path(config["paths"]["task_tree_dir"]) / "我的长期任务.json"
+            self.assertEqual(result["filename"], "我的长期任务.json")
+            self.assertEqual(Path(result["path"]), expected_path.resolve())
+            self.assertEqual(result["tree"]["title"], "JSON 内标题")
+            self.assertTrue(expected_path.exists())
+            self.assertIn('"title": "JSON 内标题"', expected_path.read_text(encoding="utf-8"))
+            state = load_response.json()
+            self.assertEqual(state["selected"]["filename"], "我的长期任务.json")
+            self.assertEqual(state["items"][0]["filename"], "我的长期任务.json")
+
+    def test_task_tree_api_rejects_invalid_json_without_overwriting(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            tree_dir = Path(config["paths"]["task_tree_dir"])
+            tree_dir.mkdir(parents=True)
+            existing = tree_dir / "已有任务.json"
+            existing.write_text('{"title":"旧内容","nodes":[]}\n', encoding="utf-8")
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+
+            response = client.post(
+                "/api/task-tree",
+                json={"title": "已有任务", "text": "{not json"},
+            )
+
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("JSON 解析失败", response.json()["detail"])
+            self.assertEqual(existing.read_text(encoding="utf-8"), '{"title":"旧内容","nodes":[]}\n')
 
     def test_xhs_page_contains_publish_controls(self) -> None:
         with _temporary_directory() as temp_dir:
@@ -1110,6 +1191,7 @@ def _test_config(root: Path) -> dict[str, Any]:
         "logs_dir": str(root / "system_logs"),
         "state_dir": str(root / "state"),
         "quarantine_dir": str(root / "quarantine"),
+        "task_tree_dir": str(root / "task_tree"),
         "post_dir": str(root / "data" / "post" / "data"),
         "post_image_dir": str(root / "data" / "post" / "images"),
     }

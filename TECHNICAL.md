@@ -56,11 +56,15 @@ conda run --no-capture-output -n xiushenlu python app/main.py cost
 conda run --no-capture-output -n xiushenlu python app/main.py console
 ```
 
-控制台目前支持查看 daily、查看今日待办、保存今日待办、打开待办文件、写入记录、生成计划、日内局部更新、生成复盘、停止当前 LLM 操作、手动 token 统计和小红书图文发布。首页日期右侧的“发布”下拉菜单进入 `/xhs` 发布页。自动化、通知、审批、工具和知识区域只预留布局。
+控制台目前支持查看 daily、查看今日待办、保存今日待办、打开待办文件、写入记录、生成计划、日内局部更新、生成复盘、停止当前 LLM 操作、手动 token 统计、小红书图文发布和长期任务树渲染。首页日期右侧的菜单可进入 `/xhs` 发布页和 `/task-tree` 长期任务树页。自动化、通知、审批、工具和知识区域只预留布局。
 
 控制台里的“保存待办”和“生成计划”是两个独立动作：“保存待办”只写入 `data/user_inputs/today_tasks.md`，不调用 LLM；“生成计划”等价于 `python app/main.py plan`。
 
 控制台里的“停止”是防误点的 v1 语义：它不会强行中断 DashScope SDK 正在进行的同步网络调用，但会标记当前操作为取消；如果 LLM 稍后返回，后端会在写入 daily、`today_tasks.md` 或事件日志前丢弃结果。同一时间后端只允许一个 LLM 操作运行。
+
+长期任务树页不调用 LLM。用户把 Codex 拆分出的固定 JSON 粘贴到 `/task-tree`，填写保存标题后，后端会校验 JSON 并写入 `data/task_tree/<标题>.json`；标题会清洗为合法 Windows 文件名。页面按节点的 `kind`、`cadence`、`status` 和 `tags` 渲染标签，例如每日重复和阶段性，每个有子节点的节点都可点击展开或收起。
+
+任务树 JSON 根对象需要包含 `title` 和 `nodes`。节点的 `kind` 支持 `phase`、`milestone`、`task`、`habit`、`checkpoint`；`cadence` 支持 `none`、`daily`、`weekly`、`monthly`、`phase`、`one_off`；`status` 支持 `todo`、`doing`、`done`、`paused`。`children` 是子节点数组，可为空。
 
 ## 桌面宠物
 
@@ -196,6 +200,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 | `llm.api_key_env` | 默认 `DASHSCOPE_API_KEY`，也可通过项目根目录 `.env` 加载。 |
 | `assistant.system_prompt` | Provider 发送给模型的 system prompt。 |
 | `paths.*` | daily、inbox、memory、logs、state、quarantine 等目录。 |
+| `paths.task_tree_dir` | 长期任务树 JSON 保存目录，默认 `data/task_tree`。 |
 | `paths.post_dir` | 小红书正文草稿目录，默认 `data/post/data`。 |
 | `paths.post_image_dir` | 小红书默认图片目录，默认 `data/post/images`。 |
 | `xiaohongshu.mcp_url` | 本地 `xiaohongshu-mcp` MCP 地址，默认 `http://localhost:18060/mcp`。 |
@@ -226,6 +231,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 | `app/pipelines/nightly_review.py` | 晚间复盘 pipeline；当天复盘成功后滚动待办并清空 `明日计划.md`。 |
 | `app/posting/` | 小红书图文发布与封面生成适配：读取 `data/post/data` 草稿、校验参数、调用本地 MCP、调用 DashScope 图片模型并记录事件。 |
 | `app/desktop_pet/` | 桌宠素材下载校验、spritesheet 切片、位置状态和 Tkinter 透明窗口。 |
+| `app/task_tree.py` | 长期任务树 JSON 校验、标题文件名清洗和 `data/task_tree` 安全读写。 |
 | `app/daily.py` | daily Markdown 路径、读取、区块替换和记录追加。 |
 | `app/inbox.py` | `today_tasks.md` 和 `明日计划.md` 的读写封装。 |
 | `app/logger.py` | 按日 JSON Lines 事件追加和读取。 |
@@ -251,12 +257,14 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 - `data/system_logs/*.jsonl`
 - `data/state/*`
 - `data/desktop_pet/*`
+- `data/task_tree/*.json`
 - `data/quarantine/*`
 
 主要运行文件：
 
 - `data/user_inputs/today_tasks.md`：当前待办输入槽。
 - `data/user_inputs/明日计划.md`：明日计划暂存；当天 `review` 成功滚动后清空。
+- `data/task_tree/<标题>.json`：长期任务树页面保存的结构化拆分结果。
 - `data/user_records/YYYY-MM-DD.md`：人类可读 daily。
 - `data/system_logs/YYYY-MM-DD.jsonl`：机器可读事件流。
 
