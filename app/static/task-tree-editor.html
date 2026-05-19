@@ -3,162 +3,377 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>工作树编辑器 - 修身炉</title>
+  <title>长期任务树 - 修身炉</title>
   <link rel="stylesheet" href="/static/vendor/simple-mind-map-0.14.0-fix.2/simpleMindMap.esm.min.css">
   <style>
     :root {
       color-scheme: light;
-      --bg: #f5f7fb;
+      --bg: #f3f6f4;
       --surface: #ffffff;
-      --surface-2: #eef3f8;
-      --text: #1f2937;
-      --muted: #607086;
-      --line: #d7e0ea;
-      --accent: #2563eb;
-      --accent-dark: #1d4ed8;
+      --surface-soft: #f7faf8;
+      --surface-tint: #eef6f1;
+      --text: #17212f;
+      --muted: #667085;
+      --line: #d7e0dc;
+      --accent: #28745b;
+      --accent-dark: #1f5d49;
+      --accent-blue: #2f6fd6;
+      --accent-warm: #b86e2f;
       --danger: #b42318;
       --ok: #20735b;
-      --shadow: 0 16px 38px rgba(31, 41, 55, 0.08);
+      --shadow: 0 18px 44px rgba(23, 33, 47, 0.09);
+      --focus: 0 0 0 3px rgba(40, 116, 91, 0.18);
     }
-    * { box-sizing: border-box; }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      min-height: 100%;
+      background: var(--bg);
+      -webkit-tap-highlight-color: rgba(40, 116, 91, 0.14);
+    }
+
     body {
       margin: 0;
       min-height: 100vh;
-      background: var(--bg);
+      overflow-x: hidden;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(243, 246, 244, 0.92)),
+        var(--bg);
       color: var(--text);
-      font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+      font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
       letter-spacing: 0;
+      touch-action: manipulation;
     }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
     header {
-      border-bottom: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.92);
-      backdrop-filter: blur(10px);
       position: sticky;
       top: 0;
       z-index: 10;
+      border-bottom: 1px solid rgba(215, 224, 220, 0.88);
+      background: rgba(248, 251, 249, 0.9);
+      backdrop-filter: blur(14px);
     }
+
     .bar {
       display: flex;
       justify-content: space-between;
       gap: 16px;
       align-items: center;
-      max-width: 1680px;
+      max-width: 1720px;
       margin: 0 auto;
-      padding: 14px 18px;
+      padding: 14px max(18px, env(safe-area-inset-right)) 14px max(18px, env(safe-area-inset-left));
     }
-    h1, h2 {
+
+    h1,
+    h2,
+    p {
       margin: 0;
       letter-spacing: 0;
     }
+
     h1 {
-      font-size: 20px;
+      color: #14243a;
+      font-size: 21px;
+      font-weight: 760;
       line-height: 1.25;
+      text-wrap: balance;
     }
-    h2 {
+
+    h2,
+    .summary-title {
       font-size: 15px;
+      font-weight: 720;
       line-height: 1.35;
     }
+
     .meta {
       margin-top: 4px;
       color: var(--muted);
       font-size: 13px;
       overflow-wrap: anywhere;
     }
+
     .row {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
       align-items: center;
+      min-width: 0;
     }
-    a {
-      color: inherit;
-      text-decoration: none;
-    }
-    button, select, input {
+
+    .button-link,
+    button,
+    select,
+    input,
+    textarea {
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: #fff;
+      background: var(--surface);
       color: var(--text);
       font: inherit;
-      min-height: 38px;
     }
+
+    .button-link,
     button {
-      cursor: pointer;
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 38px;
       padding: 8px 13px;
-      background: var(--accent);
       border-color: var(--accent);
+      background: var(--accent);
       color: #fff;
-      font-weight: 650;
+      cursor: pointer;
+      font-weight: 680;
+      white-space: nowrap;
     }
+
+    .button-link.secondary,
     button.secondary {
-      background: #fff;
       border-color: var(--line);
+      background: var(--surface);
       color: var(--text);
     }
-    button:disabled {
+
+    .button-link:hover,
+    button:hover {
+      border-color: var(--accent-dark);
+      background: var(--accent-dark);
+      color: #fff;
+    }
+
+    .button-link.secondary:hover,
+    button.secondary:hover {
+      border-color: #bfd0c7;
+      background: var(--surface-tint);
+      color: var(--text);
+    }
+
+    .button-link:focus-visible,
+    button:focus-visible,
+    summary:focus-visible,
+    select:focus-visible,
+    input:focus-visible,
+    textarea:focus-visible {
+      outline: 0;
+      box-shadow: var(--focus);
+    }
+
+    button:disabled,
+    input:disabled,
+    select:disabled,
+    textarea:disabled {
       cursor: not-allowed;
-      opacity: 0.55;
+      opacity: 0.56;
     }
-    select, input {
+
+    select,
+    input,
+    textarea {
       width: 100%;
-      padding: 8px 10px;
+      padding: 9px 10px;
+      background: #fff;
     }
+
+    textarea {
+      min-height: 280px;
+      resize: vertical;
+      font-family: "Cascadia Mono", Consolas, "Microsoft YaHei UI", monospace;
+      font-size: 13px;
+      line-height: 1.55;
+      overflow-wrap: anywhere;
+      white-space: pre;
+    }
+
     label {
       display: block;
       margin-bottom: 6px;
       color: var(--muted);
       font-size: 13px;
     }
+
     main {
       display: grid;
-      grid-template-columns: minmax(280px, 340px) minmax(520px, 1fr);
+      grid-template-columns: minmax(290px, 360px) minmax(540px, 1fr);
       gap: 14px;
-      max-width: 1680px;
-      margin: 0 auto;
-      padding: 14px;
+      max-width: 1720px;
       min-height: calc(100vh - 70px);
+      margin: 0 auto;
+      padding: 14px max(14px, env(safe-area-inset-right)) 18px max(14px, env(safe-area-inset-left));
     }
+
     .side {
       display: flex;
       flex-direction: column;
       gap: 12px;
+      min-width: 0;
     }
+
     .panel {
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: var(--surface);
+      background: rgba(255, 255, 255, 0.96);
       box-shadow: var(--shadow);
       padding: 14px;
     }
+
     .stack {
       display: flex;
       flex-direction: column;
       gap: 12px;
+      min-width: 0;
     }
-    .status {
+
+    .input-panel {
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .input-panel summary {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      min-height: 54px;
+      padding: 14px;
+      cursor: pointer;
+      list-style: none;
+    }
+
+    .input-panel summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .summary-copy {
+      min-width: 0;
+    }
+
+    .summary-title {
+      display: block;
+      color: var(--text);
+    }
+
+    .summary-subtitle {
+      display: block;
+      margin-top: 3px;
       color: var(--muted);
       font-size: 13px;
-      min-height: 18px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
-    .status.ok { color: var(--ok); }
-    .status.error { color: var(--danger); }
-    .canvas-panel {
-      position: relative;
-      min-height: 680px;
+
+    .chevron {
+      width: 10px;
+      height: 10px;
+      flex: 0 0 auto;
+      border-right: 2px solid var(--muted);
+      border-bottom: 2px solid var(--muted);
+      transform: rotate(45deg);
+      transform-origin: center;
+    }
+
+    .input-panel[open] .chevron {
+      transform: rotate(225deg);
+    }
+
+    .input-body {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 0 14px 14px;
+      border-top: 1px solid var(--line);
+      background: var(--surface-soft);
+    }
+
+    .field-grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 1fr;
+      padding-top: 14px;
+    }
+
+    .status {
+      min-height: 20px;
+      color: var(--muted);
+      font-size: 13px;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+
+    .status.ok {
+      color: var(--ok);
+    }
+
+    .status.error {
+      color: var(--danger);
+    }
+
+    .path-text {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+
+    .node-preview {
+      max-height: 220px;
+      overflow: auto;
       border: 1px solid var(--line);
       border-radius: 8px;
+      background: var(--surface-soft);
+      padding: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+
+    .canvas-panel {
+      position: relative;
+      min-height: 690px;
       overflow: hidden;
+      border: 1px solid #cfdcd5;
+      border-radius: 8px;
       background:
-        radial-gradient(circle at 20px 20px, rgba(255, 255, 255, 0.72) 0 1px, transparent 1.5px),
-        linear-gradient(135deg, #071224, #0d1b34 55%, #152947);
-      background-size: 24px 24px, cover;
+        linear-gradient(rgba(39, 116, 91, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(47, 111, 214, 0.07) 1px, transparent 1px),
+        linear-gradient(135deg, #f8fbff 0%, #f4f8f2 48%, #fff8ee 100%);
+      background-size: 28px 28px, 28px 28px, cover;
       box-shadow: var(--shadow);
     }
+
+    .canvas-label {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      z-index: 2;
+      border: 1px solid rgba(215, 224, 220, 0.88);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.82);
+      color: var(--muted);
+      font-size: 12px;
+      padding: 5px 9px;
+      pointer-events: none;
+    }
+
     #mindMap {
       width: 100%;
       height: calc(100vh - 102px);
-      min-height: 680px;
+      min-height: 690px;
     }
+
     #mindMap .smm-richtext-node-wrap {
       display: block;
       margin: 0;
@@ -167,44 +382,53 @@
       white-space: pre-wrap;
       overflow: visible;
     }
+
     #mindMap .smm-richtext-node-wrap p {
       margin: 0;
       padding: 0;
       line-height: 1.2;
     }
+
     #mindMap foreignObject {
       overflow: visible;
     }
-    .node-preview {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--surface-2);
-      padding: 10px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.55;
-      overflow-wrap: anywhere;
-      white-space: pre-wrap;
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto;
+      }
     }
+
     @media (max-width: 980px) {
       main {
         grid-template-columns: 1fr;
       }
+
       #mindMap,
       .canvas-panel {
         min-height: 620px;
       }
     }
+
     @media (max-width: 640px) {
       .bar {
         align-items: flex-start;
         flex-direction: column;
       }
+
       main {
         padding: 10px;
       }
-      button {
+
+      .row > button,
+      .row > .button-link {
         width: 100%;
+      }
+
+      textarea {
+        min-height: 220px;
       }
     }
   </style>
@@ -217,48 +441,69 @@
   <header>
     <div class="bar">
       <div>
-        <h1>工作树编辑器</h1>
-        <div class="meta">根在上，叶在下</div>
+        <h1>长期任务树</h1>
+        <div class="meta">工作树视图</div>
       </div>
       <div class="row">
-        <a href="/"><button class="secondary" type="button">返回控制台</button></a>
-        <a href="/task-tree"><button class="secondary" type="button">JSON 树</button></a>
+        <a class="button-link secondary" href="/">返回控制台</a>
       </div>
     </div>
   </header>
   <main>
-    <aside class="side">
-      <section class="panel stack">
-        <h2>文件</h2>
-        <div>
-          <label for="treeTitleInput">保存标题</label>
-          <input id="treeTitleInput" type="text" spellcheck="false" placeholder="标题会作为 JSON 文件名">
+    <aside class="side" aria-label="任务树控制">
+      <details class="panel input-panel" id="inputPanel">
+        <summary>
+          <span class="summary-copy">
+            <span class="summary-title">输入</span>
+            <span class="summary-subtitle" id="inputSummary">准备中</span>
+          </span>
+          <span class="chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="input-body">
+          <div class="field-grid">
+            <div>
+              <label for="treeTitleInput">保存标题</label>
+              <input id="treeTitleInput" name="task-tree-title" type="text" autocomplete="off" spellcheck="false" placeholder="例如：修身炉长期任务…">
+            </div>
+            <div>
+              <label for="treeSelect">已保存</label>
+              <select id="treeSelect" name="task-tree-select"></select>
+            </div>
+          </div>
+          <div>
+            <label for="treeJsonInput">任务树 JSON</label>
+            <textarea id="treeJsonInput" name="task-tree-json" autocomplete="off" spellcheck="false" placeholder="粘贴 JSON…"></textarea>
+          </div>
+          <div class="row">
+            <button id="renderBtn" type="button">渲染输入</button>
+            <button class="secondary" id="syncJsonBtn" type="button">同步当前树</button>
+          </div>
         </div>
-        <div>
-          <label for="treeSelect">已保存</label>
-          <select id="treeSelect"></select>
-        </div>
+      </details>
+      <section class="panel stack" aria-labelledby="fileHeading">
+        <h2 id="fileHeading">文件</h2>
         <div class="row">
           <button id="saveBtn" type="button">保存</button>
           <button class="secondary" id="reloadBtn" type="button">重新读取</button>
         </div>
-        <div class="status" id="statusText">准备中</div>
-        <div class="meta" id="pathText"></div>
+        <div class="status" id="statusText" aria-live="polite">准备中</div>
+        <div class="path-text" id="pathText"></div>
       </section>
-      <section class="panel stack">
-        <h2>视图</h2>
+      <section class="panel stack" aria-labelledby="viewHeading">
+        <h2 id="viewHeading">视图</h2>
         <div class="row">
           <button class="secondary" id="fitBtn" type="button">居中</button>
           <button class="secondary" id="expandBtn" type="button">全部展开</button>
           <button class="secondary" id="collapseBtn" type="button">全部收起</button>
         </div>
       </section>
-      <section class="panel stack">
-        <h2>当前节点</h2>
+      <section class="panel stack" aria-labelledby="nodeHeading">
+        <h2 id="nodeHeading">当前节点</h2>
         <div class="node-preview" id="nodePreview">未选择节点。</div>
       </section>
     </aside>
-    <section class="canvas-panel">
+    <section class="canvas-panel" aria-label="工作树画布">
+      <div class="canvas-label" id="canvasLabel">工作树</div>
       <div id="mindMap"></div>
     </section>
   </main>
@@ -268,6 +513,7 @@
       busy: false,
       sample: "",
       selectedTitle: "",
+      selectedFilename: "",
       mindMap: null,
     };
 
@@ -281,8 +527,8 @@
 
     function setBusy(value) {
       state.busy = value;
-      for (const button of document.querySelectorAll("button")) {
-        button.disabled = value;
+      for (const control of document.querySelectorAll("button, input, select, textarea")) {
+        control.disabled = value;
       }
       $("treeSelect").disabled = value || $("treeSelect").options.length === 0;
     }
@@ -291,6 +537,12 @@
       const el = $("statusText");
       el.textContent = text || "";
       el.className = kind ? `status ${kind}` : "status";
+    }
+
+    function updateInputSummary(text = "") {
+      const title = text || state.selectedTitle || $("treeTitleInput").value.trim() || "未命名任务树";
+      $("inputSummary").textContent = title;
+      $("canvasLabel").textContent = title;
     }
 
     async function requestJson(url, options = {}) {
@@ -323,23 +575,29 @@
       state.sample = data.sample || "";
       const items = data.items || [];
       $("treeSelect").innerHTML = items.length
-        ? items.map((item) => `<option value="${escapeHtml(item.title)}">${escapeHtml(item.filename)}</option>`).join("")
+        ? items.map((item) => `<option value="${escapeHtml(item.title)}">${escapeHtml(item.title)}</option>`).join("")
         : '<option value="">暂无</option>';
       $("treeSelect").disabled = items.length === 0;
 
       if (data.selected) {
         state.selectedTitle = data.selected.title;
+        state.selectedFilename = data.selected.filename;
         $("treeTitleInput").value = data.selected.title;
+        $("treeJsonInput").value = data.selected.text;
         $("pathText").textContent = data.selected.path;
         $("treeSelect").value = data.selected.title;
+        updateInputSummary(data.selected.title);
         loadMindMap(data.selected.tree);
         return;
       }
 
       const sample = parseTreeText(state.sample);
       state.selectedTitle = "";
+      state.selectedFilename = "";
       $("treeTitleInput").value = sample.title || "";
+      $("treeJsonInput").value = state.sample;
       $("pathText").textContent = data.directory || "";
+      updateInputSummary(sample.title || "");
       loadMindMap(sample);
     }
 
@@ -351,6 +609,31 @@
         throw new Error("任务树 JSON 不能为空。");
       }
       return JSON.parse(source);
+    }
+
+    function renderFromInput() {
+      try {
+        const tree = parseTreeText($("treeJsonInput").value);
+        if (!$("treeTitleInput").value.trim() && tree.title) {
+          $("treeTitleInput").value = tree.title;
+        }
+        updateInputSummary(tree.title || "");
+        loadMindMap(tree);
+        setStatus("已渲染输入，尚未保存。", "ok");
+      } catch (error) {
+        setStatus(error.message, "error");
+      }
+    }
+
+    function syncJsonFromMap() {
+      if (!state.mindMap) {
+        return;
+      }
+      const tree = mindRootToTaskTree(state.mindMap.getData(false));
+      $("treeJsonInput").value = JSON.stringify(tree, null, 2);
+      $("treeTitleInput").value = $("treeTitleInput").value.trim() || tree.title;
+      updateInputSummary(tree.title);
+      setStatus("当前工作树已同步到输入。", "ok");
     }
 
     function loadMindMap(tree) {
@@ -366,8 +649,8 @@
         layout: "organizationStructure",
         theme: "default",
         fit: true,
-        fitPadding: 70,
-        textAutoWrapWidth: 220,
+        fitPadding: 82,
+        textAutoWrapWidth: 230,
         mousewheelAction: "zoom",
         minZoomRatio: 35,
         maxZoomRatio: 240,
@@ -381,41 +664,41 @@
         themeConfig: {
           backgroundColor: "transparent",
           backgroundImage: "none",
-          lineColor: "#95a5bd",
-          lineWidth: 1.5,
+          lineColor: "#8aa69c",
+          lineWidth: 1.4,
           lineStyle: "straight",
           root: {
             shape: "rectangle",
-            fillColor: "#f8fbff",
-            color: "#111827",
-            borderColor: "#2563eb",
-            borderWidth: 1.5,
+            fillColor: "#edf7f0",
+            color: "#14243a",
+            borderColor: "#28745b",
+            borderWidth: 1.7,
             borderRadius: 6,
             fontSize: 20,
             fontWeight: "bold",
             paddingX: 24,
             paddingY: 14,
-            marginY: 78,
-            marginX: 86,
+            marginY: 80,
+            marginX: 88,
           },
           second: {
             shape: "rectangle",
             fillColor: "#ffffff",
-            color: "#1f2937",
-            borderColor: "#60a5fa",
-            borderWidth: 1.2,
+            color: "#17212f",
+            borderColor: "#2f6fd6",
+            borderWidth: 1.3,
             borderRadius: 6,
             fontSize: 16,
             paddingX: 18,
             paddingY: 12,
-            marginY: 62,
-            marginX: 58,
+            marginY: 64,
+            marginX: 60,
           },
           node: {
             shape: "rectangle",
-            fillColor: "#ffffff",
-            color: "#243047",
-            borderColor: "#93b4d7",
+            fillColor: "#fffaf2",
+            color: "#253044",
+            borderColor: "#d1a055",
             borderWidth: 1,
             borderRadius: 6,
             fontSize: 15,
@@ -511,7 +794,7 @@
         return;
       }
       setBusy(true);
-      setStatus("保存中...");
+      setStatus("保存中…");
       try {
         const tree = mindRootToTaskTree(state.mindMap.getData(false));
         const data = await requestJson("/api/task-tree", {
@@ -577,8 +860,11 @@
     }
 
     $("treeSelect").addEventListener("change", () => loadState($("treeSelect").value));
+    $("treeTitleInput").addEventListener("input", () => updateInputSummary());
+    $("renderBtn").addEventListener("click", renderFromInput);
+    $("syncJsonBtn").addEventListener("click", syncJsonFromMap);
     $("saveBtn").addEventListener("click", saveTree);
-    $("reloadBtn").addEventListener("click", () => loadState($("treeTitleInput").value || state.selectedTitle));
+    $("reloadBtn").addEventListener("click", () => loadState($("treeSelect").value || $("treeTitleInput").value || state.selectedTitle));
     $("fitBtn").addEventListener("click", fitMap);
     $("expandBtn").addEventListener("click", expandAll);
     $("collapseBtn").addEventListener("click", collapseAll);

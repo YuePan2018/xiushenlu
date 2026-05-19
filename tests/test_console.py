@@ -143,7 +143,7 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn('class="menu-icon" aria-hidden="true"', html)
             self.assertNotIn("<span>发布</span>", html)
             self.assertIn('href="/task-tree">长期任务树</a>', html)
-            self.assertIn('href="/task-tree/edit">工作树编辑器</a>', html)
+            self.assertNotIn('href="/task-tree/edit"', html)
             self.assertIn('href="/xhs">发布小红书</a>', html)
             self.assertIn('width: 132px;', html)
             self.assertLess(html.index('id="dateInput"'), html.index('id="menuBtn"'))
@@ -163,7 +163,7 @@ class ConsoleTests(unittest.TestCase):
             self.assertNotIn('<pre id="dailyText"', html)
             self.assertNotIn("<h2>日内更新</h2>", html)
 
-    def test_task_tree_page_contains_editor_and_tree_controls(self) -> None:
+    def test_task_tree_page_uses_work_tree_editor(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
             client = TestClient(create_app(config=config, provider_factory=FakeProvider))
@@ -173,42 +173,37 @@ class ConsoleTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             html = response.text
             self.assertIn("长期任务树", html)
+            self.assertIn("工作树视图", html)
+            self.assertIn("/static/vendor/simple-mind-map-0.14.0-fix.2/simpleMindMap.umd.min.js", html)
+            self.assertIn("/static/vendor/simple-mind-map-0.14.0-fix.2/simpleMindMap.esm.min.css", html)
             self.assertIn('id="treeTitleInput"', html)
             self.assertIn('id="treeJsonInput"', html)
             self.assertIn('id="treeSelect"', html)
-            self.assertIn('id="treeView"', html)
+            self.assertIn('id="inputPanel"', html)
+            self.assertIn('id="inputSummary"', html)
+            self.assertIn('id="mindMap"', html)
             self.assertIn('id="renderBtn"', html)
+            self.assertIn('id="syncJsonBtn"', html)
             self.assertIn('id="saveBtn"', html)
             self.assertIn('id="expandBtn"', html)
             self.assertIn('id="collapseBtn"', html)
             self.assertIn("/api/task-tree", html)
-            self.assertIn("node.content", html)
-            self.assertIn("node-content", html)
-            self.assertNotIn("nodeBadges", html)
-            self.assertNotIn("每日重复", html)
-            self.assertNotIn("阶段性", html)
+            self.assertIn('layout: "organizationStructure"', html)
+            self.assertIn('mousewheelAction: "zoom"', html)
+            self.assertIn('state.mindMap.execCommand("UNEXPAND_ALL")', html)
+            self.assertIn("taskTreeToMindRoot", html)
+            self.assertIn("mindRootToTaskTree", html)
+            self.assertNotIn('id="treeView"', html)
+            self.assertNotIn("node-content", html)
 
-    def test_task_tree_editor_page_uses_simple_mind_map(self) -> None:
+    def test_task_tree_edit_route_is_removed(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
             client = TestClient(create_app(config=config, provider_factory=FakeProvider))
 
             response = client.get("/task-tree/edit")
 
-            self.assertEqual(response.status_code, 200)
-            html = response.text
-            self.assertIn("工作树编辑器", html)
-            self.assertIn("/static/vendor/simple-mind-map-0.14.0-fix.2/simpleMindMap.umd.min.js", html)
-            self.assertIn("/static/vendor/simple-mind-map-0.14.0-fix.2/simpleMindMap.esm.min.css", html)
-            self.assertIn('layout: "organizationStructure"', html)
-            self.assertIn('mousewheelAction: "zoom"', html)
-            self.assertIn('minZoomRatio: 35', html)
-            self.assertIn('maxZoomRatio: 240', html)
-            self.assertIn('alwaysShowExpandBtn: true', html)
-            self.assertIn("#mindMap .smm-richtext-node-wrap p", html)
-            self.assertIn('state.mindMap.execCommand("UNEXPAND_ALL")', html)
-            self.assertIn("taskTreeToMindRoot", html)
-            self.assertIn("mindRootToTaskTree", html)
+            self.assertEqual(response.status_code, 404)
 
     def test_task_tree_api_saves_title_named_json_file(self) -> None:
         with _temporary_directory() as temp_dir:
