@@ -24,9 +24,17 @@ conda run --no-capture-output -n xiushenlu python app/main.py --help
 conda run --no-capture-output -n xiushenlu python app/main.py status
 ```
 
-日常可以直接双击 `run_main.bat`。无参数时它会启动本地控制台并打开网页；如果 8765 端口已有控制台在运行，则只打开现有页面。默认地址是 `http://127.0.0.1:8765`。
+日常控制台可以直接双击 `run_console.bat`。默认会监听 `0.0.0.0:8765`，自动识别电脑当前局域网 IPv4，并打开形如 `http://192.168.x.x:8765/` 的网页；同一 Wi-Fi 下的手机也访问这个地址。首次弹出 Windows 防火墙提示时，允许“专用网络”。
 
-运行窗口保持打开时，可以输入 `重启` 来重启控制台并重新打开网页；按 `Ctrl+C` 会停止控制台并关闭窗口。传入参数时，例如 `run_main.bat status`，仍转发到 CLI。
+只允许本机访问时，使用：
+
+```powershell
+.\run_console.bat --local-only
+```
+
+本机-only 模式监听 `127.0.0.1:8765`，默认地址是 `http://127.0.0.1:8765/`。
+
+运行窗口保持打开时，可以输入 `重启` 来重启控制台并重新打开网页；按 `Ctrl+C` 会停止控制台并关闭窗口。`run_main.bat` 无参数时会转到 `run_console.bat`；传入参数时，例如 `run_main.bat status`，仍转发到 CLI。
 
 ## Demo 流程
 

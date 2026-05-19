@@ -1,12 +1,15 @@
 param(
     [string]$HostAddress = "127.0.0.1",
     [int]$Port = 8765,
-    [string]$Url = ""
+    [string]$Url = "",
+    [string]$PythonPath = ""
 )
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ProjectRoot
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
 
 if (-not $Url) {
     $Url = "http://${HostAddress}:${Port}"
@@ -20,6 +23,26 @@ $ErrLog = Join-Path $LogDir "console.err.log"
 $script:ServerPid = $null
 $script:CanStopServer = $false
 $RestartCommand = -join ([char[]](0x91CD, 0x542F))
+
+function Resolve-ConsolePython {
+    if ($PythonPath) {
+        return $PythonPath
+    }
+
+    if ($env:CONDA_PREFIX -and (Split-Path -Leaf $env:CONDA_PREFIX) -eq "xiushenlu") {
+        $activeEnvPython = Join-Path $env:CONDA_PREFIX "python.exe"
+        if (Test-Path $activeEnvPython) {
+            return $activeEnvPython
+        }
+    }
+
+    $userEnvPython = Join-Path $env:USERPROFILE ".conda\envs\xiushenlu\python.exe"
+    if (Test-Path $userEnvPython) {
+        return $userEnvPython
+    }
+
+    return "python"
+}
 
 function Get-ListeningConsolePid {
     $escapedHost = [regex]::Escape($HostAddress)
@@ -107,9 +130,11 @@ function Start-ConsoleServer {
         return
     }
 
+    $consolePython = Resolve-ConsolePython
     Write-Host "Starting Xiushenlu console: $Url"
+    Write-Host "Using Python: $consolePython"
     $process = Start-Process `
-        -FilePath "python" `
+        -FilePath $consolePython `
         -ArgumentList @("app\main.py", "console", "--host", $HostAddress, "--port", "$Port") `
         -WorkingDirectory $ProjectRoot `
         -RedirectStandardOutput $OutLog `

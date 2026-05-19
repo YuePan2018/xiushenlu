@@ -5,9 +5,6 @@ chcp 65001 >nul
 cd /d "%~dp0"
 
 set "ENV_NAME=xiushenlu"
-set "CONSOLE_HOST=127.0.0.1"
-set "CONSOLE_PORT=8765"
-set "CONSOLE_URL=http://%CONSOLE_HOST%:%CONSOLE_PORT%"
 set "ACTIVATED="
 
 set "PYTHONUTF8=1"
@@ -44,8 +41,8 @@ if not defined ACTIVATED (
 )
 
 if "%~1"=="" (
-    start "Xiushenlu Console" powershell -NoProfile -ExecutionPolicy Bypass -NoExit -File "%~dp0run_console.ps1" -HostAddress "%CONSOLE_HOST%" -Port "%CONSOLE_PORT%" -Url "%CONSOLE_URL%"
-    exit /b 0
+    call "%~dp0run_console.bat"
+    exit /b
 ) else (
     python app\main.py %*
 )
