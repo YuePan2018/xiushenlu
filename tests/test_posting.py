@@ -8,7 +8,7 @@ from typing import Any
 from unittest.mock import patch
 
 from app.logger import EventLogger
-from app.posting.publisher import publish_xhs_from_draft
+from app.posting.publisher import _build_client, publish_xhs_from_draft
 from app.posting.validation import build_xhs_payload
 from app.posting.xhs_mcp import XhsMcpClient, XhsMcpError, XhsToolResult
 
@@ -50,6 +50,14 @@ class PostingTests(unittest.TestCase):
         self.assertEqual(payload.tags, ["修身炉", "AI工具"])
         self.assertEqual(payload.visibility, "仅自己可见")
         self.assertEqual(payload.to_mcp_arguments()["visibility"], "仅自己可见")
+
+        original_payload = build_xhs_payload(
+            title="原创声明",
+            content="带原创标记的正文。",
+            images=["https://example.com/a.png"],
+            is_original=True,
+        )
+        self.assertTrue(original_payload.to_mcp_arguments()["is_original"])
 
     def test_build_xhs_payload_rejects_overlong_content(self) -> None:
         with self.assertRaisesRegex(ValueError, "1000"):
@@ -140,6 +148,19 @@ class PostingTests(unittest.TestCase):
         with patch("urllib.request.urlopen", side_effect=TimeoutError("timed out")):
             with self.assertRaisesRegex(XhsMcpError, "请求超时"):
                 client.publish_content({"title": "超时测试"})
+
+    def test_publish_client_uses_publish_timeout_when_configured(self) -> None:
+        client = _build_client(
+            {
+                "xiaohongshu": {
+                    "mcp_url": "http://localhost:18060/mcp",
+                    "timeout": 30,
+                    "publish_timeout": 60,
+                }
+            }
+        )
+
+        self.assertEqual(client.timeout, 60)
 
 
 def _write_draft(config: dict[str, Any], text: str) -> Path:

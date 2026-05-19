@@ -360,6 +360,8 @@ class ConsoleTests(unittest.TestCase):
             self.assertLess(html.index("可见范围"), html.index("标签（可选）"))
             self.assertLess(html.index("标签（可选）"), html.index("定时发布（可选）"))
             self.assertIn("原创标记（可选）", html)
+            self.assertIn('id="originalInput"', html)
+            self.assertIn('is_original: $("originalInput").checked', html)
             self.assertIn('id="startMcpBtn" type="button" disabled', html)
             self.assertIn("statusLoading", html)
             self.assertIn("missingRequiredFields", html)
@@ -875,6 +877,7 @@ class ConsoleTests(unittest.TestCase):
                     "images": ["https://example.com/a.png"],
                     "tags": ["修身炉"],
                     "visibility": "公开可见",
+                    "is_original": True,
                 },
             )
 
@@ -884,6 +887,7 @@ class ConsoleTests(unittest.TestCase):
                 ["publish_content"],
             )
             self.assertEqual(xhs_client.calls[-1][1]["visibility"], "公开可见")
+            self.assertTrue(xhs_client.calls[-1][1]["is_original"])
             self.assertEqual(response.json()["result"]["visibility"], "公开可见")
 
     def test_local_markdown_vendor_assets_are_served(self) -> None:
@@ -1294,6 +1298,7 @@ def _test_config(root: Path) -> dict[str, Any]:
         "xiaohongshu": {
             "mcp_url": "http://localhost:18060/mcp",
             "timeout": 1,
+            "publish_timeout": 60,
             "cover_model": "fake-cover-model",
             "working_dir": str(xhs_dir),
             "mcp_exe": str(xhs_dir / "xiaohongshu-mcp.exe"),

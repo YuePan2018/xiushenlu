@@ -115,5 +115,5 @@ def publish_xhs_from_draft(
 def _build_client(config: dict[str, Any]) -> XhsMcpClient:
     settings = config.get("xiaohongshu", {})
     url = settings.get("mcp_url", "http://localhost:18060/mcp")
-    timeout = float(settings.get("timeout", 30))
+    timeout = float(settings.get("publish_timeout", settings.get("timeout", 30)))
     return XhsMcpClient(url=url, timeout=timeout)
