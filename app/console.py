@@ -751,6 +751,10 @@ def create_app(
     def task_tree_page() -> HTMLResponse:
         return HTMLResponse(TASK_TREE_HTML)
 
+    @app.get("/task-tree/edit")
+    def task_tree_editor_page() -> FileResponse:
+        return FileResponse(STATIC_DIR / "task-tree-editor.html")
+
     @app.get("/api/state")
     def api_state(date: str | None = None) -> dict[str, Any]:
         return _handle(lambda: service.snapshot(date))
@@ -1695,6 +1699,7 @@ CONSOLE_HTML = f"""<!doctype html>
           </button>
           <div class="menu-list" id="mainMenu" hidden>
             <a href="/task-tree">长期任务树</a>
+            <a href="/task-tree/edit">工作树编辑器</a>
             <a href="/xhs">发布小红书</a>
           </div>
         </div>
@@ -2461,6 +2466,7 @@ TASK_TREE_HTML = """<!doctype html>
       </div>
       <div class="row">
         <a href="/"><button class="secondary" type="button">返回控制台</button></a>
+        <a href="/task-tree/edit"><button class="secondary" type="button">工作树编辑器</button></a>
       </div>
     </div>
   </header>

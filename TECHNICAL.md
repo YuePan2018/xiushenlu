@@ -56,13 +56,13 @@ conda run --no-capture-output -n xiushenlu python app/main.py cost
 conda run --no-capture-output -n xiushenlu python app/main.py console
 ```
 
-控制台目前支持查看 daily、查看今日待办、保存今日待办、打开待办文件、写入记录、生成计划、日内局部更新、生成复盘、停止当前 LLM 操作、手动 token 统计、小红书图文发布和长期任务树渲染。首页日期右侧的菜单可进入 `/xhs` 发布页和 `/task-tree` 长期任务树页。自动化、通知、审批、工具和知识区域只预留布局。
+控制台目前支持查看 daily、查看今日待办、保存今日待办、打开待办文件、写入记录、生成计划、日内局部更新、生成复盘、停止当前 LLM 操作、手动 token 统计、小红书图文发布、长期任务树渲染和工作树编辑。首页日期右侧的菜单可进入 `/xhs` 发布页、`/task-tree` 长期任务树页和 `/task-tree/edit` 工作树编辑器。自动化、通知、审批、工具和知识区域只预留布局。
 
 控制台里的“保存待办”和“生成计划”是两个独立动作：“保存待办”只写入 `data/user_inputs/today_tasks.md`，不调用 LLM；“生成计划”等价于 `python app/main.py plan`。
 
 控制台里的“停止”是防误点的 v1 语义：它不会强行中断 DashScope SDK 正在进行的同步网络调用，但会标记当前操作为取消；如果 LLM 稍后返回，后端会在写入 daily、`today_tasks.md` 或事件日志前丢弃结果。同一时间后端只允许一个 LLM 操作运行。
 
-长期任务树页不调用 LLM。用户把 Codex 拆分出的固定 JSON 粘贴到 `/task-tree`，填写保存标题后，后端会校验 JSON 并写入 `data/task_tree/<标题>.json`；标题会清洗为合法 Windows 文件名。页面按节点的 `kind`、`cadence`、`status` 和 `tags` 渲染标签，例如每日重复和阶段性，每个有子节点的节点都可点击展开或收起。
+长期任务树页不调用 LLM。用户把 Codex 拆分出的固定 JSON 粘贴到 `/task-tree`，填写保存标题后，后端会校验 JSON 并写入 `data/task_tree/<标题>.json`；标题会清洗为合法 Windows 文件名。页面按节点的 `kind`、`cadence`、`status` 和 `tags` 渲染标签，例如每日重复和阶段性，每个有子节点的节点都可点击展开或收起。`/task-tree/edit` 使用本地 vendored SimpleMindMap 以 `organizationStructure` 布局加载同一份 JSON，支持根在上、叶在下的矩形节点、拖拽、缩放、文本编辑和子树展开/收起；保存时会转换回标准任务树 JSON 并复用同一后端接口。
 
 任务树 JSON 根对象需要包含 `title` 和 `nodes`。节点的 `kind` 支持 `phase`、`milestone`、`task`、`habit`、`checkpoint`；`cadence` 支持 `none`、`daily`、`weekly`、`monthly`、`phase`、`one_off`；`status` 支持 `todo`、`doing`、`done`、`paused`。`children` 是子节点数组，可为空。
 
@@ -224,7 +224,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 | 文件 | 职责 |
 | --- | --- |
 | `app/main.py` | CLI 命令入口；加载配置；组装 Provider；调用 pipeline 或本地读写函数。 |
-| `app/console.py` | FastAPI 本地控制台；展示 daily 和 today_tasks；触发已有 plan/log/review 能力。 |
+| `app/console.py` | FastAPI 本地控制台；展示 daily 和 today_tasks；触发已有 plan/log/review 能力，并提供任务树/工作树页面路由。 |
 | `app/pipelines/daily_plan.py` | 今日计划 pipeline；LLM 生成五列表格形式的任务管理表。 |
 | `app/pipelines/log_schedule_update.py` | 写入记录后的任务管理表更新 pipeline；LLM 返回状态和计时线索，代码重算并写入 `状态` 和 `用时` 两列。 |
 | `app/pipelines/plan_update.py` | 日内计划局部更新 pipeline；更新待办原文并给任务管理表追加一行，解析失败时停止写入。 |

@@ -3,6 +3,7 @@ __pycache__/
 
 .env
 .venv/
+.cache/
 .claude/
 
 app/workspace/
