@@ -182,6 +182,11 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn('id="inputPanel"', html)
             self.assertIn('id="inputSummary"', html)
             self.assertIn('id="mindMap"', html)
+            self.assertIn('id="workspace"', html)
+            self.assertIn('id="leftCollapseBtn"', html)
+            self.assertIn('id="rightCollapseBtn"', html)
+            self.assertIn('id="nodeContentInput"', html)
+            self.assertIn('class="canvas-tools"', html)
             self.assertIn('id="renderBtn"', html)
             self.assertIn('id="syncJsonBtn"', html)
             self.assertIn('id="saveBtn"', html)
@@ -193,8 +198,16 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn('state.mindMap.execCommand("UNEXPAND_ALL")', html)
             self.assertIn("taskTreeToMindRoot", html)
             self.assertIn("mindRootToTaskTree", html)
+            self.assertIn("contentEdits", html)
+            self.assertIn("updateSelectedContent", html)
+            self.assertIn("setLeftCollapsed", html)
+            self.assertIn("setRightCollapsed", html)
             self.assertNotIn('id="treeView"', html)
             self.assertNotIn("node-content", html)
+            self.assertNotIn("nodePreview", html)
+            self.assertNotIn("note: node.content", html)
+            self.assertNotIn('id="zoomInBtn"', html)
+            self.assertNotIn('id="zoomOutBtn"', html)
 
     def test_task_tree_edit_route_is_removed(self) -> None:
         with _temporary_directory() as temp_dir:

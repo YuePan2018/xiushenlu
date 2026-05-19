@@ -69,7 +69,7 @@
       justify-content: space-between;
       gap: 16px;
       align-items: center;
-      max-width: 1720px;
+      max-width: 1760px;
       margin: 0 auto;
       padding: 14px max(18px, env(safe-area-inset-right)) 14px max(18px, env(safe-area-inset-left));
     }
@@ -94,6 +94,13 @@
       font-size: 15px;
       font-weight: 720;
       line-height: 1.35;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--muted);
+      font-size: 13px;
     }
 
     .meta {
@@ -153,7 +160,9 @@
     }
 
     .button-link.secondary:hover,
-    button.secondary:hover {
+    button.secondary:hover,
+    .tool-button:hover,
+    .collapse-button:hover {
       border-color: #bfd0c7;
       background: var(--surface-tint);
       color: var(--text);
@@ -186,45 +195,111 @@
     }
 
     textarea {
-      min-height: 280px;
       resize: vertical;
       font-family: "Cascadia Mono", Consolas, "Microsoft YaHei UI", monospace;
       font-size: 13px;
       line-height: 1.55;
       overflow-wrap: anywhere;
-      white-space: pre;
-    }
-
-    label {
-      display: block;
-      margin-bottom: 6px;
-      color: var(--muted);
-      font-size: 13px;
     }
 
     main {
       display: grid;
-      grid-template-columns: minmax(290px, 360px) minmax(540px, 1fr);
-      gap: 14px;
-      max-width: 1720px;
+      grid-template-columns: minmax(300px, 360px) minmax(520px, 1fr) minmax(300px, 360px);
+      gap: 12px;
+      width: 100%;
+      max-width: 1760px;
       min-height: calc(100vh - 70px);
       margin: 0 auto;
-      padding: 14px max(14px, env(safe-area-inset-right)) 18px max(14px, env(safe-area-inset-left));
+      padding: 12px max(12px, env(safe-area-inset-right)) 18px max(12px, env(safe-area-inset-left));
+      transition: grid-template-columns 160ms ease;
+    }
+
+    main.left-collapsed {
+      grid-template-columns: 44px minmax(520px, 1fr) minmax(300px, 360px);
+    }
+
+    main.right-collapsed {
+      grid-template-columns: minmax(300px, 360px) minmax(520px, 1fr) 44px;
+    }
+
+    main.left-collapsed.right-collapsed {
+      grid-template-columns: 44px minmax(520px, 1fr) 44px;
     }
 
     .side {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
       min-width: 0;
-    }
-
-    .panel {
+      overflow: hidden;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: rgba(255, 255, 255, 0.96);
       box-shadow: var(--shadow);
+    }
+
+    .side-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      min-height: 52px;
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .side-title {
+      min-width: 0;
+    }
+
+    .side-title .meta {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .side-body {
+      display: flex;
+      flex-direction: column;
+      gap: 13px;
       padding: 14px;
+    }
+
+    .side-rail {
+      display: none;
+      height: 100%;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 0;
+      writing-mode: vertical-rl;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .left-collapsed .left-side .side-body,
+    .left-collapsed .left-side .side-header,
+    .right-collapsed .right-side .side-body,
+    .right-collapsed .right-side .side-header {
+      display: none;
+    }
+
+    .left-collapsed .left-side .side-rail,
+    .right-collapsed .right-side .side-rail {
+      display: flex;
+    }
+
+    .collapse-button,
+    .tool-button {
+      width: 34px;
+      min-width: 34px;
+      height: 34px;
+      min-height: 34px;
+      padding: 0;
+      border-color: var(--line);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 16px;
+      line-height: 1;
     }
 
     .stack {
@@ -234,73 +309,10 @@
       min-width: 0;
     }
 
-    .input-panel {
-      padding: 0;
-      overflow: hidden;
-    }
-
-    .input-panel summary {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      align-items: center;
-      min-height: 54px;
-      padding: 14px;
-      cursor: pointer;
-      list-style: none;
-    }
-
-    .input-panel summary::-webkit-details-marker {
-      display: none;
-    }
-
-    .summary-copy {
-      min-width: 0;
-    }
-
-    .summary-title {
-      display: block;
-      color: var(--text);
-    }
-
-    .summary-subtitle {
-      display: block;
-      margin-top: 3px;
-      color: var(--muted);
-      font-size: 13px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .chevron {
-      width: 10px;
-      height: 10px;
-      flex: 0 0 auto;
-      border-right: 2px solid var(--muted);
-      border-bottom: 2px solid var(--muted);
-      transform: rotate(45deg);
-      transform-origin: center;
-    }
-
-    .input-panel[open] .chevron {
-      transform: rotate(225deg);
-    }
-
-    .input-body {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      padding: 0 14px 14px;
-      border-top: 1px solid var(--line);
-      background: var(--surface-soft);
-    }
-
     .field-grid {
       display: grid;
       gap: 10px;
       grid-template-columns: 1fr;
-      padding-top: 14px;
     }
 
     .status {
@@ -324,24 +336,99 @@
       font-size: 12px;
       line-height: 1.45;
       overflow-wrap: anywhere;
+      word-break: break-all;
     }
 
-    .node-preview {
-      max-height: 220px;
-      overflow: auto;
+    details.input-panel {
       border: 1px solid var(--line);
       border-radius: 8px;
       background: var(--surface-soft);
-      padding: 10px;
+      overflow: hidden;
+    }
+
+    .input-panel summary {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      min-height: 44px;
+      padding: 11px 12px;
+      cursor: pointer;
+      list-style: none;
+    }
+
+    .input-panel summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .summary-copy {
+      min-width: 0;
+    }
+
+    .summary-title {
+      display: block;
+      color: var(--text);
+    }
+
+    .summary-subtitle {
+      display: block;
+      margin-top: 2px;
       color: var(--muted);
-      font-size: 13px;
-      line-height: 1.55;
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .chevron {
+      width: 10px;
+      height: 10px;
+      flex: 0 0 auto;
+      border-right: 2px solid var(--muted);
+      border-bottom: 2px solid var(--muted);
+      transform: rotate(45deg);
+      transform-origin: center;
+    }
+
+    .input-panel[open] .chevron {
+      transform: rotate(225deg);
+    }
+
+    .input-body {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 0 12px 12px;
+      border-top: 1px solid var(--line);
+    }
+
+    #treeJsonInput {
+      min-height: 230px;
+      white-space: pre;
+    }
+
+    .content-panel {
+      min-height: 0;
+    }
+
+    .selected-node-title {
+      min-height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface-soft);
+      padding: 9px 10px;
+      color: var(--text);
+      font-weight: 700;
       overflow-wrap: anywhere;
-      white-space: pre-wrap;
+    }
+
+    #nodeContentInput {
+      min-height: 300px;
     }
 
     .canvas-panel {
       position: relative;
+      min-width: 0;
       min-height: 690px;
       overflow: hidden;
       border: 1px solid #cfdcd5;
@@ -368,9 +455,25 @@
       pointer-events: none;
     }
 
+    .canvas-tools {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      z-index: 3;
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      border: 1px solid rgba(215, 224, 220, 0.92);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.86);
+      box-shadow: 0 10px 26px rgba(23, 33, 47, 0.08);
+      padding: 5px;
+    }
+
     #mindMap {
       width: 100%;
-      height: calc(100vh - 102px);
+      min-width: 0;
+      height: calc(100vh - 94px);
       min-height: 690px;
     }
 
@@ -398,16 +501,36 @@
       *::before,
       *::after {
         scroll-behavior: auto;
+        transition: none;
       }
     }
 
-    @media (max-width: 980px) {
-      main {
+    @media (max-width: 1120px) {
+      main,
+      main.left-collapsed,
+      main.right-collapsed,
+      main.left-collapsed.right-collapsed {
         grid-template-columns: 1fr;
       }
 
-      #mindMap,
-      .canvas-panel {
+      .left-collapsed .left-side .side-body,
+      .left-collapsed .left-side .side-header,
+      .right-collapsed .right-side .side-body,
+      .right-collapsed .right-side .side-header {
+        display: flex;
+      }
+
+      .left-collapsed .left-side .side-rail,
+      .right-collapsed .right-side .side-rail {
+        display: none;
+      }
+
+      .side-header {
+        display: flex;
+      }
+
+      .canvas-panel,
+      #mindMap {
         min-height: 620px;
       }
     }
@@ -427,7 +550,14 @@
         width: 100%;
       }
 
-      textarea {
+      .canvas-tools {
+        top: 50px;
+        right: auto;
+        left: 10px;
+      }
+
+      #treeJsonInput,
+      #nodeContentInput {
         min-height: 220px;
       }
     }
@@ -449,63 +579,86 @@
       </div>
     </div>
   </header>
-  <main>
-    <aside class="side" aria-label="任务树控制">
-      <details class="panel input-panel" id="inputPanel">
-        <summary>
-          <span class="summary-copy">
-            <span class="summary-title">输入</span>
-            <span class="summary-subtitle" id="inputSummary">准备中</span>
-          </span>
-          <span class="chevron" aria-hidden="true"></span>
-        </summary>
-        <div class="input-body">
-          <div class="field-grid">
-            <div>
-              <label for="treeTitleInput">保存标题</label>
-              <input id="treeTitleInput" name="task-tree-title" type="text" autocomplete="off" spellcheck="false" placeholder="例如：修身炉长期任务…">
-            </div>
-            <div>
-              <label for="treeSelect">已保存</label>
-              <select id="treeSelect" name="task-tree-select"></select>
-            </div>
+  <main id="workspace">
+    <aside class="side left-side" aria-label="任务源">
+      <button class="side-rail" id="leftRailBtn" type="button" aria-label="展开任务源">任务源</button>
+      <div class="side-header">
+        <div class="side-title">
+          <h2>任务源</h2>
+          <div class="meta" id="inputSummary">准备中</div>
+        </div>
+        <button class="collapse-button" id="leftCollapseBtn" type="button" title="收起任务源" aria-label="收起任务源">‹</button>
+      </div>
+      <div class="side-body">
+        <div class="field-grid">
+          <div>
+            <label for="treeSelect">已保存</label>
+            <select id="treeSelect" name="task-tree-select"></select>
           </div>
           <div>
-            <label for="treeJsonInput">任务树 JSON</label>
-            <textarea id="treeJsonInput" name="task-tree-json" autocomplete="off" spellcheck="false" placeholder="粘贴 JSON…"></textarea>
-          </div>
-          <div class="row">
-            <button id="renderBtn" type="button">渲染输入</button>
-            <button class="secondary" id="syncJsonBtn" type="button">同步当前树</button>
+            <label for="treeTitleInput">保存标题</label>
+            <input id="treeTitleInput" name="task-tree-title" type="text" autocomplete="off" spellcheck="false" placeholder="例如：修身炉长期任务…">
           </div>
         </div>
-      </details>
-      <section class="panel stack" aria-labelledby="fileHeading">
-        <h2 id="fileHeading">文件</h2>
         <div class="row">
           <button id="saveBtn" type="button">保存</button>
-          <button class="secondary" id="reloadBtn" type="button">重新读取</button>
+          <button class="secondary" id="reloadBtn" type="button">重读</button>
         </div>
         <div class="status" id="statusText" aria-live="polite">准备中</div>
         <div class="path-text" id="pathText"></div>
-      </section>
-      <section class="panel stack" aria-labelledby="viewHeading">
-        <h2 id="viewHeading">视图</h2>
-        <div class="row">
-          <button class="secondary" id="fitBtn" type="button">居中</button>
-          <button class="secondary" id="expandBtn" type="button">全部展开</button>
-          <button class="secondary" id="collapseBtn" type="button">全部收起</button>
-        </div>
-      </section>
-      <section class="panel stack" aria-labelledby="nodeHeading">
-        <h2 id="nodeHeading">当前节点</h2>
-        <div class="node-preview" id="nodePreview">未选择节点。</div>
-      </section>
+        <details class="input-panel" id="inputPanel">
+          <summary>
+            <span class="summary-copy">
+              <span class="summary-title">JSON 输入</span>
+              <span class="summary-subtitle">手动粘贴或同步当前树</span>
+            </span>
+            <span class="chevron" aria-hidden="true"></span>
+          </summary>
+          <div class="input-body">
+            <div>
+              <label for="treeJsonInput">任务树 JSON</label>
+              <textarea id="treeJsonInput" name="task-tree-json" autocomplete="off" spellcheck="false" placeholder="粘贴 JSON…"></textarea>
+            </div>
+            <div class="row">
+              <button id="renderBtn" type="button">渲染输入</button>
+              <button class="secondary" id="syncJsonBtn" type="button">同步当前树</button>
+            </div>
+          </div>
+        </details>
+      </div>
     </aside>
+
     <section class="canvas-panel" aria-label="工作树画布">
       <div class="canvas-label" id="canvasLabel">工作树</div>
+      <div class="canvas-tools" aria-label="画布工具">
+        <button class="tool-button" id="fitBtn" type="button" title="居中" aria-label="居中">中</button>
+        <button class="tool-button" id="expandBtn" type="button" title="全部展开" aria-label="全部展开">展</button>
+        <button class="tool-button" id="collapseBtn" type="button" title="全部收起" aria-label="全部收起">收</button>
+      </div>
       <div id="mindMap"></div>
     </section>
+
+    <aside class="side right-side content-panel" aria-label="节点内容">
+      <button class="side-rail" id="rightRailBtn" type="button" aria-label="展开节点内容">内容</button>
+      <div class="side-header">
+        <div class="side-title">
+          <h2>节点内容</h2>
+          <div class="meta" id="nodeKindText">未选择</div>
+        </div>
+        <button class="collapse-button" id="rightCollapseBtn" type="button" title="收起节点内容" aria-label="收起节点内容">›</button>
+      </div>
+      <div class="side-body">
+        <div>
+          <label for="selectedNodeTitle">标题</label>
+          <div class="selected-node-title" id="selectedNodeTitle">未选择节点。</div>
+        </div>
+        <div>
+          <label for="nodeContentInput" id="nodeContentLabel">内容</label>
+          <textarea id="nodeContentInput" spellcheck="false" disabled></textarea>
+        </div>
+        <div class="status" id="nodeContentStatus">选择节点后显示内容。</div>
+      </div>
+    </aside>
   </main>
   <script>
     const $ = (id) => document.getElementById(id);
@@ -514,6 +667,9 @@
       sample: "",
       selectedTitle: "",
       selectedFilename: "",
+      selectedUid: "",
+      selectedIsRoot: false,
+      contentEdits: new Map(),
       mindMap: null,
     };
 
@@ -530,6 +686,7 @@
       for (const control of document.querySelectorAll("button, input, select, textarea")) {
         control.disabled = value;
       }
+      $("nodeContentInput").disabled = value || !state.selectedUid;
       $("treeSelect").disabled = value || $("treeSelect").options.length === 0;
     }
 
@@ -543,6 +700,16 @@
       const title = text || state.selectedTitle || $("treeTitleInput").value.trim() || "未命名任务树";
       $("inputSummary").textContent = title;
       $("canvasLabel").textContent = title;
+    }
+
+    function setLeftCollapsed(collapsed) {
+      $("workspace").classList.toggle("left-collapsed", collapsed);
+      window.setTimeout(resizeMap, 180);
+    }
+
+    function setRightCollapsed(collapsed) {
+      $("workspace").classList.toggle("right-collapsed", collapsed);
+      window.setTimeout(resizeMap, 180);
     }
 
     async function requestJson(url, options = {}) {
@@ -582,9 +749,10 @@
       if (data.selected) {
         state.selectedTitle = data.selected.title;
         state.selectedFilename = data.selected.filename;
+        state.contentEdits = new Map();
         $("treeTitleInput").value = data.selected.title;
         $("treeJsonInput").value = data.selected.text;
-        $("pathText").textContent = data.selected.path;
+        $("pathText").textContent = "";
         $("treeSelect").value = data.selected.title;
         updateInputSummary(data.selected.title);
         loadMindMap(data.selected.tree);
@@ -594,6 +762,7 @@
       const sample = parseTreeText(state.sample);
       state.selectedTitle = "";
       state.selectedFilename = "";
+      state.contentEdits = new Map();
       $("treeTitleInput").value = sample.title || "";
       $("treeJsonInput").value = state.sample;
       $("pathText").textContent = data.directory || "";
@@ -617,6 +786,7 @@
         if (!$("treeTitleInput").value.trim() && tree.title) {
           $("treeTitleInput").value = tree.title;
         }
+        state.contentEdits = new Map();
         updateInputSummary(tree.title || "");
         loadMindMap(tree);
         setStatus("已渲染输入，尚未保存。", "ok");
@@ -629,7 +799,7 @@
       if (!state.mindMap) {
         return;
       }
-      const tree = mindRootToTaskTree(state.mindMap.getData(false));
+      const tree = getCurrentTaskTree();
       $("treeJsonInput").value = JSON.stringify(tree, null, 2);
       $("treeTitleInput").value = $("treeTitleInput").value.trim() || tree.title;
       updateInputSummary(tree.title);
@@ -639,6 +809,7 @@
     function loadMindMap(tree) {
       const MindMap = getMindMapCtor();
       const root = taskTreeToMindRoot(tree);
+      clearNodeContentPanel();
       if (state.mindMap) {
         state.mindMap.destroy();
         state.mindMap = null;
@@ -710,7 +881,7 @@
         },
       });
       state.mindMap.on("node_active", (node) => {
-        updateNodePreview(node && node.nodeData ? node.nodeData : null);
+        selectNode(node && node.nodeData ? node.nodeData : null);
       });
       window.setTimeout(fitMap, 120);
     }
@@ -720,11 +891,11 @@
         data: {
           uid: "root",
           text: tree.title || "未命名任务树",
-          note: tree.summary || "",
           expand: true,
           _xiushenlu: {
             root: true,
             version: Number(tree.version || 1),
+            content: tree.summary || "",
           },
         },
         children: (Array.isArray(tree.nodes) ? tree.nodes : []).map((node, index) =>
@@ -739,11 +910,35 @@
         data: {
           uid: node.id || fallbackId,
           text: node.title || "未命名节点",
-          note: node.content || node.note || "",
           expand: true,
+          _xiushenlu: {
+            content: node.content || node.note || "",
+          },
         },
         children: children.map((child, index) => taskNodeToMindNode(child, `${fallbackId}-${index}`)),
       };
+    }
+
+    function getCurrentTaskTree() {
+      if (!state.mindMap) {
+        return parseTreeText($("treeJsonInput").value);
+      }
+      const root = applyContentEdits(state.mindMap.getData(false));
+      return mindRootToTaskTree(root);
+    }
+
+    function applyContentEdits(root) {
+      const copy = typeof structuredClone === "function" ? structuredClone(root) : JSON.parse(JSON.stringify(root));
+      walkMindTree(copy, (node) => {
+        const data = node && node.data ? node.data : {};
+        const uid = data.uid || "";
+        if (!uid || !state.contentEdits.has(uid)) {
+          return;
+        }
+        data._xiushenlu = data._xiushenlu || {};
+        data._xiushenlu.content = state.contentEdits.get(uid);
+      });
+      return copy;
     }
 
     function mindRootToTaskTree(root) {
@@ -753,7 +948,7 @@
       return {
         version: Number(meta.version || 1),
         title,
-        summary: normalizeText(data.note || "", ""),
+        summary: normalizeText(meta.content || "", ""),
         nodes: (Array.isArray(root.children) ? root.children : []).map((node, index) =>
           mindNodeToTaskNode(node, `nodes-${index}`)
         ),
@@ -762,12 +957,13 @@
 
     function mindNodeToTaskNode(node, fallbackId) {
       const data = node && node.data ? node.data : {};
+      const meta = data._xiushenlu || {};
       const children = Array.isArray(node.children) ? node.children : [];
       const taskNode = {
         id: safeNodeId(data.uid || fallbackId, fallbackId),
         title: normalizeText(data.text, "未命名节点"),
       };
-      const content = normalizeText(data.note || "", "");
+      const content = normalizeText(meta.content || "", "");
       if (content) {
         taskNode.content = content;
       }
@@ -776,6 +972,59 @@
         taskNode.children = childNodes;
       }
       return taskNode;
+    }
+
+    function walkMindTree(node, visitor) {
+      if (!node) {
+        return;
+      }
+      visitor(node);
+      for (const child of Array.isArray(node.children) ? node.children : []) {
+        walkMindTree(child, visitor);
+      }
+    }
+
+    function selectNode(nodeData) {
+      if (!nodeData || !nodeData.data) {
+        clearNodeContentPanel();
+        return;
+      }
+      const data = nodeData.data;
+      const meta = data._xiushenlu || {};
+      const uid = data.uid || "";
+      state.selectedUid = uid;
+      state.selectedIsRoot = Boolean(meta.root);
+      const content = state.contentEdits.has(uid) ? state.contentEdits.get(uid) : (meta.content || "");
+      $("selectedNodeTitle").textContent = normalizeText(data.text, "未命名节点");
+      $("nodeKindText").textContent = state.selectedIsRoot ? "根节点摘要" : "任务节点内容";
+      $("nodeContentLabel").textContent = state.selectedIsRoot ? "摘要" : "内容";
+      $("nodeContentInput").value = content;
+      $("nodeContentInput").disabled = false;
+      $("nodeContentStatus").textContent = content ? "已载入内容。" : "暂无内容。";
+      $("nodeContentStatus").className = "status";
+      setRightCollapsed(false);
+      setBusy(state.busy);
+    }
+
+    function clearNodeContentPanel() {
+      state.selectedUid = "";
+      state.selectedIsRoot = false;
+      $("selectedNodeTitle").textContent = "未选择节点。";
+      $("nodeKindText").textContent = "未选择";
+      $("nodeContentLabel").textContent = "内容";
+      $("nodeContentInput").value = "";
+      $("nodeContentInput").disabled = true;
+      $("nodeContentStatus").textContent = "选择节点后显示内容。";
+      $("nodeContentStatus").className = "status";
+    }
+
+    function updateSelectedContent() {
+      if (!state.selectedUid) {
+        return;
+      }
+      state.contentEdits.set(state.selectedUid, $("nodeContentInput").value);
+      $("nodeContentStatus").textContent = "内容已同步到当前树，保存后写入文件。";
+      $("nodeContentStatus").className = "status ok";
     }
 
     function normalizeText(value, fallback) {
@@ -796,7 +1045,7 @@
       setBusy(true);
       setStatus("保存中…");
       try {
-        const tree = mindRootToTaskTree(state.mindMap.getData(false));
+        const tree = getCurrentTaskTree();
         const data = await requestJson("/api/task-tree", {
           method: "POST",
           body: JSON.stringify({
@@ -810,6 +1059,12 @@
         setStatus(error.message, "error");
       } finally {
         setBusy(false);
+      }
+    }
+
+    function resizeMap() {
+      if (state.mindMap) {
+        state.mindMap.resize();
       }
     }
 
@@ -833,23 +1088,6 @@
       }
     }
 
-    function updateNodePreview(nodeData) {
-      if (!nodeData || !nodeData.data) {
-        $("nodePreview").textContent = "未选择节点。";
-        return;
-      }
-      const data = nodeData.data;
-      const meta = data._xiushenlu || {};
-      const lines = [
-        normalizeText(data.text, "未命名节点"),
-        meta.root ? "根节点" : "任务节点",
-      ];
-      if (data.note) {
-        lines.push(`${meta.root ? "摘要" : "内容"}：${data.note}`);
-      }
-      $("nodePreview").textContent = lines.join("\n");
-    }
-
     function escapeHtml(value) {
       return String(value)
         .replaceAll("&", "&amp;")
@@ -859,6 +1097,10 @@
         .replaceAll("'", "&#039;");
     }
 
+    $("leftCollapseBtn").addEventListener("click", () => setLeftCollapsed(true));
+    $("leftRailBtn").addEventListener("click", () => setLeftCollapsed(false));
+    $("rightCollapseBtn").addEventListener("click", () => setRightCollapsed(true));
+    $("rightRailBtn").addEventListener("click", () => setRightCollapsed(false));
     $("treeSelect").addEventListener("change", () => loadState($("treeSelect").value));
     $("treeTitleInput").addEventListener("input", () => updateInputSummary());
     $("renderBtn").addEventListener("click", renderFromInput);
@@ -868,11 +1110,8 @@
     $("fitBtn").addEventListener("click", fitMap);
     $("expandBtn").addEventListener("click", expandAll);
     $("collapseBtn").addEventListener("click", collapseAll);
-    window.addEventListener("resize", () => {
-      if (state.mindMap) {
-        state.mindMap.resize();
-      }
-    });
+    $("nodeContentInput").addEventListener("input", updateSelectedContent);
+    window.addEventListener("resize", resizeMap);
     loadState();
   </script>
 </body>
