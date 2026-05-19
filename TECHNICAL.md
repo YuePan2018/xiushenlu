@@ -34,7 +34,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py status
 
 本机-only 模式监听 `127.0.0.1:8765`，默认地址是 `http://127.0.0.1:8765/`。
 
-运行窗口保持打开时，可以输入 `重启` 来重启控制台并重新打开网页；按 `Ctrl+C` 会停止控制台并关闭窗口。`run_main.bat` 无参数时会转到 `run_console.bat`；传入参数时，例如 `run_main.bat status`，仍转发到 CLI。
+运行窗口保持打开时，可以输入 `重启` 来重启控制台并重新打开网页；按 `Ctrl+C` 会停止控制台并关闭窗口。CLI 命令统一使用 `conda run --no-capture-output -n xiushenlu python app/main.py ...`。
 
 ## Demo 流程
 

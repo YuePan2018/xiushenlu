@@ -36,9 +36,18 @@ function Resolve-ConsolePython {
         }
     }
 
-    $userEnvPython = Join-Path $env:USERPROFILE ".conda\envs\xiushenlu\python.exe"
-    if (Test-Path $userEnvPython) {
-        return $userEnvPython
+    $candidateEnvRoots = @(
+        (Join-Path $env:USERPROFILE ".conda\envs\xiushenlu"),
+        (Join-Path $env:USERPROFILE "miniconda3\envs\xiushenlu"),
+        (Join-Path $env:USERPROFILE "anaconda3\envs\xiushenlu"),
+        (Join-Path $env:ProgramData "miniconda3\envs\xiushenlu"),
+        (Join-Path $env:ProgramData "anaconda3\envs\xiushenlu")
+    )
+    foreach ($envRoot in $candidateEnvRoots) {
+        $envPython = Join-Path $envRoot "python.exe"
+        if (Test-Path $envPython) {
+            return $envPython
+        }
     }
 
     return "python"
