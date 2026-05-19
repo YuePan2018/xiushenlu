@@ -12,6 +12,7 @@ from app.task_tree import (
     list_task_trees,
     parse_task_tree_text,
     read_task_tree,
+    read_task_tree_file,
     save_task_tree,
     task_tree_filename,
 )
@@ -128,15 +129,41 @@ class TaskTreeTests(unittest.TestCase):
             )
 
             saved = save_task_tree("用户给的标题", text, config)
-            loaded = read_task_tree("用户给的标题", config)
+            loaded = read_task_tree_file("用户给的标题.json", config)
+            loaded_by_title = read_task_tree("用户给的标题", config)
             items = list_task_trees(config)
 
             self.assertEqual(saved.filename, "用户给的标题.json")
             self.assertEqual(loaded.title, "用户给的标题")
+            self.assertEqual(loaded_by_title.filename, "用户给的标题.json")
             self.assertEqual(loaded.tree["title"], "JSON 内标题")
+            self.assertEqual(loaded.text, saved.path.read_text(encoding="utf-8"))
             self.assertEqual(loaded.tree["nodes"], [{"id": "nodes-0", "title": "阶段一"}])
             self.assertTrue(saved.path.exists())
             self.assertEqual(items[0].filename, "用户给的标题.json")
+
+    def test_list_task_trees_only_uses_root_json_files(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            tree_dir = Path(config["paths"]["task_tree_dir"])
+            tree_dir.mkdir(parents=True)
+            (tree_dir / "根任务A.json").write_text('{"title":"A","nodes":[]}\n', encoding="utf-8")
+            (tree_dir / "根任务B.json").write_text('{"title":"B","nodes":[]}\n', encoding="utf-8")
+            (tree_dir / "忽略.txt").write_text("not json\n", encoding="utf-8")
+            child_dir = tree_dir / "子目录"
+            child_dir.mkdir()
+            (child_dir / "子任务.json").write_text('{"title":"子","nodes":[]}\n', encoding="utf-8")
+
+            items = list_task_trees(config)
+
+            self.assertEqual({item.filename for item in items}, {"根任务A.json", "根任务B.json"})
+
+    def test_read_task_tree_file_rejects_subdirectory_filename(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+
+            with self.assertRaisesRegex(TaskTreeError, "根目录"):
+                read_task_tree_file("子目录/子任务.json", config)
 
 
 def _test_config(root: Path) -> dict[str, Any]:

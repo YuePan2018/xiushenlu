@@ -61,12 +61,28 @@ def read_task_tree(title: str, config: dict[str, Any] | None = None) -> TaskTree
     if not path.exists():
         raise TaskTreeError(f"任务树不存在：{path.name}")
     text = safe_read_text(path, cfg)
-    tree, normalized_text = normalize_task_tree_text(text)
+    tree, _ = normalize_task_tree_text(text)
     return TaskTreeDocument(
         title=path.stem,
         filename=path.name,
         path=path,
-        text=normalized_text,
+        text=text,
+        tree=tree,
+    )
+
+
+def read_task_tree_file(filename: str, config: dict[str, Any] | None = None) -> TaskTreeDocument:
+    cfg = _task_tree_config(config)
+    path = task_tree_path_for_filename(filename, cfg)
+    if not path.exists():
+        raise TaskTreeError(f"任务树不存在：{path.name}")
+    text = safe_read_text(path, cfg)
+    tree, _ = normalize_task_tree_text(text)
+    return TaskTreeDocument(
+        title=path.stem,
+        filename=path.name,
+        path=path,
+        text=text,
         tree=tree,
     )
 
@@ -95,6 +111,13 @@ def task_tree_path_for_title(title: str, config: dict[str, Any] | None = None) -
     filename = task_tree_filename(title)
     directory = task_tree_dir(cfg)
     return validate_path(directory / filename, cfg, for_write=True)
+
+
+def task_tree_path_for_filename(filename: str, config: dict[str, Any] | None = None) -> Path:
+    cfg = _task_tree_config(config)
+    name = _validate_task_tree_filename(filename)
+    directory = task_tree_dir(cfg)
+    return validate_path(directory / name, cfg)
 
 
 def task_tree_filename(title: str) -> str:
@@ -215,6 +238,16 @@ def _sanitize_filename_stem(title: str) -> str:
         value = value[:80].rstrip(" .")
     if value.upper() in {"CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "LPT1", "LPT2", "LPT3"}:
         value = f"{value}_task_tree"
+    return value
+
+
+def _validate_task_tree_filename(filename: str) -> str:
+    value = filename.strip()
+    if not value:
+        raise TaskTreeError("任务树文件名不能为空。")
+    path = Path(value)
+    if path.name != value or path.suffix.lower() != ".json":
+        raise TaskTreeError("任务树文件名必须是 task_tree 根目录下的 JSON 文件。")
     return value
 
 

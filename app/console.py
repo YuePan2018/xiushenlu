@@ -46,7 +46,7 @@ from app.posting.xhs_mcp import XhsMcpClient
 from app.safety import safe_read_text, safe_write_text
 from app.task_tree import (
     list_task_trees,
-    read_task_tree,
+    read_task_tree_file,
     save_task_tree as persist_task_tree,
     task_tree_dir,
 )
@@ -507,14 +507,27 @@ class ConsoleService:
     def stop_operation(self) -> dict[str, Any]:
         return self.operations.stop()
 
-    def task_tree_state(self, title: str | None = None) -> dict[str, Any]:
+    def task_tree_state(
+        self,
+        filename: str | None = None,
+        title: str | None = None,
+    ) -> dict[str, Any]:
         items = list_task_trees(self.config)
+        selected_filename = (filename or "").strip()
         selected_title = (title or "").strip()
-        selected = None
-        if selected_title:
-            selected = _task_tree_document_payload(read_task_tree(selected_title, self.config))
+        selected_item = None
+        if selected_filename:
+            selected_item = next((item for item in items if item.filename == selected_filename), None)
+        elif selected_title:
+            selected_item = next((item for item in items if item.title == selected_title), None)
         elif items:
-            selected = _task_tree_document_payload(read_task_tree(items[0].title, self.config))
+            selected_item = items[0]
+        if selected_item is None and items:
+            selected_item = items[0]
+
+        selected = None
+        if selected_item:
+            selected = _task_tree_document_payload(read_task_tree_file(selected_item.filename, self.config))
 
         return {
             "directory": str(task_tree_dir(self.config)),
@@ -528,7 +541,7 @@ class ConsoleService:
         return {
             "message": f"任务树已保存：{document.filename}",
             "result": _task_tree_document_payload(document),
-            "state": self.task_tree_state(document.title),
+            "state": self.task_tree_state(filename=document.filename),
         }
 
     def xhs_defaults(self) -> dict[str, Any]:
@@ -792,8 +805,8 @@ def create_app(
         return _handle(lambda: service.report_tokens(request))
 
     @app.get("/api/task-tree")
-    def api_task_tree(title: str | None = None) -> dict[str, Any]:
-        return _handle(lambda: service.task_tree_state(title))
+    def api_task_tree(filename: str | None = None, title: str | None = None) -> dict[str, Any]:
+        return _handle(lambda: service.task_tree_state(filename=filename, title=title))
 
     @app.post("/api/task-tree")
     def api_save_task_tree(request: TaskTreeRequest) -> dict[str, Any]:

@@ -64,13 +64,13 @@ conda run --no-capture-output -n xiushenlu python app/main.py cost
 conda run --no-capture-output -n xiushenlu python app/main.py console
 ```
 
-控制台目前支持查看 daily、查看今日待办、保存今日待办、打开待办文件、写入记录、生成计划、日内局部更新、生成复盘、停止当前 LLM 操作、手动 token 统计、小红书图文发布、长期任务树渲染和工作树编辑。首页日期右侧的菜单可进入 `/xhs` 发布页、`/task-tree` 长期任务树页和 `/task-tree/edit` 工作树编辑器。自动化、通知、审批、工具和知识区域只预留布局。
+控制台目前支持查看 daily、查看今日待办、保存今日待办、打开待办文件、写入记录、生成计划、日内局部更新、生成复盘、停止当前 LLM 操作、手动 token 统计、小红书图文发布和长期任务树工作树编辑。首页日期右侧的菜单可进入 `/xhs` 发布页和 `/task-tree` 长期任务树页。自动化、通知、审批、工具和知识区域只预留布局。
 
 控制台里的“保存待办”和“生成计划”是两个独立动作：“保存待办”只写入 `data/user_inputs/today_tasks.md`，不调用 LLM；“生成计划”等价于 `python app/main.py plan`。
 
 控制台里的“停止”是防误点的 v1 语义：它不会强行中断 DashScope SDK 正在进行的同步网络调用，但会标记当前操作为取消；如果 LLM 稍后返回，后端会在写入 daily、`today_tasks.md` 或事件日志前丢弃结果。同一时间后端只允许一个 LLM 操作运行。
 
-长期任务树页不调用 LLM。用户把 Codex 拆分出的固定 JSON 粘贴到 `/task-tree`，填写保存标题后，后端会校验 JSON 并写入 `data/task_tree/<标题>.json`；标题会清洗为合法 Windows 文件名。页面按节点层级渲染 `title` 和 `content`，每个有子节点的节点都可点击展开或收起。`/task-tree/edit` 使用本地 vendored SimpleMindMap 以 `organizationStructure` 布局加载同一份 JSON，支持根在上、叶在下的矩形节点、拖拽、缩放、文本编辑和子树展开/收起；保存时会转换回标准任务树 JSON 并复用同一后端接口。
+长期任务树页不调用 LLM。`/task-tree` 使用本地 vendored SimpleMindMap 以 `organizationStructure` 布局加载任务树 JSON，支持根在上、叶在下的矩形节点、拖拽、缩放、文本编辑、节点内容编辑和子树展开/收起。“已保存”只扫描 `paths.task_tree_dir` 根目录下的 `.json` 文件，不递归子目录；菜单以文件名 stem 展示，读取时使用完整文件名作为 key。选择文件会把保存标题设为文件名 stem，并把磁盘里的 JSON 原文加载到输入区；保存时会校验 JSON，并按保存标题写入 `data/task_tree/<标题>.json`，标题会清洗为合法 Windows 文件名，保存后刷新“已保存”列表并选中新文件。
 
 任务树 JSON 根对象需要包含 `title` 和 `nodes`，可选 `summary`。节点包含 `title`，可选 `id`、`content` 和 `children`；`children` 是子节点数组，可省略或为空。旧 JSON 中的 `note` 会在保存时迁移为 `content`，`kind`、`cadence`、`status`、`tags` 等旧节点标签字段会被丢弃。
 

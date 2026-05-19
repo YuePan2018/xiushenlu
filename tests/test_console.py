@@ -190,9 +190,20 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn('id="renderBtn"', html)
             self.assertIn('id="syncJsonBtn"', html)
             self.assertIn('id="saveBtn"', html)
+            self.assertIn('class="source-divider"', html)
+            self.assertIn('class="source-actions"', html)
+            self.assertIn(">保存到本地</button>", html)
+            self.assertIn('id="refreshSavedBtn"', html)
+            self.assertIn('aria-label="刷新已保存"', html)
+            self.assertNotIn('id="reloadBtn"', html)
+            self.assertNotIn(">重读</button>", html)
+            self.assertLess(html.index('id="treeSelect"'), html.index('class="source-divider"'))
+            self.assertLess(html.index('class="source-divider"'), html.index('id="treeTitleInput"'))
+            self.assertLess(html.index('id="inputPanel"'), html.index('id="saveBtn"'))
             self.assertIn('id="expandBtn"', html)
             self.assertIn('id="collapseBtn"', html)
             self.assertIn("/api/task-tree", html)
+            self.assertIn("?filename=", html)
             self.assertIn('layout: "organizationStructure"', html)
             self.assertIn('mousewheelAction: "zoom"', html)
             self.assertIn('state.mindMap.execCommand("UNEXPAND_ALL")', html)
@@ -242,7 +253,7 @@ class ConsoleTests(unittest.TestCase):
                 "/api/task-tree",
                 json={"title": "我的长期任务", "text": text},
             )
-            load_response = client.get("/api/task-tree?title=我的长期任务")
+            load_response = client.get("/api/task-tree?filename=我的长期任务.json")
 
             self.assertEqual(save_response.status_code, 200)
             self.assertEqual(load_response.status_code, 200)
@@ -254,9 +265,45 @@ class ConsoleTests(unittest.TestCase):
             self.assertEqual(result["tree"]["title"], "JSON 内标题")
             self.assertTrue(expected_path.exists())
             self.assertIn('"title": "JSON 内标题"', expected_path.read_text(encoding="utf-8"))
+            self.assertEqual(data["state"]["selected"]["filename"], "我的长期任务.json")
             state = load_response.json()
             self.assertEqual(state["selected"]["filename"], "我的长期任务.json")
             self.assertEqual(state["items"][0]["filename"], "我的长期任务.json")
+
+    def test_task_tree_api_lists_root_files_and_loads_by_filename(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            tree_dir = Path(config["paths"]["task_tree_dir"])
+            tree_dir.mkdir(parents=True)
+            (tree_dir / "第一棵.json").write_text('{"title":"JSON 第一棵","nodes":[]}\n', encoding="utf-8")
+            (tree_dir / "第二棵.json").write_text('{"title":"JSON 第二棵","nodes":[]}\n', encoding="utf-8")
+            child_dir = tree_dir / "子目录"
+            child_dir.mkdir()
+            (child_dir / "不加载.json").write_text('{"title":"子目录","nodes":[]}\n', encoding="utf-8")
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+
+            response = client.get("/api/task-tree?filename=第二棵.json")
+
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual({item["filename"] for item in data["items"]}, {"第一棵.json", "第二棵.json"})
+            self.assertEqual(data["selected"]["filename"], "第二棵.json")
+            self.assertEqual(data["selected"]["title"], "第二棵")
+            self.assertEqual(data["selected"]["text"], '{"title":"JSON 第二棵","nodes":[]}\n')
+            self.assertEqual(data["selected"]["tree"]["title"], "JSON 第二棵")
+
+    def test_task_tree_api_missing_filename_falls_back_to_first_file(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            tree_dir = Path(config["paths"]["task_tree_dir"])
+            tree_dir.mkdir(parents=True)
+            (tree_dir / "仍存在.json").write_text('{"title":"还在","nodes":[]}\n', encoding="utf-8")
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+
+            response = client.get("/api/task-tree?filename=已删除.json")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["selected"]["filename"], "仍存在.json")
 
     def test_task_tree_api_rejects_invalid_json_without_overwriting(self) -> None:
         with _temporary_directory() as temp_dir:

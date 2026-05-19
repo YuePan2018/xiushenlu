@@ -162,6 +162,7 @@
     .button-link.secondary:hover,
     button.secondary:hover,
     .tool-button:hover,
+    .icon-button:hover,
     .collapse-button:hover {
       border-color: #bfd0c7;
       background: var(--surface-tint);
@@ -227,6 +228,8 @@
     }
 
     .side {
+      display: flex;
+      flex-direction: column;
       min-width: 0;
       overflow: hidden;
       border: 1px solid var(--line);
@@ -259,6 +262,9 @@
       display: flex;
       flex-direction: column;
       gap: 13px;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: auto;
       padding: 14px;
     }
 
@@ -309,10 +315,61 @@
       min-width: 0;
     }
 
-    .field-grid {
-      display: grid;
-      gap: 10px;
-      grid-template-columns: 1fr;
+    .task-source-block,
+    .task-edit-block {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .source-divider {
+      height: 1px;
+      background: var(--line);
+    }
+
+    .source-actions {
+      position: sticky;
+      bottom: 0;
+      display: flex;
+      margin: auto -14px -14px;
+      padding: 12px 14px 14px;
+      border-top: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.96);
+      backdrop-filter: blur(10px);
+    }
+
+    .source-actions button {
+      width: 100%;
+    }
+
+    .field-label-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    .field-label-row label {
+      margin-bottom: 0;
+    }
+
+    .icon-button {
+      width: 30px;
+      min-width: 30px;
+      height: 30px;
+      min-height: 30px;
+      padding: 0;
+      border-color: var(--line);
+      background: var(--surface);
+      color: var(--text);
+    }
+
+    .icon-button svg {
+      width: 17px;
+      height: 17px;
+      stroke: currentColor;
     }
 
     .status {
@@ -329,14 +386,6 @@
 
     .status.error {
       color: var(--danger);
-    }
-
-    .path-text {
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.45;
-      overflow-wrap: anywhere;
-      word-break: break-all;
     }
 
     details.input-panel {
@@ -590,41 +639,50 @@
         <button class="collapse-button" id="leftCollapseBtn" type="button" title="收起任务源" aria-label="收起任务源">‹</button>
       </div>
       <div class="side-body">
-        <div class="field-grid">
+        <div class="task-source-block">
           <div>
-            <label for="treeSelect">已保存</label>
+            <div class="field-label-row">
+              <label for="treeSelect">已保存</label>
+              <button class="icon-button" id="refreshSavedBtn" type="button" title="刷新已保存" aria-label="刷新已保存">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M21 12a9 9 0 0 1-15.36 6.36M3 12A9 9 0 0 1 18.36 5.64" stroke-width="2" stroke-linecap="round"/>
+                  <path d="M21 5v7h-7M3 19v-7h7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+            </div>
             <select id="treeSelect" name="task-tree-select"></select>
           </div>
+        </div>
+        <div class="source-divider" aria-hidden="true"></div>
+        <div class="task-edit-block">
           <div>
             <label for="treeTitleInput">保存标题</label>
             <input id="treeTitleInput" name="task-tree-title" type="text" autocomplete="off" spellcheck="false" placeholder="例如：修身炉长期任务…">
           </div>
-        </div>
-        <div class="row">
-          <button id="saveBtn" type="button">保存</button>
-          <button class="secondary" id="reloadBtn" type="button">重读</button>
+          <details class="input-panel" id="inputPanel">
+            <summary>
+              <span class="summary-copy">
+                <span class="summary-title">JSON 输入</span>
+                <span class="summary-subtitle">手动粘贴或同步当前树</span>
+              </span>
+              <span class="chevron" aria-hidden="true"></span>
+            </summary>
+            <div class="input-body">
+              <div>
+                <label for="treeJsonInput">任务树 JSON</label>
+                <textarea id="treeJsonInput" name="task-tree-json" autocomplete="off" spellcheck="false" placeholder="粘贴 JSON…"></textarea>
+              </div>
+              <div class="row">
+                <button id="renderBtn" type="button">渲染输入</button>
+                <button class="secondary" id="syncJsonBtn" type="button">同步当前树</button>
+              </div>
+            </div>
+          </details>
         </div>
         <div class="status" id="statusText" aria-live="polite">准备中</div>
-        <div class="path-text" id="pathText"></div>
-        <details class="input-panel" id="inputPanel">
-          <summary>
-            <span class="summary-copy">
-              <span class="summary-title">JSON 输入</span>
-              <span class="summary-subtitle">手动粘贴或同步当前树</span>
-            </span>
-            <span class="chevron" aria-hidden="true"></span>
-          </summary>
-          <div class="input-body">
-            <div>
-              <label for="treeJsonInput">任务树 JSON</label>
-              <textarea id="treeJsonInput" name="task-tree-json" autocomplete="off" spellcheck="false" placeholder="粘贴 JSON…"></textarea>
-            </div>
-            <div class="row">
-              <button id="renderBtn" type="button">渲染输入</button>
-              <button class="secondary" id="syncJsonBtn" type="button">同步当前树</button>
-            </div>
-          </div>
-        </details>
+        <div class="source-actions">
+          <button id="saveBtn" type="button">保存到本地</button>
+        </div>
       </div>
     </aside>
 
@@ -665,8 +723,8 @@
     const state = {
       busy: false,
       sample: "",
-      selectedTitle: "",
       selectedFilename: "",
+      jsonDirty: false,
       selectedUid: "",
       selectedIsRoot: false,
       contentEdits: new Map(),
@@ -686,8 +744,9 @@
       for (const control of document.querySelectorAll("button, input, select, textarea")) {
         control.disabled = value;
       }
+      const hasSavedFiles = Array.from($("treeSelect").options).some((option) => option.value);
       $("nodeContentInput").disabled = value || !state.selectedUid;
-      $("treeSelect").disabled = value || $("treeSelect").options.length === 0;
+      $("treeSelect").disabled = value || !hasSavedFiles;
     }
 
     function setStatus(text, kind = "") {
@@ -697,7 +756,7 @@
     }
 
     function updateInputSummary(text = "") {
-      const title = text || state.selectedTitle || $("treeTitleInput").value.trim() || "未命名任务树";
+      const title = text || $("treeTitleInput").value.trim() || filenameStem(state.selectedFilename) || "未命名任务树";
       $("inputSummary").textContent = title;
       $("canvasLabel").textContent = title;
     }
@@ -724,10 +783,10 @@
       return body;
     }
 
-    async function loadState(title = "") {
+    async function loadState(filename = "") {
       setBusy(true);
       try {
-        const query = title ? `?title=${encodeURIComponent(title)}` : "";
+        const query = filename ? `?filename=${encodeURIComponent(filename)}` : "";
         const data = await requestJson(`/api/task-tree${query}`);
         renderState(data);
         setStatus(data.selected ? `已读取 ${data.selected.filename}` : "已载入示例。", "ok");
@@ -742,30 +801,28 @@
       state.sample = data.sample || "";
       const items = data.items || [];
       $("treeSelect").innerHTML = items.length
-        ? items.map((item) => `<option value="${escapeHtml(item.title)}">${escapeHtml(item.title)}</option>`).join("")
+        ? items.map((item) => `<option value="${escapeHtml(item.filename)}">${escapeHtml(item.title)}</option>`).join("")
         : '<option value="">暂无</option>';
       $("treeSelect").disabled = items.length === 0;
 
       if (data.selected) {
-        state.selectedTitle = data.selected.title;
         state.selectedFilename = data.selected.filename;
+        state.jsonDirty = false;
         state.contentEdits = new Map();
         $("treeTitleInput").value = data.selected.title;
         $("treeJsonInput").value = data.selected.text;
-        $("pathText").textContent = "";
-        $("treeSelect").value = data.selected.title;
+        $("treeSelect").value = data.selected.filename;
         updateInputSummary(data.selected.title);
         loadMindMap(data.selected.tree);
         return;
       }
 
       const sample = parseTreeText(state.sample);
-      state.selectedTitle = "";
       state.selectedFilename = "";
+      state.jsonDirty = false;
       state.contentEdits = new Map();
       $("treeTitleInput").value = sample.title || "";
       $("treeJsonInput").value = state.sample;
-      $("pathText").textContent = data.directory || "";
       updateInputSummary(sample.title || "");
       loadMindMap(sample);
     }
@@ -787,6 +844,7 @@
           $("treeTitleInput").value = tree.title;
         }
         state.contentEdits = new Map();
+        state.jsonDirty = false;
         updateInputSummary(tree.title || "");
         loadMindMap(tree);
         setStatus("已渲染输入，尚未保存。", "ok");
@@ -802,6 +860,7 @@
       const tree = getCurrentTaskTree();
       $("treeJsonInput").value = JSON.stringify(tree, null, 2);
       $("treeTitleInput").value = $("treeTitleInput").value.trim() || tree.title;
+      state.jsonDirty = false;
       updateInputSummary(tree.title);
       setStatus("当前工作树已同步到输入。", "ok");
     }
@@ -1045,7 +1104,7 @@
       setBusy(true);
       setStatus("保存中…");
       try {
-        const tree = getCurrentTaskTree();
+        const tree = state.jsonDirty ? parseTreeText($("treeJsonInput").value) : getCurrentTaskTree();
         const data = await requestJson("/api/task-tree", {
           method: "POST",
           body: JSON.stringify({
@@ -1088,6 +1147,14 @@
       }
     }
 
+    function refreshSavedFiles() {
+      return loadState($("treeSelect").value || state.selectedFilename);
+    }
+
+    function filenameStem(filename) {
+      return String(filename || "").replace(/\.json$/i, "");
+    }
+
     function escapeHtml(value) {
       return String(value)
         .replaceAll("&", "&amp;")
@@ -1103,10 +1170,13 @@
     $("rightRailBtn").addEventListener("click", () => setRightCollapsed(false));
     $("treeSelect").addEventListener("change", () => loadState($("treeSelect").value));
     $("treeTitleInput").addEventListener("input", () => updateInputSummary());
+    $("treeJsonInput").addEventListener("input", () => {
+      state.jsonDirty = true;
+    });
+    $("refreshSavedBtn").addEventListener("click", refreshSavedFiles);
     $("renderBtn").addEventListener("click", renderFromInput);
     $("syncJsonBtn").addEventListener("click", syncJsonFromMap);
     $("saveBtn").addEventListener("click", saveTree);
-    $("reloadBtn").addEventListener("click", () => loadState($("treeSelect").value || $("treeTitleInput").value || state.selectedTitle));
     $("fitBtn").addEventListener("click", fitMap);
     $("expandBtn").addEventListener("click", expandAll);
     $("collapseBtn").addEventListener("click", collapseAll);
