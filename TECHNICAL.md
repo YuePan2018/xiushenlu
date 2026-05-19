@@ -64,15 +64,15 @@ conda run --no-capture-output -n xiushenlu python app/main.py cost
 conda run --no-capture-output -n xiushenlu python app/main.py console
 ```
 
-控制台目前支持查看 daily、查看今日待办、保存今日待办、打开待办文件、写入记录、生成计划、日内局部更新、生成复盘、停止当前 LLM 操作、手动 token 统计、小红书图文发布和长期任务树工作树编辑。首页日期右侧的菜单可进入 `/xhs` 发布页和 `/task-tree` 长期任务树页。自动化、通知、审批、工具和知识区域只预留布局。
+控制台目前支持查看 daily、查看今日待办、保存今日待办、打开待办文件、写入记录、生成计划、日内局部更新、生成复盘、停止当前 LLM 操作、手动 token 统计、小红书图文发布和工作树编辑。首页日期右侧的菜单可进入 `/xhs` 发布页和 `/task-tree` 工作树页。自动化、通知、审批、工具和知识区域只预留布局。
 
 控制台里的“保存待办”和“生成计划”是两个独立动作：“保存待办”只写入 `data/user_inputs/today_tasks.md`，不调用 LLM；“生成计划”等价于 `python app/main.py plan`。
 
 控制台里的“停止”是防误点的 v1 语义：它不会强行中断 DashScope SDK 正在进行的同步网络调用，但会标记当前操作为取消；如果 LLM 稍后返回，后端会在写入 daily、`today_tasks.md` 或事件日志前丢弃结果。同一时间后端只允许一个 LLM 操作运行。
 
-长期任务树页不调用 LLM。`/task-tree` 使用本地 vendored SimpleMindMap 以 `organizationStructure` 布局加载任务树 JSON，支持根在上、叶在下的矩形节点、拖拽、缩放、文本编辑、节点内容编辑和子树展开/收起。“已保存”只扫描 `paths.task_tree_dir` 根目录下的 `.json` 文件，不递归子目录；菜单以文件名 stem 展示，读取时使用完整文件名作为 key。选择文件会把保存标题设为文件名 stem，并把磁盘里的 JSON 原文加载到输入区；保存时会校验 JSON，并按保存标题写入 `data/task_tree/<标题>.json`，标题会清洗为合法 Windows 文件名，保存后刷新“已保存”列表并选中新文件。
+工作树页不调用 LLM。`/task-tree` 使用本地 vendored SimpleMindMap 以 `organizationStructure` 布局加载工作树 JSON，支持根在上、叶在下的矩形节点、拖拽、缩放、文本编辑、节点内容编辑和子树展开/收起。“选择文件”只扫描 `paths.task_tree_dir` 根目录下的 `.json` 文件，不递归子目录；菜单以文件名 stem 展示，读取时使用完整文件名作为 key。选择文件会把标题设为文件名 stem，并把磁盘里的 JSON 原文加载到输入区；保存时会校验 JSON，并按标题写入 `data/task_tree/<标题>.json`，标题会清洗为合法 Windows 文件名，保存后刷新文件列表并选中新文件。
 
-任务树 JSON 根对象需要包含 `title` 和 `nodes`，可选 `summary`。节点包含 `title`，可选 `id`、`content` 和 `children`；`children` 是子节点数组，可省略或为空。旧 JSON 中的 `note` 会在保存时迁移为 `content`，`kind`、`cadence`、`status`、`tags` 等旧节点标签字段会被丢弃。
+工作树 JSON 根对象需要包含 `title` 和 `nodes`，可选 `summary`。节点包含 `title`，可选 `id`、`content` 和 `children`；`children` 是子节点数组，可省略或为空。旧 JSON 中的 `note` 会在保存时迁移为 `content`，`kind`、`cadence`、`status`、`tags` 等旧节点标签字段会被丢弃。
 
 ## 桌面宠物
 
@@ -208,7 +208,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 | `llm.api_key_env` | 默认 `DASHSCOPE_API_KEY`，也可通过项目根目录 `.env` 加载。 |
 | `assistant.system_prompt` | Provider 发送给模型的 system prompt。 |
 | `paths.*` | daily、inbox、memory、logs、state、quarantine 等目录。 |
-| `paths.task_tree_dir` | 长期任务树 JSON 保存目录，默认 `data/task_tree`。 |
+| `paths.task_tree_dir` | 工作树 JSON 保存目录，默认 `data/task_tree`。 |
 | `paths.post_dir` | 小红书正文草稿目录，默认 `data/post/data`。 |
 | `paths.post_image_dir` | 小红书默认图片目录，默认 `data/post/images`。 |
 | `xiaohongshu.mcp_url` | 本地 `xiaohongshu-mcp` MCP 地址，默认 `http://localhost:18060/mcp`。 |
@@ -232,14 +232,14 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 | 文件 | 职责 |
 | --- | --- |
 | `app/main.py` | CLI 命令入口；加载配置；组装 Provider；调用 pipeline 或本地读写函数。 |
-| `app/console.py` | FastAPI 本地控制台；展示 daily 和 today_tasks；触发已有 plan/log/review 能力，并提供任务树/工作树页面路由。 |
+| `app/console.py` | FastAPI 本地控制台；展示 daily 和 today_tasks；触发已有 plan/log/review 能力，并提供工作树页面路由。 |
 | `app/pipelines/daily_plan.py` | 今日计划 pipeline；LLM 生成五列表格形式的任务管理表。 |
 | `app/pipelines/log_schedule_update.py` | 写入记录后的任务管理表更新 pipeline；LLM 返回状态和计时线索，代码重算并写入 `状态` 和 `用时` 两列。 |
 | `app/pipelines/plan_update.py` | 日内计划局部更新 pipeline；更新待办原文并给任务管理表追加一行，解析失败时停止写入。 |
 | `app/pipelines/nightly_review.py` | 晚间复盘 pipeline；当天复盘成功后滚动待办并清空 `明日计划.md`。 |
 | `app/posting/` | 小红书图文发布与封面生成适配：读取 `data/post/data` 草稿、校验参数、调用本地 MCP、调用 DashScope 图片模型并记录事件。 |
 | `app/desktop_pet/` | 桌宠素材下载校验、spritesheet 切片、位置状态和 Tkinter 透明窗口。 |
-| `app/task_tree.py` | 长期任务树 JSON 校验、标题文件名清洗和 `data/task_tree` 安全读写。 |
+| `app/task_tree.py` | 工作树 JSON 校验、标题文件名清洗和 `data/task_tree` 安全读写。 |
 | `app/daily.py` | daily Markdown 路径、读取、区块替换和记录追加。 |
 | `app/inbox.py` | `today_tasks.md` 和 `明日计划.md` 的读写封装。 |
 | `app/logger.py` | 按日 JSON Lines 事件追加和读取。 |
@@ -272,7 +272,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 
 - `data/user_inputs/today_tasks.md`：当前待办输入槽。
 - `data/user_inputs/明日计划.md`：明日计划暂存；当天 `review` 成功滚动后清空。
-- `data/task_tree/<标题>.json`：长期任务树页面保存的结构化拆分结果。
+- `data/task_tree/<标题>.json`：工作树页面保存的结构化拆分结果。
 - `data/user_records/YYYY-MM-DD.md`：人类可读 daily。
 - `data/system_logs/YYYY-MM-DD.jsonl`：机器可读事件流。
 

@@ -59,7 +59,7 @@ def read_task_tree(title: str, config: dict[str, Any] | None = None) -> TaskTree
     cfg = _task_tree_config(config)
     path = task_tree_path_for_title(title, cfg)
     if not path.exists():
-        raise TaskTreeError(f"任务树不存在：{path.name}")
+        raise TaskTreeError(f"工作树不存在：{path.name}")
     text = safe_read_text(path, cfg)
     tree, _ = normalize_task_tree_text(text)
     return TaskTreeDocument(
@@ -75,7 +75,7 @@ def read_task_tree_file(filename: str, config: dict[str, Any] | None = None) -> 
     cfg = _task_tree_config(config)
     path = task_tree_path_for_filename(filename, cfg)
     if not path.exists():
-        raise TaskTreeError(f"任务树不存在：{path.name}")
+        raise TaskTreeError(f"工作树不存在：{path.name}")
     text = safe_read_text(path, cfg)
     tree, _ = normalize_task_tree_text(text)
     return TaskTreeDocument(
@@ -123,7 +123,7 @@ def task_tree_path_for_filename(filename: str, config: dict[str, Any] | None = N
 def task_tree_filename(title: str) -> str:
     stem = _sanitize_filename_stem(title)
     if not stem:
-        raise TaskTreeError("任务树标题不能为空。")
+        raise TaskTreeError("工作树标题不能为空。")
     return f"{stem}.json"
 
 
@@ -136,11 +136,11 @@ def normalize_task_tree_text(text: str) -> tuple[dict[str, Any], str]:
 def parse_task_tree_text(text: str) -> dict[str, Any]:
     source = _strip_json_fence(text)
     if not source.strip():
-        raise TaskTreeError("任务树 JSON 不能为空。")
+        raise TaskTreeError("工作树 JSON 不能为空。")
     try:
         data = json.loads(source)
     except json.JSONDecodeError as exc:
-        raise TaskTreeError(f"任务树 JSON 解析失败：{exc.msg}") from exc
+        raise TaskTreeError(f"工作树 JSON 解析失败：{exc.msg}") from exc
     return _normalize_tree(data)
 
 
@@ -161,12 +161,12 @@ def _task_tree_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
 
 def _normalize_tree(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict):
-        raise TaskTreeError("任务树根节点必须是 JSON 对象。")
+        raise TaskTreeError("工作树根节点必须是 JSON 对象。")
 
-    title = _required_text(data, "title", "任务树标题")
+    title = _required_text(data, "title", "工作树标题")
     nodes_value = data.get("nodes")
     if not isinstance(nodes_value, list):
-        raise TaskTreeError("任务树必须包含 nodes 数组。")
+        raise TaskTreeError("工作树必须包含 nodes 数组。")
 
     normalized: dict[str, Any] = {
         "version": int(data.get("version", 1)),
@@ -244,10 +244,10 @@ def _sanitize_filename_stem(title: str) -> str:
 def _validate_task_tree_filename(filename: str) -> str:
     value = filename.strip()
     if not value:
-        raise TaskTreeError("任务树文件名不能为空。")
+        raise TaskTreeError("工作树文件名不能为空。")
     path = Path(value)
     if path.name != value or path.suffix.lower() != ".json":
-        raise TaskTreeError("任务树文件名必须是 task_tree 根目录下的 JSON 文件。")
+        raise TaskTreeError("工作树文件名必须是 task_tree 根目录下的 JSON 文件。")
     return value
 
 

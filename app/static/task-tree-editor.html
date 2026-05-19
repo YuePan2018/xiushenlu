@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>长期任务树 - 修身炉</title>
+  <title>工作树 - 修身炉</title>
   <link rel="stylesheet" href="/static/vendor/simple-mind-map-0.14.0-fix.2/simpleMindMap.esm.min.css">
   <style>
     :root {
@@ -324,7 +324,8 @@
     }
 
     .source-divider {
-      height: 1px;
+      height: 3px;
+      border-radius: 999px;
       background: var(--line);
     }
 
@@ -620,7 +621,7 @@
   <header>
     <div class="bar">
       <div>
-        <h1>长期任务树</h1>
+        <h1>工作树</h1>
         <div class="meta">工作树视图</div>
       </div>
       <div class="row">
@@ -642,8 +643,8 @@
         <div class="task-source-block">
           <div>
             <div class="field-label-row">
-              <label for="treeSelect">已保存</label>
-              <button class="icon-button" id="refreshSavedBtn" type="button" title="刷新已保存" aria-label="刷新已保存">
+              <label for="treeSelect">选择文件</label>
+              <button class="icon-button" id="refreshSavedBtn" type="button" title="刷新文件列表" aria-label="刷新文件列表">
                 <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                   <path d="M21 12a9 9 0 0 1-15.36 6.36M3 12A9 9 0 0 1 18.36 5.64" stroke-width="2" stroke-linecap="round"/>
                   <path d="M21 5v7h-7M3 19v-7h7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -656,7 +657,7 @@
         <div class="source-divider" aria-hidden="true"></div>
         <div class="task-edit-block">
           <div>
-            <label for="treeTitleInput">保存标题</label>
+            <label for="treeTitleInput">标题</label>
             <input id="treeTitleInput" name="task-tree-title" type="text" autocomplete="off" spellcheck="false" placeholder="例如：修身炉长期任务…">
           </div>
           <details class="input-panel" id="inputPanel">
@@ -669,7 +670,7 @@
             </summary>
             <div class="input-body">
               <div>
-                <label for="treeJsonInput">任务树 JSON</label>
+                <label for="treeJsonInput">工作树 JSON</label>
                 <textarea id="treeJsonInput" name="task-tree-json" autocomplete="off" spellcheck="false" placeholder="粘贴 JSON…"></textarea>
               </div>
               <div class="row">
@@ -756,7 +757,7 @@
     }
 
     function updateInputSummary(text = "") {
-      const title = text || $("treeTitleInput").value.trim() || filenameStem(state.selectedFilename) || "未命名任务树";
+      const title = text || $("treeTitleInput").value.trim() || filenameStem(state.selectedFilename) || "未命名工作树";
       $("inputSummary").textContent = title;
       $("canvasLabel").textContent = title;
     }
@@ -832,7 +833,7 @@
       const match = stripped.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
       const source = match ? match[1].trim() : stripped;
       if (!source) {
-        throw new Error("任务树 JSON 不能为空。");
+        throw new Error("工作树 JSON 不能为空。");
       }
       return JSON.parse(source);
     }
@@ -949,7 +950,7 @@
       return {
         data: {
           uid: "root",
-          text: tree.title || "未命名任务树",
+          text: tree.title || "未命名工作树",
           expand: true,
           _xiushenlu: {
             root: true,
@@ -1003,7 +1004,7 @@
     function mindRootToTaskTree(root) {
       const data = root && root.data ? root.data : {};
       const meta = data._xiushenlu || {};
-      const title = normalizeText(data.text, "未命名任务树");
+      const title = normalizeText(data.text, "未命名工作树");
       return {
         version: Number(meta.version || 1),
         title,
@@ -1113,7 +1114,7 @@
           }),
         });
         renderState(data.state);
-        setStatus(data.message || "任务树已保存。", "ok");
+        setStatus(data.message || "工作树已保存。", "ok");
       } catch (error) {
         setStatus(error.message, "error");
       } finally {

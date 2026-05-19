@@ -99,7 +99,7 @@ class TaskTreeTests(unittest.TestCase):
         )
 
     def test_parse_task_tree_requires_title_and_nodes(self) -> None:
-        with self.assertRaisesRegex(TaskTreeError, "任务树标题"):
+        with self.assertRaisesRegex(TaskTreeError, "工作树标题"):
             parse_task_tree_text('{"nodes": []}')
         with self.assertRaisesRegex(TaskTreeError, "nodes 数组"):
             parse_task_tree_text('{"title": "缺少节点"}')

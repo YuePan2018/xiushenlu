@@ -142,7 +142,7 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn('aria-haspopup="menu"', html)
             self.assertIn('class="menu-icon" aria-hidden="true"', html)
             self.assertNotIn("<span>发布</span>", html)
-            self.assertIn('href="/task-tree">长期任务树</a>', html)
+            self.assertIn('href="/task-tree">工作树</a>', html)
             self.assertNotIn('href="/task-tree/edit"', html)
             self.assertIn('href="/xhs">发布小红书</a>', html)
             self.assertIn('width: 132px;', html)
@@ -172,7 +172,7 @@ class ConsoleTests(unittest.TestCase):
 
             self.assertEqual(response.status_code, 200)
             html = response.text
-            self.assertIn("长期任务树", html)
+            self.assertIn("工作树", html)
             self.assertIn("工作树视图", html)
             self.assertIn("/static/vendor/simple-mind-map-0.14.0-fix.2/simpleMindMap.umd.min.js", html)
             self.assertIn("/static/vendor/simple-mind-map-0.14.0-fix.2/simpleMindMap.esm.min.css", html)
@@ -194,7 +194,9 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn('class="source-actions"', html)
             self.assertIn(">保存到本地</button>", html)
             self.assertIn('id="refreshSavedBtn"', html)
-            self.assertIn('aria-label="刷新已保存"', html)
+            self.assertIn(">选择文件</label>", html)
+            self.assertIn(">标题</label>", html)
+            self.assertIn('aria-label="刷新文件列表"', html)
             self.assertNotIn('id="reloadBtn"', html)
             self.assertNotIn(">重读</button>", html)
             self.assertLess(html.index('id="treeSelect"'), html.index('class="source-divider"'))
