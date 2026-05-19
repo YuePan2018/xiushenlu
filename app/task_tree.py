@@ -10,9 +10,6 @@ from app.config import load_config, resolve_project_path
 from app.safety import safe_read_text, safe_write_text, validate_path
 
 
-ALLOWED_KINDS = {"phase", "milestone", "task", "habit", "checkpoint"}
-ALLOWED_CADENCES = {"none", "daily", "weekly", "monthly", "phase", "one_off"}
-ALLOWED_STATUSES = {"todo", "doing", "done", "paused"}
 DEFAULT_TASK_TREE_DIR = "data/task_tree"
 
 
@@ -162,9 +159,6 @@ def _normalize_node(data: Any, path: str) -> dict[str, Any]:
         raise TaskTreeError(f"{path} 必须是 JSON 对象。")
 
     title = _required_text(data, "title", f"{path}.title")
-    kind = _enum_text(data.get("kind", "task"), ALLOWED_KINDS, f"{path}.kind")
-    cadence = _enum_text(data.get("cadence", "none"), ALLOWED_CADENCES, f"{path}.cadence")
-    status = _enum_text(data.get("status", "todo"), ALLOWED_STATUSES, f"{path}.status")
     children_value = data.get("children", [])
     if not isinstance(children_value, list):
         raise TaskTreeError(f"{path}.children 必须是数组。")
@@ -172,16 +166,16 @@ def _normalize_node(data: Any, path: str) -> dict[str, Any]:
     normalized: dict[str, Any] = {
         "id": _optional_text(data.get("id")) or _fallback_node_id(path),
         "title": title,
-        "kind": kind,
-        "cadence": cadence,
-        "status": status,
-        "note": _optional_text(data.get("note")),
-        "tags": _normalize_tags(data.get("tags", []), path),
-        "children": [
-            _normalize_node(child, f"{path}.children[{index}]")
-            for index, child in enumerate(children_value)
-        ],
     }
+    content = _optional_node_content(data)
+    if content:
+        normalized["content"] = content
+    children = [
+        _normalize_node(child, f"{path}.children[{index}]")
+        for index, child in enumerate(children_value)
+    ]
+    if children:
+        normalized["children"] = children
     return normalized
 
 
@@ -200,29 +194,10 @@ def _optional_text(value: Any) -> str:
     return value.strip()
 
 
-def _enum_text(value: Any, allowed: set[str], label: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise TaskTreeError(f"{label} 不能为空。")
-    normalized = value.strip()
-    if normalized not in allowed:
-        options = ", ".join(sorted(allowed))
-        raise TaskTreeError(f"{label} 只能是：{options}。")
-    return normalized
-
-
-def _normalize_tags(value: Any, path: str) -> list[str]:
-    if value is None:
-        return []
-    if not isinstance(value, list):
-        raise TaskTreeError(f"{path}.tags 必须是字符串数组。")
-    tags: list[str] = []
-    for index, item in enumerate(value):
-        if not isinstance(item, str):
-            raise TaskTreeError(f"{path}.tags[{index}] 必须是字符串。")
-        tag = item.strip()
-        if tag:
-            tags.append(tag)
-    return tags
+def _optional_node_content(data: dict[str, Any]) -> str:
+    if "content" in data:
+        return _optional_text(data.get("content"))
+    return _optional_text(data.get("note"))
 
 
 def _strip_json_fence(text: str) -> str:

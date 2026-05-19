@@ -2157,25 +2157,17 @@ CONSOLE_HTML = f"""<!doctype html>
 TASK_TREE_SAMPLE_JSON = """{
   "version": 1,
   "title": "示例长期任务",
-  "summary": "把一个长期目标拆成阶段、检查点、任务和习惯。",
+  "summary": "把一个长期目标拆成可继续推进的层级。",
   "nodes": [
     {
       "id": "phase-1",
       "title": "第一阶段：明确方向",
-      "kind": "phase",
-      "cadence": "phase",
-      "status": "todo",
-      "note": "先把目标边界、资料和验收标准定清楚。",
-      "tags": ["阶段性"],
+      "content": "先把目标边界、资料和验收标准定清楚。",
       "children": [
         {
           "id": "daily-review",
           "title": "每天记录 10 分钟推进情况",
-          "kind": "habit",
-          "cadence": "daily",
-          "status": "todo",
-          "tags": ["每日重复"],
-          "children": []
+          "content": "记录今天推进了什么、卡在哪里、下一步是什么。"
         }
       ]
     }
@@ -2411,36 +2403,11 @@ TASK_TREE_HTML = """<!doctype html>
       font-weight: 680;
       overflow-wrap: anywhere;
     }
-    .node-note {
+    .node-content {
       margin-top: 3px;
       color: var(--muted);
       font-size: 13px;
       overflow-wrap: anywhere;
-    }
-    .badges {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 5px;
-      margin-top: 5px;
-    }
-    .badge {
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: var(--surface-2);
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.2;
-      padding: 3px 7px;
-    }
-    .badge.daily {
-      border-color: rgba(123, 77, 151, 0.3);
-      background: rgba(123, 77, 151, 0.1);
-      color: var(--habit);
-    }
-    .badge.phase {
-      border-color: rgba(138, 90, 34, 0.3);
-      background: rgba(138, 90, 34, 0.1);
-      color: var(--phase);
     }
     .empty-tree {
       color: var(--muted);
@@ -2509,27 +2476,6 @@ TASK_TREE_HTML = """<!doctype html>
     const state = {
       busy: false,
       sample: "",
-    };
-    const kindLabels = {
-      phase: "阶段",
-      milestone: "里程碑",
-      task: "任务",
-      habit: "习惯",
-      checkpoint: "检查点",
-    };
-    const cadenceLabels = {
-      none: "",
-      daily: "每日重复",
-      weekly: "每周重复",
-      monthly: "每月重复",
-      phase: "阶段性",
-      one_off: "一次性",
-    };
-    const statusLabels = {
-      todo: "待办",
-      doing: "进行中",
-      done: "完成",
-      paused: "暂停",
     };
 
     function setBusy(value) {
@@ -2651,40 +2597,18 @@ TASK_TREE_HTML = """<!doctype html>
     function renderNode(node) {
       const children = Array.isArray(node.children) ? node.children : [];
       const hasChildren = children.length > 0;
-      const badges = nodeBadges(node);
       return `
         <li class="tree-node ${hasChildren ? "has-children" : ""}">
           <div class="node-row" role="${hasChildren ? "button" : "group"}" tabindex="0" aria-expanded="${hasChildren ? "true" : "false"}">
             <span class="twisty" aria-hidden="true"></span>
             <div>
               <div class="node-title">${escapeHtml(node.title || "未命名节点")}</div>
-              ${node.note ? `<div class="node-note">${escapeHtml(node.note)}</div>` : ""}
-              ${badges ? `<div class="badges">${badges}</div>` : ""}
+              ${node.content ? `<div class="node-content">${escapeHtml(node.content)}</div>` : ""}
             </div>
           </div>
           ${hasChildren ? `<ul class="tree-list">${children.map(renderNode).join("")}</ul>` : ""}
         </li>
       `;
-    }
-
-    function nodeBadges(node) {
-      const values = [];
-      const kind = kindLabels[node.kind] || node.kind || "";
-      const cadence = cadenceLabels[node.cadence] || node.cadence || "";
-      const status = statusLabels[node.status] || node.status || "";
-      if (kind) {
-        values.push({ text: kind, cls: node.kind === "phase" ? "phase" : "" });
-      }
-      if (cadence) {
-        values.push({ text: cadence, cls: node.cadence === "daily" ? "daily" : node.cadence === "phase" ? "phase" : "" });
-      }
-      if (status) {
-        values.push({ text: status, cls: "" });
-      }
-      for (const tag of Array.isArray(node.tags) ? node.tags : []) {
-        values.push({ text: tag, cls: tag.includes("每日") ? "daily" : tag.includes("阶段") ? "phase" : "" });
-      }
-      return values.map((item) => `<span class="badge ${item.cls}">${escapeHtml(item.text)}</span>`).join("");
     }
 
     function renderEmptyTree(text) {

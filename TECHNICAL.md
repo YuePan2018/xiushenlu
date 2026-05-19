@@ -62,9 +62,9 @@ conda run --no-capture-output -n xiushenlu python app/main.py console
 
 控制台里的“停止”是防误点的 v1 语义：它不会强行中断 DashScope SDK 正在进行的同步网络调用，但会标记当前操作为取消；如果 LLM 稍后返回，后端会在写入 daily、`today_tasks.md` 或事件日志前丢弃结果。同一时间后端只允许一个 LLM 操作运行。
 
-长期任务树页不调用 LLM。用户把 Codex 拆分出的固定 JSON 粘贴到 `/task-tree`，填写保存标题后，后端会校验 JSON 并写入 `data/task_tree/<标题>.json`；标题会清洗为合法 Windows 文件名。页面按节点的 `kind`、`cadence`、`status` 和 `tags` 渲染标签，例如每日重复和阶段性，每个有子节点的节点都可点击展开或收起。`/task-tree/edit` 使用本地 vendored SimpleMindMap 以 `organizationStructure` 布局加载同一份 JSON，支持根在上、叶在下的矩形节点、拖拽、缩放、文本编辑和子树展开/收起；保存时会转换回标准任务树 JSON 并复用同一后端接口。
+长期任务树页不调用 LLM。用户把 Codex 拆分出的固定 JSON 粘贴到 `/task-tree`，填写保存标题后，后端会校验 JSON 并写入 `data/task_tree/<标题>.json`；标题会清洗为合法 Windows 文件名。页面按节点层级渲染 `title` 和 `content`，每个有子节点的节点都可点击展开或收起。`/task-tree/edit` 使用本地 vendored SimpleMindMap 以 `organizationStructure` 布局加载同一份 JSON，支持根在上、叶在下的矩形节点、拖拽、缩放、文本编辑和子树展开/收起；保存时会转换回标准任务树 JSON 并复用同一后端接口。
 
-任务树 JSON 根对象需要包含 `title` 和 `nodes`。节点的 `kind` 支持 `phase`、`milestone`、`task`、`habit`、`checkpoint`；`cadence` 支持 `none`、`daily`、`weekly`、`monthly`、`phase`、`one_off`；`status` 支持 `todo`、`doing`、`done`、`paused`。`children` 是子节点数组，可为空。
+任务树 JSON 根对象需要包含 `title` 和 `nodes`，可选 `summary`。节点包含 `title`，可选 `id`、`content` 和 `children`；`children` 是子节点数组，可省略或为空。旧 JSON 中的 `note` 会在保存时迁移为 `content`，`kind`、`cadence`、`status`、`tags` 等旧节点标签字段会被丢弃。
 
 ## 桌面宠物
 

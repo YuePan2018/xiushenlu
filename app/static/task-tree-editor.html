@@ -264,9 +264,6 @@
   </main>
   <script>
     const $ = (id) => document.getElementById(id);
-    const allowedKinds = new Set(["phase", "milestone", "task", "habit", "checkpoint"]);
-    const allowedCadences = new Set(["none", "daily", "weekly", "monthly", "phase", "one_off"]);
-    const allowedStatuses = new Set(["todo", "doing", "done", "paused"]);
     const state = {
       busy: false,
       sample: "",
@@ -459,14 +456,8 @@
         data: {
           uid: node.id || fallbackId,
           text: node.title || "未命名节点",
-          note: node.note || "",
-          tag: Array.isArray(node.tags) ? node.tags : [],
+          note: node.content || node.note || "",
           expand: true,
-          _xiushenlu: {
-            kind: normalizeEnum(node.kind, allowedKinds, "task"),
-            cadence: normalizeEnum(node.cadence, allowedCadences, "none"),
-            status: normalizeEnum(node.status, allowedStatuses, "todo"),
-          },
         },
         children: children.map((child, index) => taskNodeToMindNode(child, `${fallbackId}-${index}`)),
       };
@@ -488,23 +479,20 @@
 
     function mindNodeToTaskNode(node, fallbackId) {
       const data = node && node.data ? node.data : {};
-      const meta = data._xiushenlu || {};
       const children = Array.isArray(node.children) ? node.children : [];
-      return {
+      const taskNode = {
         id: safeNodeId(data.uid || fallbackId, fallbackId),
         title: normalizeText(data.text, "未命名节点"),
-        kind: normalizeEnum(meta.kind, allowedKinds, "task"),
-        cadence: normalizeEnum(meta.cadence, allowedCadences, "none"),
-        status: normalizeEnum(meta.status, allowedStatuses, "todo"),
-        note: normalizeText(data.note || "", ""),
-        tags: Array.isArray(data.tag) ? data.tag.map((tag) => String(tag).trim()).filter(Boolean) : [],
-        children: children.map((child, index) => mindNodeToTaskNode(child, `${fallbackId}-${index}`)),
       };
-    }
-
-    function normalizeEnum(value, allowed, fallback) {
-      const text = String(value || "").trim();
-      return allowed.has(text) ? text : fallback;
+      const content = normalizeText(data.note || "", "");
+      if (content) {
+        taskNode.content = content;
+      }
+      const childNodes = children.map((child, index) => mindNodeToTaskNode(child, `${fallbackId}-${index}`));
+      if (childNodes.length) {
+        taskNode.children = childNodes;
+      }
+      return taskNode;
     }
 
     function normalizeText(value, fallback) {
@@ -571,14 +559,10 @@
       const meta = data._xiushenlu || {};
       const lines = [
         normalizeText(data.text, "未命名节点"),
-        meta.root ? "根节点" : `类型：${meta.kind || "task"}`,
+        meta.root ? "根节点" : "任务节点",
       ];
-      if (!meta.root) {
-        lines.push(`状态：${meta.status || "todo"}`);
-        lines.push(`周期：${meta.cadence || "none"}`);
-      }
       if (data.note) {
-        lines.push(`备注：${data.note}`);
+        lines.push(`${meta.root ? "摘要" : "内容"}：${data.note}`);
       }
       $("nodePreview").textContent = lines.join("\n");
     }

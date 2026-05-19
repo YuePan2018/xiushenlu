@@ -182,8 +182,11 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn('id="expandBtn"', html)
             self.assertIn('id="collapseBtn"', html)
             self.assertIn("/api/task-tree", html)
-            self.assertIn("每日重复", html)
-            self.assertIn("阶段性", html)
+            self.assertIn("node.content", html)
+            self.assertIn("node-content", html)
+            self.assertNotIn("nodeBadges", html)
+            self.assertNotIn("每日重复", html)
+            self.assertNotIn("阶段性", html)
 
     def test_task_tree_editor_page_uses_simple_mind_map(self) -> None:
         with _temporary_directory() as temp_dir:

@@ -18,7 +18,7 @@ from app.task_tree import (
 
 
 class TaskTreeTests(unittest.TestCase):
-    def test_parse_task_tree_accepts_fenced_json_and_defaults_node_fields(self) -> None:
+    def test_parse_task_tree_accepts_fenced_json_and_drops_node_metadata(self) -> None:
         tree = parse_task_tree_text(
             """```json
 {
@@ -30,6 +30,9 @@ class TaskTreeTests(unittest.TestCase):
       "title": "每天写 500 字",
       "kind": "habit",
       "cadence": "daily",
+      "status": "doing",
+      "note": "旧版节点说明",
+      "tags": ["每日重复"],
       "children": []
     }
   ]
@@ -39,30 +42,60 @@ class TaskTreeTests(unittest.TestCase):
 
         self.assertEqual(tree["title"], "写一本书")
         node = tree["nodes"][0]
+        self.assertEqual(
+            node,
+            {
+                "id": "nodes-0",
+                "title": "每天写 500 字",
+                "content": "旧版节点说明",
+            },
+        )
         self.assertEqual(node["title"], "每天写 500 字")
-        self.assertEqual(node["kind"], "habit")
-        self.assertEqual(node["cadence"], "daily")
-        self.assertEqual(node["status"], "todo")
-        self.assertEqual(node["children"], [])
 
-    def test_parse_task_tree_rejects_unknown_labels(self) -> None:
-        with self.assertRaisesRegex(TaskTreeError, "nodes\\[0\\]\\.cadence"):
-            parse_task_tree_text(
-                json.dumps(
-                    {
-                        "title": "长期计划",
-                        "nodes": [
-                            {
-                                "title": "错误周期",
-                                "kind": "task",
-                                "cadence": "yearly",
-                                "children": [],
-                            }
-                        ],
-                    },
-                    ensure_ascii=False,
-                )
+    def test_parse_task_tree_keeps_children_as_structure_only(self) -> None:
+        tree = parse_task_tree_text(
+            json.dumps(
+                {
+                    "title": "长期计划",
+                    "nodes": [
+                        {
+                            "id": "parent",
+                            "title": "父节点",
+                            "content": "父节点正文",
+                            "kind": "phase",
+                            "children": [
+                                {
+                                    "id": "child",
+                                    "title": "子节点",
+                                    "content": "子节点正文",
+                                    "status": "done",
+                                    "children": [],
+                                }
+                            ],
+                        }
+                    ],
+                },
+                ensure_ascii=False,
             )
+        )
+
+        self.assertEqual(
+            tree["nodes"],
+            [
+                {
+                    "id": "parent",
+                    "title": "父节点",
+                    "content": "父节点正文",
+                    "children": [
+                        {
+                            "id": "child",
+                            "title": "子节点",
+                            "content": "子节点正文",
+                        }
+                    ],
+                }
+            ],
+        )
 
     def test_parse_task_tree_requires_title_and_nodes(self) -> None:
         with self.assertRaisesRegex(TaskTreeError, "任务树标题"):
@@ -101,6 +134,7 @@ class TaskTreeTests(unittest.TestCase):
             self.assertEqual(saved.filename, "用户给的标题.json")
             self.assertEqual(loaded.title, "用户给的标题")
             self.assertEqual(loaded.tree["title"], "JSON 内标题")
+            self.assertEqual(loaded.tree["nodes"], [{"id": "nodes-0", "title": "阶段一"}])
             self.assertTrue(saved.path.exists())
             self.assertEqual(items[0].filename, "用户给的标题.json")
 
