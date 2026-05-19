@@ -278,6 +278,26 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 
 ## 验证建议
 
+### 长驻服务验证
+
+验证网页、MCP、本地 API 或需要 dev server 的功能前，先检查现场，不要直接启动或重启服务：
+
+```powershell
+netstat -ano | Select-String -Pattern ":8765"
+Get-Process -Name python,conda,node -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,StartTime,Path
+```
+
+如果目标端口已有监听，先向用户说明端口、PID 和可能来源，并询问是复用、关闭重启还是换端口。未得到明确同意前，不关闭、不重启、不抢占端口。
+
+优先使用会自动退出的验证方式：
+
+- `conda run -n xiushenlu python -m unittest ...`
+- FastAPI `TestClient`
+- 静态 HTML / JS 字符串检查
+- 对已存在服务的只读 API 请求
+
+确实必须临时启动 `uvicorn`、dev server、watch 或 MCP 时，先说明端口，记录 PID，验证结束后清理。不要用普通同步 shell 调用直接运行长驻命令，也不要依赖 `timeout_ms` 防卡住；一次启动卡住后，停止同类重试，先向用户汇报。
+
 不需要 LLM 的文档或本地逻辑改动至少跑：
 
 ```powershell

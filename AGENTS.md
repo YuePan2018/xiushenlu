@@ -81,6 +81,9 @@
 - 运行可能输出中文的 Python / conda 命令时，先设置 `$env:PYTHONUTF8 = "1"` 和 `$env:PYTHONIOENCODING = "utf-8"`；使用 `conda run` 时优先加 `--no-capture-output`。
 - 后续 agent 或自动化运行 Python/验证命令时，默认使用 `conda run -n xiushenlu python ...`，不要直接使用裸 `python ...`。
 - 不要假设 `conda activate xiushenlu` 会跨工具调用或跨 shell 生效；如果使用 `conda activate`，必须和实际 Python 命令放在同一条 PowerShell 调用中。
+- 启动 dev server、`uvicorn`、watch、MCP 或其他长驻程序前，必须先用 PowerShell 检查目标端口和相关进程；如果已有运行实例，先向用户汇报端口、PID 和可能来源，获得明确同意后才能关闭、重启或改端口。
+- 验证网页或本地服务时，默认优先使用会自动退出的方式，例如 `unittest`、FastAPI `TestClient`、静态 HTML 检查或 API 请求检查；不要把启动长驻服务作为默认验证步骤。
+- 如果确实需要临时启动长驻程序，必须先说明使用端口，记录 PID，验证结束后清理；不能依赖 `timeout_ms` 兜底，也不能在一次启动卡住后换同类命令反复重试。
 - 文档改动通常不需要跑 Python 测试；代码或 pipeline 改动按 `TECHNICAL.md` 的验证建议执行。
 
 ## Codex 测试失败记录
