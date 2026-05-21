@@ -73,6 +73,32 @@ class NightlyReviewTests(unittest.TestCase):
         self.assertIn("完成复盘", parsed.review)
         self.assertIn("规划下一进度", parsed.next_today_tasks)
 
+    def test_parse_nightly_review_response_drops_task_management_table(self) -> None:
+        parsed = parse_nightly_review_response(
+            json.dumps(
+                {
+                    "review": "完成了什么\n- 完成复盘",
+                    "next_today_tasks": (
+                        "【学习】\n"
+                        "1. codex子代理\n\n"
+                        "**任务管理**\n"
+                        "| 任务 | 优先级 | 预计 | 状态 | 用时 |\n"
+                        "|---|---|---|---|---|\n"
+                        "| codex子代理 | P1 | 1h | ○ | |\n"
+                        "总工作时长预估为1小时。\n\n"
+                        "【杂事】\n"
+                        "1. 每日沟通\n"
+                    ),
+                },
+                ensure_ascii=False,
+            )
+        )
+
+        self.assertEqual(parsed.next_today_tasks, "【学习】\n1. codex子代理\n\n【杂事】\n1. 每日沟通")
+        self.assertNotIn("任务管理", parsed.next_today_tasks)
+        self.assertNotIn("总工作时长", parsed.next_today_tasks)
+        self.assertNotIn("|", parsed.next_today_tasks)
+
     def test_review_prompts_share_review_requirements(self) -> None:
         daily_text = (
             "# 2026-05-16\n\n"
@@ -108,6 +134,8 @@ class NightlyReviewTests(unittest.TestCase):
         self.assertIn("next_today_tasks", rollover_prompt)
         self.assertIn("明日计划.md（只用于 next_today_tasks，不用于 review）", rollover_prompt)
         self.assertIn("禁止从记录内容新增、派生或沉淀任务", rollover_prompt)
+        self.assertIn("必须使用“【分组】”加编号列表", rollover_prompt)
+        self.assertIn("禁止输出“任务管理”标题或任何 Markdown 表格", rollover_prompt)
 
     def test_daily_review_context_uses_original_tasks_snapshot(self) -> None:
         daily_text = (
@@ -133,6 +161,30 @@ class NightlyReviewTests(unittest.TestCase):
         self.assertIn("根据长期目标", context.plan_notes)
         self.assertIn("review会改today_tasks", context.records)
         self.assertNotIn("旧复盘不应进入上下文", context.records)
+
+    def test_daily_review_context_keeps_task_table_out_of_today_tasks(self) -> None:
+        daily_text = (
+            "# 2026-05-20\n\n"
+            "## 计划\n\n"
+            "**今日待办**\n\n"
+            "【学习】\n"
+            "1. codex子代理\n\n"
+            "**任务管理**\n"
+            "| 任务 | 优先级 | 预计 | 状态 | 用时 |\n"
+            "|---|---|---|---|---|\n"
+            "| codex子代理 | P1 | 1h | ○ | |\n\n"
+            "总工作时长预估为1小时。\n\n"
+            "## 记录\n\n"
+            "- 10:00 做了别的事\n"
+        )
+
+        context = _build_daily_review_context(daily_text)
+
+        self.assertIn("codex子代理", context.today_tasks)
+        self.assertNotIn("任务管理", context.today_tasks)
+        self.assertNotIn("| 任务 | 优先级 |", context.today_tasks)
+        self.assertIn("任务管理", context.plan_notes)
+        self.assertIn("| codex子代理 | P1 | 1h | ○ | |", context.plan_notes)
 
     def test_today_review_rolls_over_tasks_and_clears_tomorrow_plan(self) -> None:
         with _temporary_directory() as temp_dir:
@@ -268,7 +320,7 @@ class NightlyReviewTests(unittest.TestCase):
 
             saved_tasks = today_tasks.read_text(encoding="utf-8")
             self.assertTrue(result.rolled_over)
-            self.assertEqual(saved_tasks, "修身炉：\n1. 未完成任务\n\n杂事：\n去浙大\n")
+            self.assertEqual(saved_tasks, "【修身炉】\n1. 未完成任务\n\n【杂事】\n1. 去浙大\n")
             self.assertNotIn("NotebookLM", saved_tasks)
             self.assertIn("去浙大", saved_tasks)
             self.assertEqual(tomorrow_plan.read_text(encoding="utf-8"), "")
@@ -316,7 +368,7 @@ class NightlyReviewTests(unittest.TestCase):
             self.assertEqual(result.today_tasks_path, today_tasks)
             self.assertIn("历史复盘", daily_file.read_text(encoding="utf-8"))
             self.assertNotIn("token 消耗统计", daily_file.read_text(encoding="utf-8"))
-            self.assertEqual(today_tasks.read_text(encoding="utf-8"), "旧任务\n明日输入\n")
+            self.assertEqual(today_tasks.read_text(encoding="utf-8"), "【待办】\n1. 旧任务\n2. 明日输入\n")
             self.assertEqual(tomorrow_plan.read_text(encoding="utf-8"), "")
             self.assertIn("严格 JSON", provider.prompts[0])
 
