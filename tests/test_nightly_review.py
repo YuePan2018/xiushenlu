@@ -136,6 +136,7 @@ class NightlyReviewTests(unittest.TestCase):
         self.assertIn("禁止从记录内容新增、派生或沉淀任务", rollover_prompt)
         self.assertIn("必须使用“【分组】”加编号列表", rollover_prompt)
         self.assertIn("禁止输出“任务管理”标题或任何 Markdown 表格", rollover_prompt)
+        self.assertIn("标题或分组为“日常”的任务代表每日重复", rollover_prompt)
 
     def test_daily_review_context_uses_original_tasks_snapshot(self) -> None:
         daily_text = (
@@ -326,6 +327,64 @@ class NightlyReviewTests(unittest.TestCase):
             self.assertEqual(tomorrow_plan.read_text(encoding="utf-8"), "")
             self.assertIn("学习 NotebookLM", provider.prompts[0])
             self.assertIn("如果不在“今日待办”中，也不能写入 next_today_tasks", provider.prompts[0])
+
+    def test_today_review_keeps_completed_recurring_daily_tasks(self) -> None:
+        with _temporary_directory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            config = _test_config(root)
+            today = date.today()
+            today_text = today.isoformat()
+            inbox = Path(config["paths"]["inbox_dir"])
+            daily_dir = Path(config["paths"]["daily_dir"])
+            inbox.mkdir(parents=True)
+            daily_dir.mkdir(parents=True)
+
+            today_tasks = inbox / "today_tasks.md"
+            tomorrow_plan = inbox / "明日计划.md"
+            daily_file = daily_dir / f"{today_text}.md"
+            today_tasks.write_text("# 今日待办\n\n旧槽\n", encoding="utf-8")
+            tomorrow_plan.write_text("", encoding="utf-8")
+            daily_file.write_text(
+                f"# {today_text}\n\n"
+                "## 计划\n\n"
+                "**今日待办**\n\n"
+                "【日常】\n"
+                "1. 喝水\n"
+                "2. 过期日常\n\n"
+                "【项目】\n"
+                "1. 未完成项目\n\n"
+                "**任务管理**\n"
+                "| 任务 | 优先级 | 预计 | 状态 | 用时 |\n"
+                "|---|---|---|---|---|\n"
+                "| 喝水 | P3 | 5m | ✓ |  |\n"
+                "| 过期日常 | P3 | 5m | × |  |\n"
+                "| 未完成项目 | P1 | 30m |  |  |\n\n"
+                "## 记录\n\n"
+                "- 10:00 喝水完成\n",
+                encoding="utf-8",
+            )
+            provider = FakeProvider(
+                json.dumps(
+                    {
+                        "review": "完成了什么\n- 喝水完成",
+                        "next_today_tasks": "项目：\n1. 未完成项目",
+                    },
+                    ensure_ascii=False,
+                )
+            )
+
+            result = generate_nightly_review(
+                provider,
+                config=config,
+                target_date=today,
+                logger=FakeLogger(),  # type: ignore[arg-type]
+            )
+
+            saved_tasks = today_tasks.read_text(encoding="utf-8")
+            self.assertTrue(result.rolled_over)
+            self.assertEqual(saved_tasks, "【项目】\n1. 未完成项目\n\n【日常】\n1. 喝水\n")
+            self.assertNotIn("过期日常", saved_tasks)
+            self.assertIn("标题或分组为“日常”的任务代表每日重复", provider.prompts[0])
 
     def test_historical_review_rolls_over_current_tasks_by_default(self) -> None:
         with _temporary_directory() as temp_dir:

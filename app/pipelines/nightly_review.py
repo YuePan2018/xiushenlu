@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -17,7 +18,10 @@ from app.inbox import (
 from app.llm.provider import LLMProvider
 from app.llm.usage import append_llm_call_event
 from app.logger import EventLogger
-from app.pipelines.today_tasks_format import format_today_tasks_snapshot
+from app.pipelines.today_tasks_format import (
+    EMPTY_TODAY_TASKS_PLACEHOLDER,
+    format_today_tasks_snapshot,
+)
 
 
 REQUIRED_ROLLOVER_KEYS = ("review", "next_today_tasks")
@@ -81,7 +85,7 @@ def generate_nightly_review(
         append_llm_call_event(event_logger, provider, "nightly_review")
         parsed = parse_nightly_review_response(raw_reply)
         review = parsed.review
-        next_today_tasks = parsed.next_today_tasks
+        next_today_tasks = _merge_recurring_daily_tasks(parsed.next_today_tasks, daily_context)
 
         path = write_daily_section("复盘", review, cfg, date_text, mode="replace")
         next_tasks_path = write_today_tasks(next_today_tasks, cfg)
@@ -189,7 +193,7 @@ def _build_rollover_prompt(
 你必须只输出一个严格 JSON 对象，不要使用代码块，不要输出解释文字。
 JSON 必须包含且只需要包含这些字符串字段：
 - review：晚间复盘正文，必须遵守下面的“复盘要求”。
-- next_today_tasks：新的完整 today_tasks.md 内容。只能由“任务管理”里的未完成计划任务和“明日计划.md”的显式内容组成；必须使用“【分组】”加编号列表；禁止输出“任务管理”标题或任何 Markdown 表格；不要输出任何 Markdown 标题行，禁止输出任何以 `#` 开头的标题行；不要生成口号、总结句或装饰性标题；不要判断优先级；未完成的任务，优先按“今日待办”的原小标题归类。
+- next_today_tasks：新的完整 today_tasks.md 内容。只能由“任务管理”里的未完成计划任务、“今日待办”里“日常”分组的每日重复任务，和“明日计划.md”的显式内容组成；必须使用“【分组】”加编号列表；禁止输出“任务管理”标题或任何 Markdown 表格；不要输出任何 Markdown 标题行，禁止输出任何以 `#` 开头的标题行；不要生成口号、总结句或装饰性标题；不要判断优先级；未完成的任务，优先按“今日待办”的原小标题归类。
 
 复盘要求：
 {_build_review_requirements()}
@@ -198,7 +202,8 @@ JSON 必须包含且只需要包含这些字符串字段：
 
 判断未完成任务的规则：
 - 今日记录只作为完成证据、取消证据或 review 分析依据；禁止从记录内容新增、派生或沉淀任务。记录里的临时任务、开始做某事，如果不在“今日待办”中，也不能写入 next_today_tasks。
-- 计划表“状态”列为“×”的任务，表示已删除或取消；“状态”列为“✓”表示已经完成；两者都不能写入 next_today_tasks。
+- 今日待办里标题或分组为“日常”的任务代表每日重复；即使计划表“状态”列为“✓”表示今天已完成，仍必须继续写入 next_today_tasks 的“日常”分组。
+- 计划表“状态”列为“×”的任务，表示已删除或取消，不能写入 next_today_tasks；非“日常”任务的“状态”列为“✓”表示已经完成，也不能写入 next_today_tasks。
 - 如果今天没有未完成任务且明日计划也为空，next_today_tasks 仍输出完整 today_tasks.md，保留中文分组风格或写出空任务占位，但不要输出“任务管理”标题或任何 Markdown 表格，不要输出任何 Markdown 标题行，禁止输出任何以 `#` 开头的标题行，也不要生成新的口号。
 - 生成 review 时不要引用“明日计划.md”；明日计划只允许用于生成 next_today_tasks。
 
@@ -320,6 +325,161 @@ def _looks_like_plan_notes_heading(line: str) -> bool:
 
 def _normalize_next_today_tasks(text: str) -> str:
     return format_today_tasks_snapshot(_drop_markdown_tables(text))
+
+
+def _merge_recurring_daily_tasks(next_today_tasks: str, daily_context: DailyReviewContext) -> str:
+    recurring_items = _extract_recurring_daily_items(daily_context.today_tasks)
+    if not recurring_items:
+        return next_today_tasks
+
+    base_next_today_tasks = (
+        "" if next_today_tasks.strip() == EMPTY_TODAY_TASKS_PLACEHOLDER else next_today_tasks
+    )
+    canceled_tasks = _extract_task_statuses(daily_context.plan_notes, target_status="×")
+    existing_items = _extract_task_items(base_next_today_tasks)
+    additions = [
+        item
+        for item in recurring_items
+        if _task_key(item) not in canceled_tasks and _task_key(item) not in existing_items
+    ]
+    if not additions:
+        return next_today_tasks
+
+    recurring_block = "\n".join(
+        ["【日常】", *(f"{index}. {item}" for index, item in enumerate(additions, start=1))]
+    )
+    return format_today_tasks_snapshot(f"{base_next_today_tasks}\n\n{recurring_block}")
+
+
+def _extract_recurring_daily_items(today_tasks: str) -> list[str]:
+    sections = _parse_today_task_sections(today_tasks)
+    return [
+        item
+        for heading, items in sections
+        if _is_recurring_daily_heading(heading)
+        for item in items
+    ]
+
+
+def _extract_task_items(today_tasks: str) -> set[str]:
+    return {
+        _task_key(item)
+        for _, items in _parse_today_task_sections(today_tasks)
+        for item in items
+    }
+
+
+def _parse_today_task_sections(text: str) -> list[tuple[str, list[str]]]:
+    sections: list[tuple[str, list[str]]] = []
+    current_heading: str | None = None
+    current_items: list[str] | None = None
+    previous_blank = True
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            previous_blank = True
+            continue
+        if _is_today_tasks_heading(line):
+            previous_blank = True
+            continue
+
+        heading = _parse_today_task_heading(line)
+        if heading is not None:
+            current_heading, current_items = _get_or_create_today_task_section(sections, heading)
+            previous_blank = False
+            continue
+
+        inline_heading = _parse_today_task_inline_heading(line)
+        if inline_heading is not None and (current_heading is None or previous_blank):
+            heading_text, item_text = inline_heading
+            current_heading, current_items = _get_or_create_today_task_section(sections, heading_text)
+            current_items.append(item_text)
+            previous_blank = False
+            continue
+
+        if current_items is None:
+            current_heading, current_items = _get_or_create_today_task_section(sections, "待办")
+        item = _normalize_today_task_item(line)
+        if item:
+            current_items.append(item)
+        previous_blank = False
+
+    return sections
+
+
+def _get_or_create_today_task_section(
+    sections: list[tuple[str, list[str]]],
+    heading: str,
+) -> tuple[str, list[str]]:
+    normalized = _normalize_today_task_heading(heading)
+    for section_heading, section_items in sections:
+        if section_heading == normalized:
+            return section_heading, section_items
+    section_items: list[str] = []
+    sections.append((normalized, section_items))
+    return normalized, section_items
+
+
+def _parse_today_task_heading(line: str) -> str | None:
+    stripped = line.strip()
+    if len(stripped) > 2 and stripped.startswith("【") and stripped.endswith("】"):
+        return stripped[1:-1].strip()
+    if stripped.endswith(("：", ":")):
+        return stripped[:-1].strip()
+    return None
+
+
+def _parse_today_task_inline_heading(line: str) -> tuple[str, str] | None:
+    match = re.match(r"^([^：:\n]{1,30})[：:]\s*(.+)$", line, flags=re.DOTALL)
+    if match is None:
+        return None
+    heading = _normalize_today_task_heading(match.group(1))
+    item = _normalize_today_task_item(match.group(2))
+    if not heading or not item:
+        return None
+    return heading, item
+
+
+def _normalize_today_task_heading(text: str) -> str:
+    return text.strip().strip("*").strip("#").strip()
+
+
+def _normalize_today_task_item(text: str) -> str:
+    stripped = text.strip()
+    stripped = re.sub(r"^\s*(?:[-*+]\s+|\d+[.)、]\s*)", "", stripped).strip()
+    return stripped
+
+
+def _is_recurring_daily_heading(heading: str) -> bool:
+    return _normalize_today_task_heading(heading) == "日常"
+
+
+def _extract_task_statuses(plan_notes: str, target_status: str) -> set[str]:
+    statuses: set[str] = set()
+    for line in plan_notes.splitlines():
+        if not _is_markdown_table_line(line):
+            continue
+        cells = _split_markdown_table_row(line)
+        if len(cells) < 5 or cells[0] == "任务" or _is_markdown_separator_cell(cells[0]):
+            continue
+        if cells[3] == target_status:
+            statuses.add(_task_key(cells[0]))
+    return statuses
+
+
+def _split_markdown_table_row(line: str) -> list[str]:
+    normalized = line.replace("｜", "|")
+    return [cell.strip() for cell in normalized.strip().strip("|").split("|")]
+
+
+def _is_markdown_separator_cell(text: str) -> bool:
+    stripped = text.strip()
+    return bool(stripped) and all(char in "-:" for char in stripped)
+
+
+def _task_key(text: str) -> str:
+    return re.sub(r"\s+", "", text.strip()).casefold()
 
 
 def _drop_markdown_tables(text: str) -> str:
