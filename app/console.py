@@ -1269,7 +1269,7 @@ CONSOLE_HTML = f"""<!doctype html>
     }}
     .bar {{
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: space-between;
       gap: 16px;
       max-width: 1480px;
@@ -1277,27 +1277,102 @@ CONSOLE_HTML = f"""<!doctype html>
       padding: 14px 20px;
     }}
     .brand {{
-      flex: 1 1 auto;
-      min-width: 220px;
+      flex: 0 0 auto;
+      min-width: 148px;
+      padding-top: 2px;
     }}
     .slogan {{
-      flex: 1 1 260px;
-      max-width: 420px;
+      position: relative;
+      z-index: 2;
+      flex: 999 1 520px;
+      min-width: 280px;
+      min-height: 65px;
+      max-width: none;
+      margin-right: -16px;
       border-left: 1px solid var(--line);
       padding-left: 16px;
     }}
-    .slogan h2 {{
+    .slogan.is-expanded {{
+      z-index: 30;
+    }}
+    .slogan-editor {{
+      width: 100%;
+    }}
+    .slogan.is-expanded .slogan-editor {{
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(247, 244, 237, 0.98);
+      box-shadow: var(--shadow);
+      padding: 10px;
+    }}
+    .slogan-head {{
+      display: flex;
+      align-items: center;
+      gap: 8px;
       margin-bottom: 6px;
     }}
-    .slogan input {{
+    .slogan-head h2 {{
+      margin: 0;
+    }}
+    .slogan-toggle {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      min-width: 30px;
+      min-height: 28px;
+      margin-left: auto;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      padding: 0;
+    }}
+    .slogan-toggle:hover {{
+      border-color: var(--line);
+      background: var(--surface-2);
+      color: var(--text);
+    }}
+    .slogan-toggle:focus-visible {{
+      outline: 3px solid rgba(47, 111, 94, 0.18);
+      outline-offset: 2px;
+    }}
+    .slogan-toggle-icon {{
+      width: 8px;
+      height: 8px;
+      margin-top: -4px;
+      border-right: 2px solid currentColor;
+      border-bottom: 2px solid currentColor;
+      transform: rotate(45deg);
+      transition: transform 0.14s ease, margin-top 0.14s ease;
+    }}
+    .slogan.is-expanded .slogan-toggle-icon {{
+      margin-top: 4px;
+      transform: rotate(225deg);
+    }}
+    .slogan textarea {{
+      display: block;
       min-height: 36px;
+      height: 36px;
+      line-height: 34px;
+      padding: 0 10px;
+      overflow: hidden;
+      resize: none;
+    }}
+    .slogan.is-expanded textarea {{
+      line-height: 1.5;
       padding: 7px 10px;
     }}
     .top-status {{
-      flex: 1 1 340px;
-      max-width: 520px;
+      flex: 0 0 128px;
+      max-width: 128px;
+      margin-left: auto;
       border-left: 1px solid var(--line);
       padding-left: 16px;
+      text-align: left;
     }}
     .top-status h2 {{
       margin-bottom: 4px;
@@ -1668,6 +1743,7 @@ CONSOLE_HTML = f"""<!doctype html>
       .slogan {{
         width: 100%;
         max-width: none;
+        margin-right: 0;
         border-left: 0;
         border-top: 1px solid var(--line);
         padding-left: 0;
@@ -1684,11 +1760,17 @@ CONSOLE_HTML = f"""<!doctype html>
     <div class="bar">
       <div class="brand">
         <h1>修身炉控制台</h1>
-        <div class="meta">本机入口：{_project_file("app/console.py")}</div>
       </div>
-      <div class="slogan">
-        <h2>口号</h2>
-        <input id="sloganInput" type="text" autocomplete="off">
+      <div class="slogan" id="sloganBox">
+        <div class="slogan-editor">
+          <div class="slogan-head">
+            <h2>口号</h2>
+            <button class="slogan-toggle" id="sloganToggle" type="button" aria-label="展开口号" aria-controls="sloganInput" aria-expanded="false" title="展开口号">
+              <span class="slogan-toggle-icon" aria-hidden="true"></span>
+            </button>
+          </div>
+          <textarea id="sloganInput" rows="1" autocomplete="off" spellcheck="false"></textarea>
+        </div>
       </div>
       <div class="top-status">
         <h2>运行状态</h2>
@@ -2061,10 +2143,32 @@ CONSOLE_HTML = f"""<!doctype html>
 
     function loadSlogan() {{
       $("sloganInput").value = window.localStorage.getItem(sloganStorageKey) || "";
+      setSloganExpanded(false);
     }}
 
     function saveSlogan() {{
       window.localStorage.setItem(sloganStorageKey, $("sloganInput").value);
+    }}
+
+    function resizeSlogan() {{
+      const input = $("sloganInput");
+      if (!$("sloganBox").classList.contains("is-expanded")) {{
+        input.style.height = "";
+        input.scrollTop = 0;
+        return;
+      }}
+      input.style.height = "auto";
+      input.style.height = `${{input.scrollHeight}}px`;
+    }}
+
+    function setSloganExpanded(expanded) {{
+      const box = $("sloganBox");
+      const toggle = $("sloganToggle");
+      box.classList.toggle("is-expanded", expanded);
+      toggle.setAttribute("aria-expanded", String(expanded));
+      toggle.setAttribute("aria-label", expanded ? "收起口号" : "展开口号");
+      toggle.title = expanded ? "收起口号" : "展开口号";
+      resizeSlogan();
     }}
 
     $("dateInput").addEventListener("change", () => {{
@@ -2089,7 +2193,14 @@ CONSOLE_HTML = f"""<!doctype html>
         button.setAttribute("aria-expanded", "false");
       }}
     }});
-    $("sloganInput").addEventListener("input", saveSlogan);
+    $("sloganToggle").addEventListener("click", () =>
+      setSloganExpanded(!$("sloganBox").classList.contains("is-expanded"))
+    );
+    $("sloganInput").addEventListener("input", () => {{
+      saveSlogan();
+      resizeSlogan();
+    }});
+    window.addEventListener("resize", resizeSlogan);
     $("openTasksBtn").addEventListener("click", () => runAction("打开文件", () =>
       requestJson("/api/tasks/open", {{
         method: "POST",
