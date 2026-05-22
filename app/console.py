@@ -1318,41 +1318,6 @@ CONSOLE_HTML = f"""<!doctype html>
     .slogan-head h2 {{
       margin: 0;
     }}
-    .slogan-toggle {{
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 30px;
-      min-width: 30px;
-      min-height: 28px;
-      margin-left: auto;
-      border: 1px solid transparent;
-      background: transparent;
-      color: var(--muted);
-      padding: 0;
-    }}
-    .slogan-toggle:hover {{
-      border-color: var(--line);
-      background: var(--surface-2);
-      color: var(--text);
-    }}
-    .slogan-toggle:focus-visible {{
-      outline: 3px solid rgba(47, 111, 94, 0.18);
-      outline-offset: 2px;
-    }}
-    .slogan-toggle-icon {{
-      width: 8px;
-      height: 8px;
-      margin-top: -4px;
-      border-right: 2px solid currentColor;
-      border-bottom: 2px solid currentColor;
-      transform: rotate(45deg);
-      transition: transform 0.14s ease, margin-top 0.14s ease;
-    }}
-    .slogan.is-expanded .slogan-toggle-icon {{
-      margin-top: 4px;
-      transform: rotate(225deg);
-    }}
     .slogan textarea {{
       display: block;
       min-height: 36px;
@@ -1765,9 +1730,6 @@ CONSOLE_HTML = f"""<!doctype html>
         <div class="slogan-editor">
           <div class="slogan-head">
             <h2>口号</h2>
-            <button class="slogan-toggle" id="sloganToggle" type="button" aria-label="展开口号" aria-controls="sloganInput" aria-expanded="false" title="展开口号">
-              <span class="slogan-toggle-icon" aria-hidden="true"></span>
-            </button>
           </div>
           <textarea id="sloganInput" rows="1" autocomplete="off" spellcheck="false"></textarea>
         </div>
@@ -2163,11 +2125,7 @@ CONSOLE_HTML = f"""<!doctype html>
 
     function setSloganExpanded(expanded) {{
       const box = $("sloganBox");
-      const toggle = $("sloganToggle");
       box.classList.toggle("is-expanded", expanded);
-      toggle.setAttribute("aria-expanded", String(expanded));
-      toggle.setAttribute("aria-label", expanded ? "收起口号" : "展开口号");
-      toggle.title = expanded ? "收起口号" : "展开口号";
       resizeSlogan();
     }}
 
@@ -2193,9 +2151,12 @@ CONSOLE_HTML = f"""<!doctype html>
         button.setAttribute("aria-expanded", "false");
       }}
     }});
-    $("sloganToggle").addEventListener("click", () =>
-      setSloganExpanded(!$("sloganBox").classList.contains("is-expanded"))
-    );
+    $("sloganInput").addEventListener("focus", () => setSloganExpanded(true));
+    document.addEventListener("click", (event) => {{
+      if (event.target !== $("sloganInput")) {{
+        setSloganExpanded(false);
+      }}
+    }});
     $("sloganInput").addEventListener("input", () => {{
       saveSlogan();
       resizeSlogan();
