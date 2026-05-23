@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -12,7 +13,10 @@ from app.llm.provider import LLMProvider
 from app.llm.usage import append_llm_call_event
 from app.logger import EventLogger
 from app.memory.goals import read_goals
-from app.pipelines.today_tasks_format import format_today_tasks_snapshot
+from app.pipelines.today_tasks_format import (
+    EMPTY_TODAY_TASKS_PLACEHOLDER,
+    format_today_tasks_snapshot,
+)
 
 
 @dataclass(frozen=True)
@@ -77,11 +81,12 @@ def _build_prompt(date_text: str, goals: str, tasks: str) -> str:
 1. 只输出"**任务管理**"和 markdown 表格。
 2. 任务管理表格前固定输出一行：**任务管理**
 3. 任务管理表格的表头必须使用英文竖线，固定为：| 任务 | 优先级 | 预计 | 状态 | 用时 |。“状态”和“用时”两列都不填。
-4. 预估时要考虑用户会用 Codex 辅助工作。如果工作总时间超出6小时（工作外的杂事不算入时间），在表格后用一句话提示超时，并说明6小时内优先做哪几个任务。
+4. “任务”列必须逐字使用今日待办里的任务正文，不能改写、概括、扩写、删掉括号补充或改成短标题。
+5. 预估时要考虑用户会用 Codex 辅助工作。如果工作总时间超出6小时（工作外的杂事不算入时间），在表格后用一句话提示超时，并说明6小时内优先做哪几个任务。
 
 其他要求：
 - 不要输出“今日待办”原文；这部分由程序直接写入。
-- 今日待办只用于分析，不要复制、改写、重排今日待办原文。
+- 今日待办只用于分析；除了任务管理表“任务”列需要逐字使用任务正文外，不要复制、改写、重排今日待办原文。
 - 如果长期目标或今日待办看起来还只是模板或为空，在表格后用一句话提醒用户补充。
 - 输出采用 markdown 格式，但不要用```markdown，标题不可使用#和##。
 - 不以询问句结尾。
@@ -96,7 +101,7 @@ def _build_prompt(date_text: str, goals: str, tasks: str) -> str:
 
 def _build_plan(tasks: str, plan_schedule: str) -> str:
     today_tasks = _format_today_tasks_section(tasks)
-    schedule_text = _normalize_schedule_table(plan_schedule.strip())
+    schedule_text = _normalize_schedule_table(plan_schedule.strip(), tasks=tasks)
     if not schedule_text:
         return today_tasks
     schedule_text = _ensure_task_management_title(schedule_text)
@@ -119,7 +124,7 @@ def _write_plan_section(config: dict[str, Any], date_text: str, plan: str) -> No
     )
 
 
-def _normalize_schedule_table(schedule_text: str) -> str:
+def _normalize_schedule_table(schedule_text: str, tasks: str = "") -> str:
     lines = schedule_text.splitlines()
     table_start = _find_schedule_table_start(lines)
     if table_start is None:
@@ -129,7 +134,10 @@ def _normalize_schedule_table(schedule_text: str) -> str:
     while table_end < len(lines) and _looks_like_table_line(lines[table_end]):
         table_end += 1
 
-    normalized = _normalize_table_lines(lines[table_start:table_end])
+    normalized = _normalize_table_lines(
+        lines[table_start:table_end],
+        task_items=_extract_task_items(tasks),
+    )
     if normalized is None:
         return schedule_text
     prefix = _drop_trailing_schedule_heading(lines[:table_start])
@@ -150,7 +158,10 @@ def _find_schedule_table_start(lines: list[str]) -> int | None:
     return None
 
 
-def _normalize_table_lines(table_lines: list[str]) -> list[str] | None:
+def _normalize_table_lines(
+    table_lines: list[str],
+    task_items: list[str] | None = None,
+) -> list[str] | None:
     if len(table_lines) < 2:
         return None
 
@@ -169,12 +180,121 @@ def _normalize_table_lines(table_lines: list[str]) -> list[str] | None:
         "| 任务 | 优先级 | 预计 | 状态 | 用时 |",
         "|---|---|---|---|---|",
     ]
-    for cells in rows[2:]:
+    data_rows = rows[2:]
+    source_items = task_items or []
+    used_source_indexes: set[int] = set()
+    for cells in data_rows:
         if len(cells) != expected_cols:
             return None
         task, priority, estimate = cells[:3]
+        source_task = _match_source_task(task, source_items, used_source_indexes)
+        if source_task is not None:
+            task = source_task
         normalized.append(f"| {task} | {priority} | {estimate} |  |  |")
     return normalized
+
+
+def _extract_task_items(tasks: str) -> list[str]:
+    formatted = format_today_tasks_snapshot(tasks)
+    if formatted == EMPTY_TODAY_TASKS_PLACEHOLDER:
+        return []
+
+    items: list[str] = []
+    for line in formatted.splitlines():
+        stripped = line.strip()
+        prefix, separator, item = stripped.partition(". ")
+        if separator and prefix.isdecimal() and item.strip():
+            candidate = item.strip()
+            if _is_safe_table_cell(candidate):
+                items.append(candidate)
+    return items
+
+
+def _match_source_task(
+    table_task: str,
+    source_items: list[str],
+    used_source_indexes: set[int],
+) -> str | None:
+    table_key = _task_match_key(table_task)
+    if not table_key:
+        return None
+
+    exact_matches: list[int] = []
+    partial_matches: list[tuple[int, int]] = []
+    fuzzy_matches: list[tuple[float, int]] = []
+    for index, source_item in enumerate(source_items):
+        if index in used_source_indexes:
+            continue
+        source_key = _task_match_key(source_item)
+        if not source_key:
+            continue
+        if source_key == table_key:
+            exact_matches.append(index)
+            continue
+        if table_key in source_key or source_key in table_key:
+            partial_matches.append((min(len(table_key), len(source_key)), index))
+            continue
+        similarity = _task_similarity(table_key, source_key)
+        if similarity >= 0.5:
+            fuzzy_matches.append((similarity, index))
+
+    if exact_matches:
+        matched_index = exact_matches[0]
+        used_source_indexes.add(matched_index)
+        return source_items[matched_index]
+
+    if not partial_matches:
+        return _pick_best_fuzzy_source(fuzzy_matches, source_items, used_source_indexes)
+
+    partial_matches.sort(key=lambda item: (-item[0], item[1]))
+    best_score = partial_matches[0][0]
+    best_matches = [index for score, index in partial_matches if score == best_score]
+    if len(best_matches) != 1:
+        return _pick_best_fuzzy_source(fuzzy_matches, source_items, used_source_indexes)
+
+    matched_index = best_matches[0]
+    used_source_indexes.add(matched_index)
+    return source_items[matched_index]
+
+
+def _pick_best_fuzzy_source(
+    fuzzy_matches: list[tuple[float, int]],
+    source_items: list[str],
+    used_source_indexes: set[int],
+) -> str | None:
+    if not fuzzy_matches:
+        return None
+
+    fuzzy_matches.sort(key=lambda item: (-item[0], item[1]))
+    best_score = fuzzy_matches[0][0]
+    best_matches = [index for score, index in fuzzy_matches if score == best_score]
+    if len(best_matches) != 1:
+        return None
+
+    matched_index = best_matches[0]
+    used_source_indexes.add(matched_index)
+    return source_items[matched_index]
+
+
+def _task_similarity(left: str, right: str) -> float:
+    left_chars = set(left)
+    right_chars = set(right)
+    min_chars = min(len(left_chars), len(right_chars))
+    if min_chars < 4:
+        return 0.0
+
+    overlap = len(left_chars & right_chars)
+    coverage = overlap / min_chars
+    jaccard = overlap / len(left_chars | right_chars)
+    return coverage * 0.7 + jaccard * 0.3
+
+
+def _task_match_key(text: str) -> str:
+    return re.sub(r"[\s，,。.!！？、：:；;（）()【】\[\]《》<>\"'`*_#-]+", "", text).lower()
+
+
+def _is_safe_table_cell(text: str) -> bool:
+    return "\n" not in text and "\r" not in text and "|" not in text
 
 
 def _drop_trailing_schedule_heading(lines: list[str]) -> list[str]:

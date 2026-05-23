@@ -90,6 +90,8 @@ class PlanUpdateTests(unittest.TestCase):
         self.assertIn("冒号前是目标分组标题", prompt)
         self.assertIn("分组展示必须统一为“【分组】”", prompt)
         self.assertIn("新增“杂事： 游泳”，必须新建或使用“【杂事】”", prompt)
+        self.assertIn("必须逐字等于新增任务正文", prompt)
+        self.assertIn("不能缩短、概括或扩写", prompt)
         self.assertIn("不要输出状态、用时、单独建议正文", prompt)
         self.assertNotIn("new_task_advice", prompt)
         self.assertIn("不要输出状态、用时、单独建议正文、“新任务”标题或“### 新增”", prompt)
@@ -264,6 +266,53 @@ class PlanUpdateTests(unittest.TestCase):
             self.assertNotIn("**新任务**", daily_text)
             self.assertNotIn("任务建议", daily_text)
             self.assertEqual([event["type"] for event in logger.events], ["llm_call", "plan_updated"])
+
+    def test_generate_plan_update_uses_original_new_task_in_schedule_row(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            inbox = Path(config["paths"]["inbox_dir"])
+            daily_dir = Path(config["paths"]["daily_dir"])
+            inbox.mkdir(parents=True)
+            daily_dir.mkdir(parents=True)
+            (inbox / "today_tasks.md").write_text(
+                "# 今日待办\n\n学习：\n视频\n",
+                encoding="utf-8",
+            )
+            (daily_dir / "2026-05-23.md").write_text(
+                "# 2026-05-23\n\n"
+                "## 计划\n\n"
+                "**今日待办**\n\n"
+                "学习：\n视频\n\n"
+                "| 任务 | 优先级 | 预计 | 状态 | 用时 |\n"
+                "|---|---|---|---|---|\n"
+                "| 视频 | P1 | 1h |  |  |\n",
+                encoding="utf-8",
+            )
+            new_task = "灵感：发现了codex可以优化的一些rule，比如去除常错的命令，提示plan mode和commit"
+            reply = json.dumps(
+                {
+                    "updated_today_tasks": f"# 今日待办\n\n学习：\n视频\n{new_task}",
+                    "updated_daily_original": f"学习：\n视频\n{new_task}",
+                    "target_heading": "学习",
+                    "schedule_task": "优化codex规则",
+                    "schedule_priority": "P2",
+                    "schedule_estimate": "30m",
+                },
+                ensure_ascii=False,
+            )
+
+            generate_plan_update(
+                FakeProvider(reply),
+                new_task,
+                config=config,
+                target_date=date(2026, 5, 23),
+                logger=FakeLogger(),  # type: ignore[arg-type]
+            )
+
+            daily_text = (daily_dir / "2026-05-23.md").read_text(encoding="utf-8")
+            original_task_body = "发现了codex可以优化的一些rule，比如去除常错的命令，提示plan mode和commit"
+            self.assertIn(f"| {original_task_body} | P2 | 30m |  |  |", daily_text)
+            self.assertNotIn("| 优化codex规则 | P2 | 30m |  |  |", daily_text)
 
     def test_generate_plan_update_uses_bracket_heading_style_for_new_group(self) -> None:
         with _temporary_directory() as temp_dir:

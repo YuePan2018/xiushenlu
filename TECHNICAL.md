@@ -191,7 +191,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 | `python app/main.py pet` | 否 | 启动轻量桌面宠物；首次运行会按配置下载默认素材。 |
 | `python app/main.py pet --check` | 否 | 检查桌宠素材与 spritesheet，不打开窗口。 |
 
-`plan --add` 要求模型返回严格 JSON，并逐字保留新增任务；程序会更新 `today_tasks.md`、替换 daily 里已有的“今日待办”原文，并把新增任务作为一行追加到任务管理表，`状态` 和 `用时` 两列保持为空。解析失败时不会写入 `today_tasks.md` 或 daily。
+`plan` 生成任务管理表时，`优先级` 和 `预计` 由 LLM 判断，但 `任务` 列会由程序尽量匹配并回填今日待办里的任务正文，避免把待办扩写成计划说明。`plan --add` 要求模型返回严格 JSON，并逐字保留新增任务；程序会更新 `today_tasks.md`、替换 daily 里已有的“今日待办”原文，并把新增任务正文作为一行追加到任务管理表，`状态` 和 `用时` 两列保持为空。解析失败时不会写入 `today_tasks.md` 或 daily。
 
 `log` 的用时列是从 daily 记录派生出来的结果，不作为权威累计变量保存。每次写入记录后，程序会把当天“记录”小节重新交给 LLM 判断每个任务相关的记录 ID，再由代码重新计算总用时并覆盖表格；如果相关记录中出现明确写出的时长，例如“20分钟”“用时40m”“耗时1.5h”，只使用最后一次明确时长，不累加，也不再计算首尾时间差；如果没有明确时长，只有最后一条相关记录内容包含 `&` 时，才使用最后一条相关记录的 `HH:MM:SS` 减去第一条相关记录的 `HH:MM:SS`，否则用时留空。
 
@@ -235,7 +235,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 | --- | --- |
 | `app/main.py` | CLI 命令入口；加载配置；组装 Provider；调用 pipeline 或本地读写函数。 |
 | `app/console.py` | FastAPI 本地控制台；展示 daily 和 today_tasks；触发已有 plan/log/review 能力，并提供工作树页面路由。 |
-| `app/pipelines/daily_plan.py` | 今日计划 pipeline；LLM 生成五列表格形式的任务管理表。 |
+| `app/pipelines/daily_plan.py` | 今日计划 pipeline；LLM 生成五列表格形式的任务管理表，程序回填 `任务` 列为今日待办任务正文。 |
 | `app/pipelines/log_schedule_update.py` | 写入记录后的任务管理表更新 pipeline；LLM 返回状态和计时线索，代码重算并写入 `状态` 和 `用时` 两列。 |
 | `app/pipelines/plan_update.py` | 日内计划局部更新 pipeline；更新待办原文并给任务管理表追加一行，解析失败时停止写入。 |
 | `app/pipelines/nightly_review.py` | 晚间复盘 pipeline；当天复盘成功后滚动待办并清空 `明日计划.md`。 |

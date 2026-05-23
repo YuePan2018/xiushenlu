@@ -71,8 +71,58 @@ class DailyPlanTests(unittest.TestCase):
             "**任务管理**\n"
             "| 任务 | 优先级 | 预计 | 状态 | 用时 |\n"
             "|---|---|---|---|---|\n"
-            "| 小红书post功能 | P0 | 1.5h |  |  |",
+            "| 完成小红书post功能 | P0 | 1.5h |  |  |",
         )
+
+    def test_build_plan_uses_original_task_text_in_schedule_column(self) -> None:
+        plan = _build_plan(
+            "学习：\n"
+            "1. 看 NotebookLM 的分享视频\n"
+            "2. 整理知识库入口",
+            (
+                "| 任务 | 优先级 | 预计 | 状态 | 用时 |\n"
+                "|---|---|---|---|---|\n"
+                "| 深度理解 NotebookLM 视频内容 | P1 | 45m |  |  |\n"
+                "| 整理知识库入口结构 | P2 | 30m |  |  |"
+            ),
+        )
+
+        self.assertIn("| 看 NotebookLM 的分享视频 | P1 | 45m |  |  |", plan)
+        self.assertIn("| 整理知识库入口 | P2 | 30m |  |  |", plan)
+        self.assertNotIn("深度理解 NotebookLM 视频内容", plan)
+        self.assertNotIn("整理知识库入口结构", plan)
+
+    def test_build_plan_matches_original_task_text_after_priority_reorder(self) -> None:
+        plan = _build_plan(
+            "看近几日的b站视频学习\n\n"
+            "【日常】\n"
+            "1. 小红书工作信息\n"
+            "2. 微信资讯\n"
+            "3. b站关注的当日动态看完。\n"
+            "4. 昨天的照片整理好，发给深深\n\n"
+            "【学习】\n"
+            "1. codex子代理",
+            (
+                "| 任务 | 优先级 | 预计 | 状态 | 用时 |\n"
+                "|---|---|---|---|---|\n"
+                "| Codex子代理开发与调试 | P0 | 3.5h |  |  |\n"
+                "| 整理昨日照片并发送给深深 | P1 | 0.5h |  |  |\n"
+                "| 浏览小红书工作信息 | P2 | 0.5h |  |  |\n"
+                "| 快速扫读微信资讯 | P2 | 0.5h |  |  |\n"
+                "| 观看B站学习视频（结合Codex辅助总结） | P1 | 2.0h |  |  |\n"
+                "| 浏览B站关注动态 | P3 | 0.5h |  |  |"
+            ),
+        )
+
+        self.assertIn("| codex子代理 | P0 | 3.5h |  |  |", plan)
+        self.assertIn("| 昨天的照片整理好，发给深深 | P1 | 0.5h |  |  |", plan)
+        self.assertIn("| 小红书工作信息 | P2 | 0.5h |  |  |", plan)
+        self.assertIn("| 微信资讯 | P2 | 0.5h |  |  |", plan)
+        self.assertIn("| 看近几日的b站视频学习 | P1 | 2.0h |  |  |", plan)
+        self.assertIn("| b站关注的当日动态看完。 | P3 | 0.5h |  |  |", plan)
+        self.assertNotIn("Codex子代理开发与调试", plan)
+        self.assertNotIn("整理昨日照片并发送给深深", plan)
+        self.assertNotIn("观看B站学习视频（结合Codex辅助总结）", plan)
 
     def test_build_plan_formats_inline_heading_as_bracket_numbered_list(self) -> None:
         plan = _build_plan("杂事：游泳", "")
@@ -124,6 +174,7 @@ class DailyPlanTests(unittest.TestCase):
         self.assertIn("| 任务 | 优先级 | 预计 | 状态 | 用时 |", prompt)
         self.assertIn("必须使用英文竖线", prompt)
         self.assertIn("“状态”和“用时”两列都不填", prompt)
+        self.assertIn("“任务”列必须逐字使用今日待办里的任务正文", prompt)
         self.assertNotIn("建议时段", prompt)
         self.assertNotIn("调度风险与调整规则", prompt)
         self.assertNotIn("晚间收口动作", prompt)

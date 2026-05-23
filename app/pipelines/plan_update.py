@@ -203,7 +203,11 @@ def normalize_plan_update_content(
         updated_today_tasks=updated_today_tasks,
         updated_daily_original=updated_daily_original,
         target_heading=target_heading,
-        schedule_row=parsed.schedule_row,
+        schedule_row=ScheduleRow(
+            task=new_task_intent.task_text,
+            priority=parsed.schedule_row.priority,
+            estimate=parsed.schedule_row.estimate,
+        ),
     )
 
 
@@ -512,7 +516,7 @@ def _build_prompt(
 - `updated_daily_original` 只填写 daily “今日待办”小节的新内容，并包含逐字新增任务正文；不要包含计划建议、时间安排表或任何 Markdown 标题行。
 - daily “今日待办”小节和 today_tasks.md 的最终样式都必须类似：“【杂事】”下一行“1. 游泳”；不要输出“杂事：\n游泳”或“杂事：游泳”。
 - `target_heading` 只用于内部归类，不会展示在 daily。
-- `schedule_task` 是写入时间安排表“任务”列的短任务名，可以比新增任务原文更短，但不能包含换行或 `|`。
+- `schedule_task` 是写入时间安排表“任务”列的任务正文，必须逐字等于新增任务正文；如果新增任务是“标题：任务正文”格式，只填冒号后的任务正文；不能缩短、概括或扩写，不能包含换行或 `|`。
 - `schedule_priority` 是“优先级”列，例如 P0、P1、P2、P3，不能包含换行或 `|`。
 - `schedule_estimate` 是“预计”列，例如 30m、1h、1.5h，不能包含换行或 `|`。
 - 不要输出状态、用时、单独建议正文、“新任务”标题或“### 新增”。
