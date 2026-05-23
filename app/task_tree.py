@@ -107,6 +107,15 @@ def save_task_tree(
     )
 
 
+def delete_task_tree_file(filename: str, config: dict[str, Any] | None = None) -> TaskTreeFile:
+    cfg = _task_tree_config(config)
+    path = validate_path(task_tree_path_for_filename(filename, cfg), cfg, for_write=True)
+    if not path.exists():
+        raise TaskTreeError(f"工作树不存在：{path.name}")
+    path.unlink()
+    return TaskTreeFile(title=path.stem, filename=path.name, path=path)
+
+
 def task_tree_path_for_title(title: str, config: dict[str, Any] | None = None) -> Path:
     cfg = _task_tree_config(config)
     filename = task_tree_filename(title)

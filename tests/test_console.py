@@ -197,6 +197,8 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn('id="undoBtn"', html)
             self.assertIn('id="redoBtn"', html)
             self.assertIn('id="deleteNodeBtn"', html)
+            self.assertIn('id="deleteFileBtn"', html)
+            self.assertIn('aria-label="删除选中文件"', html)
             self.assertIn('class="source-divider"', html)
             self.assertIn('class="source-actions"', html)
             self.assertIn(">保存到本地</button>", html)
@@ -235,11 +237,15 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn("updateSelectedTitle", html)
             self.assertIn("setLeftCollapsed", html)
             self.assertIn("setRightCollapsed", html)
+            self.assertIn('id="nodePreview"', html)
+            self.assertIn("node_mouseenter", html)
+            self.assertIn("node_mouseleave", html)
+            self.assertIn("/api/task-tree/delete", html)
+            self.assertIn("确定删除工作树文件", html)
             self.assertNotIn("contentEdits", html)
             self.assertNotIn("state.jsonDirty", html)
             self.assertNotIn('id="treeView"', html)
             self.assertNotIn("node-content", html)
-            self.assertNotIn("nodePreview", html)
             self.assertNotIn("note: node.content", html)
             self.assertNotIn('id="zoomInBtn"', html)
             self.assertNotIn('id="zoomOutBtn"', html)
@@ -328,6 +334,37 @@ class ConsoleTests(unittest.TestCase):
 
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()["selected"]["filename"], "仍存在.json")
+
+    def test_task_tree_api_deletes_selected_file_and_returns_refreshed_state(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            tree_dir = Path(config["paths"]["task_tree_dir"])
+            tree_dir.mkdir(parents=True)
+            deleted_file = tree_dir / "要删除.json"
+            kept_file = tree_dir / "保留.json"
+            deleted_file.write_text('{"title":"要删除","nodes":[]}\n', encoding="utf-8")
+            kept_file.write_text('{"title":"保留","nodes":[]}\n', encoding="utf-8")
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+
+            response = client.post("/api/task-tree/delete", json={"filename": "要删除.json"})
+
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["result"]["filename"], "要删除.json")
+            self.assertFalse(deleted_file.exists())
+            self.assertTrue(kept_file.exists())
+            self.assertEqual(data["state"]["selected"]["filename"], "保留.json")
+            self.assertEqual({item["filename"] for item in data["state"]["items"]}, {"保留.json"})
+
+    def test_task_tree_api_rejects_nested_delete_filename(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            client = TestClient(create_app(config=config, provider_factory=FakeProvider))
+
+            response = client.post("/api/task-tree/delete", json={"filename": "子目录/不要删.json"})
+
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("根目录", response.json()["detail"])
 
     def test_task_tree_api_rejects_invalid_json_without_overwriting(self) -> None:
         with _temporary_directory() as temp_dir:
