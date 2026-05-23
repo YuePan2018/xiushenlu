@@ -45,6 +45,7 @@ from app.posting.xhs_cover import generate_xhs_cover_from_text
 from app.posting.xhs_mcp import XhsMcpClient
 from app.safety import safe_read_text, safe_write_text
 from app.task_tree import (
+    delete_task_tree_file,
     list_task_trees,
     read_task_tree_file,
     save_task_tree as persist_task_tree,
@@ -192,6 +193,13 @@ class CostRequest(BaseModel):
 class TaskTreeRequest(BaseModel):
     title: str = ""
     text: str
+
+    class Config:
+        extra = "forbid"
+
+
+class TaskTreeDeleteRequest(BaseModel):
+    filename: str
 
     class Config:
         extra = "forbid"
@@ -544,6 +552,14 @@ class ConsoleService:
             "state": self.task_tree_state(filename=document.filename),
         }
 
+    def delete_task_tree(self, request: TaskTreeDeleteRequest) -> dict[str, Any]:
+        deleted = delete_task_tree_file(request.filename, self.config)
+        return {
+            "message": f"工作树已删除：{deleted.filename}",
+            "result": _task_tree_file_payload(deleted),
+            "state": self.task_tree_state(),
+        }
+
     def xhs_defaults(self) -> dict[str, Any]:
         today_text = date.today().isoformat()
         draft_path = _today_xhs_draft_path(self.config, today_text)
@@ -811,6 +827,10 @@ def create_app(
     @app.post("/api/task-tree")
     def api_save_task_tree(request: TaskTreeRequest) -> dict[str, Any]:
         return _handle(lambda: service.save_task_tree(request))
+
+    @app.post("/api/task-tree/delete")
+    def api_delete_task_tree(request: TaskTreeDeleteRequest) -> dict[str, Any]:
+        return _handle(lambda: service.delete_task_tree(request))
 
     @app.get("/api/xhs/defaults")
     def api_xhs_defaults() -> dict[str, Any]:

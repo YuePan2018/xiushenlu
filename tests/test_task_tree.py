@@ -9,6 +9,7 @@ from typing import Any
 
 from app.task_tree import (
     TaskTreeError,
+    delete_task_tree_file,
     list_task_trees,
     parse_task_tree_text,
     read_task_tree,
@@ -183,6 +184,28 @@ class TaskTreeTests(unittest.TestCase):
 
             with self.assertRaisesRegex(TaskTreeError, "根目录"):
                 read_task_tree_file("子目录/子任务.json", config)
+
+    def test_delete_task_tree_file_removes_root_json_file(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            tree_dir = Path(config["paths"]["task_tree_dir"])
+            tree_dir.mkdir(parents=True)
+            target = tree_dir / "待删除.json"
+            target.write_text('{"title":"待删除","nodes":[]}\n', encoding="utf-8")
+
+            deleted = delete_task_tree_file("待删除.json", config)
+
+            self.assertEqual(deleted.filename, "待删除.json")
+            self.assertFalse(target.exists())
+
+    def test_delete_task_tree_file_rejects_missing_or_nested_file(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+
+            with self.assertRaisesRegex(TaskTreeError, "工作树不存在"):
+                delete_task_tree_file("不存在.json", config)
+            with self.assertRaisesRegex(TaskTreeError, "根目录"):
+                delete_task_tree_file("子目录/子任务.json", config)
 
 
 def _test_config(root: Path) -> dict[str, Any]:
