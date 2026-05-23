@@ -162,6 +162,7 @@
     .button-link.secondary:hover,
     button.secondary:hover,
     .tool-button:hover,
+    .mode-button:hover,
     .icon-button:hover,
     .collapse-button:hover {
       border-color: #bfd0c7;
@@ -295,7 +296,8 @@
     }
 
     .collapse-button,
-    .tool-button {
+    .tool-button,
+    .mode-button {
       width: 34px;
       min-width: 34px;
       height: 34px;
@@ -306,6 +308,20 @@
       color: var(--text);
       font-size: 16px;
       line-height: 1;
+    }
+
+    .mode-button {
+      width: auto;
+      min-width: 74px;
+      padding: 0 11px;
+      font-size: 13px;
+      font-weight: 760;
+    }
+
+    .mode-button[aria-pressed="true"] {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
     }
 
     .stack {
@@ -472,6 +488,32 @@
       overflow-wrap: anywhere;
     }
 
+    input.selected-node-title {
+      background: #fff;
+    }
+
+    .node-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .node-actions button {
+      flex: 1 1 0;
+    }
+
+    button.danger-button {
+      border-color: rgba(180, 35, 24, 0.3);
+      background: #fff7f5;
+      color: var(--danger);
+    }
+
+    button.danger-button:hover {
+      border-color: rgba(180, 35, 24, 0.42);
+      background: #ffe7e2;
+      color: var(--danger);
+    }
+
     #nodeContentInput {
       min-height: 300px;
     }
@@ -544,6 +586,55 @@
 
     #mindMap foreignObject {
       overflow: visible;
+    }
+
+    .node-action-layer {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      pointer-events: none;
+    }
+
+    .node-action-button {
+      position: absolute;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      min-width: 18px;
+      height: 18px;
+      min-height: 18px;
+      padding: 0;
+      border: 1px solid rgba(40, 116, 91, 0.24);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--accent);
+      box-shadow: 0 5px 12px rgba(23, 33, 47, 0.12);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 760;
+      line-height: 1;
+      pointer-events: auto;
+      user-select: none;
+    }
+
+    .node-action-button:hover {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .node-action-button.sibling {
+      top: 50%;
+      right: 0;
+      transform: translate(50%, -50%);
+    }
+
+    .node-action-button.child {
+      bottom: 0;
+      left: calc(50% + 22px);
+      transform: translate(-50%, 50%);
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -657,14 +748,14 @@
         <div class="source-divider" aria-hidden="true"></div>
         <div class="task-edit-block">
           <div>
-            <label for="treeTitleInput">标题</label>
+            <label for="treeTitleInput">保存标题</label>
             <input id="treeTitleInput" name="task-tree-title" type="text" autocomplete="off" spellcheck="false" placeholder="例如：修身炉长期任务…">
           </div>
           <details class="input-panel" id="inputPanel">
             <summary>
               <span class="summary-copy">
-                <span class="summary-title">JSON 输入</span>
-                <span class="summary-subtitle">手动粘贴或同步当前树</span>
+                <span class="summary-title">JSON 导入 / 导出</span>
+                <span class="summary-subtitle">渲染输入导入画布，同步当前树导出 JSON</span>
               </span>
               <span class="chevron" aria-hidden="true"></span>
             </summary>
@@ -690,6 +781,9 @@
     <section class="canvas-panel" aria-label="工作树画布">
       <div class="canvas-label" id="canvasLabel">工作树</div>
       <div class="canvas-tools" aria-label="画布工具">
+        <button class="mode-button" id="editModeBtn" type="button" aria-pressed="false" title="切换编辑模式" aria-label="切换编辑模式">编辑模式</button>
+        <button class="tool-button" id="undoBtn" type="button" title="撤销" aria-label="撤销">↶</button>
+        <button class="tool-button" id="redoBtn" type="button" title="重做" aria-label="重做">↷</button>
         <button class="tool-button" id="fitBtn" type="button" title="居中" aria-label="居中">中</button>
         <button class="tool-button" id="expandBtn" type="button" title="全部展开" aria-label="全部展开">展</button>
         <button class="tool-button" id="collapseBtn" type="button" title="全部收起" aria-label="全部收起">收</button>
@@ -701,19 +795,22 @@
       <button class="side-rail" id="rightRailBtn" type="button" aria-label="展开节点内容">内容</button>
       <div class="side-header">
         <div class="side-title">
-          <h2>节点内容</h2>
+          <h2>节点属性</h2>
           <div class="meta" id="nodeKindText">未选择</div>
         </div>
         <button class="collapse-button" id="rightCollapseBtn" type="button" title="收起节点内容" aria-label="收起节点内容">›</button>
       </div>
       <div class="side-body">
         <div>
-          <label for="selectedNodeTitle">标题</label>
-          <div class="selected-node-title" id="selectedNodeTitle">未选择节点。</div>
+          <label for="selectedNodeTitle">节点标题</label>
+          <input class="selected-node-title" id="selectedNodeTitle" type="text" autocomplete="off" spellcheck="false" disabled value="未选择节点。">
         </div>
         <div>
           <label for="nodeContentInput" id="nodeContentLabel">内容</label>
           <textarea id="nodeContentInput" spellcheck="false" disabled></textarea>
+        </div>
+        <div class="node-actions">
+          <button class="danger-button" id="deleteNodeBtn" type="button" disabled>删除节点</button>
         </div>
         <div class="status" id="nodeContentStatus">选择节点后显示内容。</div>
       </div>
@@ -725,10 +822,11 @@
       busy: false,
       sample: "",
       selectedFilename: "",
-      jsonDirty: false,
+      jsonDraftDirty: false,
       selectedUid: "",
       selectedIsRoot: false,
-      contentEdits: new Map(),
+      selectedNode: null,
+      editMode: false,
       mindMap: null,
     };
 
@@ -746,8 +844,8 @@
         control.disabled = value;
       }
       const hasSavedFiles = Array.from($("treeSelect").options).some((option) => option.value);
-      $("nodeContentInput").disabled = value || !state.selectedUid;
       $("treeSelect").disabled = value || !hasSavedFiles;
+      updateSelectedControls();
     }
 
     function setStatus(text, kind = "") {
@@ -808,8 +906,7 @@
 
       if (data.selected) {
         state.selectedFilename = data.selected.filename;
-        state.jsonDirty = false;
-        state.contentEdits = new Map();
+        state.jsonDraftDirty = false;
         $("treeTitleInput").value = data.selected.title;
         $("treeJsonInput").value = data.selected.text;
         $("treeSelect").value = data.selected.filename;
@@ -820,8 +917,7 @@
 
       const sample = parseTreeText(state.sample);
       state.selectedFilename = "";
-      state.jsonDirty = false;
-      state.contentEdits = new Map();
+      state.jsonDraftDirty = false;
       $("treeTitleInput").value = sample.title || "";
       $("treeJsonInput").value = state.sample;
       updateInputSummary(sample.title || "");
@@ -844,11 +940,10 @@
         if (!$("treeTitleInput").value.trim() && tree.title) {
           $("treeTitleInput").value = tree.title;
         }
-        state.contentEdits = new Map();
-        state.jsonDirty = false;
+        state.jsonDraftDirty = false;
         updateInputSummary(tree.title || "");
         loadMindMap(tree);
-        setStatus("已渲染输入，尚未保存。", "ok");
+        setStatus("已从 JSON 导入到画布，尚未保存。", "ok");
       } catch (error) {
         setStatus(error.message, "error");
       }
@@ -861,9 +956,9 @@
       const tree = getCurrentTaskTree();
       $("treeJsonInput").value = JSON.stringify(tree, null, 2);
       $("treeTitleInput").value = $("treeTitleInput").value.trim() || tree.title;
-      state.jsonDirty = false;
+      state.jsonDraftDirty = false;
       updateInputSummary(tree.title);
-      setStatus("当前工作树已同步到输入。", "ok");
+      setStatus("当前画布树已导出到 JSON 输入。", "ok");
     }
 
     function loadMindMap(tree) {
@@ -877,6 +972,7 @@
       state.mindMap = new MindMap({
         el: $("mindMap"),
         data: root,
+        readonly: !state.editMode,
         layout: "organizationStructure",
         theme: "default",
         fit: true,
@@ -887,10 +983,14 @@
         maxZoomRatio: 240,
         alwaysShowExpandBtn: true,
         isShowExpandNum: true,
+        isShowCreateChildBtnIcon: false,
         expandBtnSize: 18,
         enableShortcutOnlyWhenMouseInSvg: true,
         enableAutoEnterTextEditWhenKeydown: true,
         enableDragModifyNodeWidth: true,
+        defaultInsertSecondLevelNodeText: "新节点",
+        defaultInsertBelowSecondLevelNodeText: "新节点",
+        addCustomContentToNode: state.editMode ? createNodeActionContent() : null,
         errorHandler: (_code, error) => setStatus(error.message || String(error), "error"),
         themeConfig: {
           backgroundColor: "transparent",
@@ -941,8 +1041,13 @@
         },
       });
       state.mindMap.on("node_active", (node) => {
-        selectNode(node && node.nodeData ? node.nodeData : null);
+        selectNode(node && node.nodeData ? node : null);
       });
+      state.mindMap.on("data_change", () => {
+        refreshCanvasSummary();
+        refreshSelectedNodePanel();
+      });
+      applyMindMapMode();
       window.setTimeout(fitMap, 120);
     }
 
@@ -983,22 +1088,8 @@
       if (!state.mindMap) {
         return parseTreeText($("treeJsonInput").value);
       }
-      const root = applyContentEdits(state.mindMap.getData(false));
+      const root = state.mindMap.getData(false);
       return mindRootToTaskTree(root);
-    }
-
-    function applyContentEdits(root) {
-      const copy = typeof structuredClone === "function" ? structuredClone(root) : JSON.parse(JSON.stringify(root));
-      walkMindTree(copy, (node) => {
-        const data = node && node.data ? node.data : {};
-        const uid = data.uid || "";
-        if (!uid || !state.contentEdits.has(uid)) {
-          return;
-        }
-        data._xiushenlu = data._xiushenlu || {};
-        data._xiushenlu.content = state.contentEdits.get(uid);
-      });
-      return copy;
     }
 
     function mindRootToTaskTree(root) {
@@ -1044,47 +1135,100 @@
       }
     }
 
-    function selectNode(nodeData) {
-      if (!nodeData || !nodeData.data) {
+    function selectNode(node) {
+      if (!node || !node.nodeData || !node.nodeData.data) {
         clearNodeContentPanel();
         return;
       }
+      const nodeData = node.nodeData;
       const data = nodeData.data;
       const meta = data._xiushenlu || {};
       const uid = data.uid || "";
+      state.selectedNode = node;
       state.selectedUid = uid;
       state.selectedIsRoot = Boolean(meta.root);
-      const content = state.contentEdits.has(uid) ? state.contentEdits.get(uid) : (meta.content || "");
-      $("selectedNodeTitle").textContent = normalizeMindMapText(data.text, "未命名节点");
+      const content = meta.content || "";
+      $("selectedNodeTitle").value = normalizeMindMapText(data.text, "未命名节点");
       $("nodeKindText").textContent = state.selectedIsRoot ? "根节点摘要" : "任务节点内容";
       $("nodeContentLabel").textContent = state.selectedIsRoot ? "摘要" : "内容";
       $("nodeContentInput").value = content;
-      $("nodeContentInput").disabled = false;
       $("nodeContentStatus").textContent = content ? "已载入内容。" : "暂无内容。";
       $("nodeContentStatus").className = "status";
       setRightCollapsed(false);
-      setBusy(state.busy);
+      updateSelectedControls();
     }
 
     function clearNodeContentPanel() {
+      state.selectedNode = null;
       state.selectedUid = "";
       state.selectedIsRoot = false;
-      $("selectedNodeTitle").textContent = "未选择节点。";
+      $("selectedNodeTitle").value = "未选择节点。";
       $("nodeKindText").textContent = "未选择";
       $("nodeContentLabel").textContent = "内容";
       $("nodeContentInput").value = "";
-      $("nodeContentInput").disabled = true;
       $("nodeContentStatus").textContent = "选择节点后显示内容。";
       $("nodeContentStatus").className = "status";
+      updateSelectedControls();
     }
 
     function updateSelectedContent() {
-      if (!state.selectedUid) {
+      if (!state.selectedNode || !state.editMode) {
         return;
       }
-      state.contentEdits.set(state.selectedUid, $("nodeContentInput").value);
+      const data = state.selectedNode.nodeData.data;
+      const meta = { ...(data._xiushenlu || {}), content: $("nodeContentInput").value };
+      state.mindMap.execCommand("SET_NODE_DATA", state.selectedNode, { _xiushenlu: meta });
       $("nodeContentStatus").textContent = "内容已同步到当前树，保存后写入文件。";
       $("nodeContentStatus").className = "status ok";
+    }
+
+    function updateSelectedTitle() {
+      if (!state.selectedNode || !state.editMode) {
+        return;
+      }
+      const fallback = state.selectedIsRoot ? "未命名工作树" : "新节点";
+      const text = normalizeMindMapText($("selectedNodeTitle").value, fallback);
+      $("selectedNodeTitle").value = text;
+      state.mindMap.execCommand("SET_NODE_TEXT", state.selectedNode, text);
+      if (state.selectedIsRoot) {
+        updateInputSummary(text);
+      }
+      $("nodeContentStatus").textContent = "标题已同步到当前树，保存后写入文件。";
+      $("nodeContentStatus").className = "status ok";
+    }
+
+    function updateSelectedControls() {
+      const hasNode = Boolean(state.selectedUid);
+      const canEditNode = !state.busy && hasNode && state.editMode;
+      $("selectedNodeTitle").disabled = !canEditNode;
+      $("nodeContentInput").disabled = !canEditNode;
+      $("deleteNodeBtn").disabled = !canEditNode || state.selectedIsRoot;
+      $("undoBtn").disabled = state.busy || !state.editMode;
+      $("redoBtn").disabled = state.busy || !state.editMode;
+    }
+
+    function refreshSelectedNodePanel() {
+      const node = state.selectedNode;
+      if (!node || !node.nodeData || !node.nodeData.data) {
+        return;
+      }
+      const data = node.nodeData.data;
+      const meta = data._xiushenlu || {};
+      if (document.activeElement !== $("selectedNodeTitle")) {
+        $("selectedNodeTitle").value = normalizeMindMapText(data.text, state.selectedIsRoot ? "未命名工作树" : "未命名节点");
+      }
+      if (document.activeElement !== $("nodeContentInput")) {
+        $("nodeContentInput").value = meta.content || "";
+      }
+    }
+
+    function refreshCanvasSummary() {
+      if (!state.mindMap) {
+        return;
+      }
+      const root = state.mindMap.getData(false);
+      const rootData = root && root.data ? root.data : {};
+      updateInputSummary(normalizeMindMapText(rootData.text, ""));
     }
 
     function normalizeText(value, fallback) {
@@ -1122,14 +1266,138 @@
       return normalized || fallback || "node";
     }
 
+    function setEditMode(value) {
+      state.editMode = Boolean(value);
+      $("workspace").classList.toggle("edit-mode", state.editMode);
+      $("editModeBtn").setAttribute("aria-pressed", state.editMode ? "true" : "false");
+      $("editModeBtn").textContent = state.editMode ? "编辑中" : "编辑模式";
+      applyMindMapMode();
+      updateSelectedControls();
+      setStatus(state.editMode ? "编辑模式已开启。节点右侧加同级，下侧加子节点。" : "编辑模式已关闭。", "ok");
+    }
+
+    function applyMindMapMode() {
+      if (!state.mindMap) {
+        return;
+      }
+      if (typeof state.mindMap.setMode === "function") {
+        state.mindMap.setMode(state.editMode ? "edit" : "readonly");
+      } else {
+        state.mindMap.updateConfig({ readonly: !state.editMode });
+      }
+      state.mindMap.updateConfig({
+        addCustomContentToNode: state.editMode ? createNodeActionContent() : null,
+      });
+      state.mindMap.reRender();
+    }
+
+    function createNodeActionContent() {
+      return {
+        create: (node) => {
+          const layer = document.createElement("div");
+          layer.className = "node-action-layer";
+          layer.style.width = "1px";
+          layer.style.height = "1px";
+
+          if (!node.isRoot) {
+            layer.appendChild(createNodeActionButton("sibling", "新增同级", () => insertSiblingNode(node)));
+          }
+          layer.appendChild(createNodeActionButton("child", "新增子节点", () => insertChildNode(node)));
+          return { el: layer, width: 1, height: 1 };
+        },
+        handle: ({ content, element, node }) => {
+          const width = Math.max(1, Number(node.width || 1));
+          const height = Math.max(1, Number(node.height || 1));
+          content.el.style.width = `${width}px`;
+          content.el.style.height = `${height}px`;
+          content.width = width;
+          content.height = height;
+          if (typeof element.size === "function") {
+            element.size(width, height);
+          } else {
+            element.width(width);
+            element.height(height);
+          }
+          element.x(0).y(0);
+        },
+      };
+    }
+
+    function createNodeActionButton(kind, title, handler) {
+      const button = document.createElement("button");
+      button.className = `node-action-button ${kind}`;
+      button.type = "button";
+      button.title = title;
+      button.setAttribute("aria-label", title);
+      button.textContent = "+";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        handler();
+      });
+      button.addEventListener("dblclick", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      });
+      return button;
+    }
+
+    function newNodeData() {
+      return {
+        text: "新节点",
+        _xiushenlu: {
+          content: "",
+        },
+      };
+    }
+
+    function insertChildNode(node) {
+      if (!state.mindMap || !state.editMode || !node) {
+        return;
+      }
+      state.mindMap.execCommand("INSERT_CHILD_NODE", false, [node], newNodeData());
+      setStatus("已新增子节点，保存后写入文件。", "ok");
+    }
+
+    function insertSiblingNode(node) {
+      if (!state.mindMap || !state.editMode || !node || node.isRoot) {
+        return;
+      }
+      state.mindMap.execCommand("INSERT_NODE", false, [node], newNodeData());
+      setStatus("已新增同级节点，保存后写入文件。", "ok");
+    }
+
+    function deleteSelectedNode() {
+      if (!state.mindMap || !state.editMode || !state.selectedNode || state.selectedIsRoot) {
+        return;
+      }
+      const title = normalizeMindMapText(state.selectedNode.nodeData.data.text, "当前节点");
+      state.mindMap.execCommand("REMOVE_NODE", [state.selectedNode]);
+      clearNodeContentPanel();
+      setStatus(`已删除“${title}”及其子节点，可用撤销恢复。`, "ok");
+    }
+
+    function runHistoryCommand(command) {
+      if (!state.mindMap) {
+        return;
+      }
+      state.mindMap.execCommand(command);
+      refreshCanvasSummary();
+      refreshSelectedNodePanel();
+    }
+
     async function saveTree() {
       if (!state.mindMap) {
+        return;
+      }
+      if (state.jsonDraftDirty) {
+        setStatus("JSON 输入有未应用更改。请先点“渲染输入”导入画布，或点“同步当前树”放弃这段 JSON 草稿。", "error");
         return;
       }
       setBusy(true);
       setStatus("保存中…");
       try {
-        const tree = state.jsonDirty ? parseTreeText($("treeJsonInput").value) : getCurrentTaskTree();
+        const tree = getCurrentTaskTree();
         const data = await requestJson("/api/task-tree", {
           method: "POST",
           body: JSON.stringify({
@@ -1196,16 +1464,22 @@
     $("treeSelect").addEventListener("change", () => loadState($("treeSelect").value));
     $("treeTitleInput").addEventListener("input", () => updateInputSummary());
     $("treeJsonInput").addEventListener("input", () => {
-      state.jsonDirty = true;
+      state.jsonDraftDirty = true;
+      setStatus("JSON 输入已变更，但尚未导入画布；保存前需要渲染输入或同步当前树。");
     });
     $("refreshSavedBtn").addEventListener("click", refreshSavedFiles);
     $("renderBtn").addEventListener("click", renderFromInput);
     $("syncJsonBtn").addEventListener("click", syncJsonFromMap);
     $("saveBtn").addEventListener("click", saveTree);
+    $("editModeBtn").addEventListener("click", () => setEditMode(!state.editMode));
+    $("undoBtn").addEventListener("click", () => runHistoryCommand("BACK"));
+    $("redoBtn").addEventListener("click", () => runHistoryCommand("FORWARD"));
     $("fitBtn").addEventListener("click", fitMap);
     $("expandBtn").addEventListener("click", expandAll);
     $("collapseBtn").addEventListener("click", collapseAll);
+    $("selectedNodeTitle").addEventListener("input", updateSelectedTitle);
     $("nodeContentInput").addEventListener("input", updateSelectedContent);
+    $("deleteNodeBtn").addEventListener("click", deleteSelectedNode);
     window.addEventListener("resize", resizeMap);
     loadState();
   </script>

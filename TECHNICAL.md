@@ -70,7 +70,9 @@ conda run --no-capture-output -n xiushenlu python app/main.py console
 
 控制台里的“停止”是防误点的 v1 语义：它不会强行中断 DashScope SDK 正在进行的同步网络调用，但会标记当前操作为取消；如果 LLM 稍后返回，后端会在写入 daily、`today_tasks.md` 或事件日志前丢弃结果。同一时间后端只允许一个 LLM 操作运行。
 
-工作树页不调用 LLM。`/task-tree` 使用本地 vendored SimpleMindMap 以 `organizationStructure` 布局加载工作树 JSON，支持根在上、叶在下的矩形节点、拖拽、缩放、文本编辑、节点内容编辑和子树展开/收起。“选择文件”只扫描 `paths.task_tree_dir` 根目录下的 `.json` 文件，不递归子目录；菜单以文件名 stem 展示，读取时使用完整文件名作为 key。选择文件会把标题设为文件名 stem，并把磁盘里的 JSON 原文加载到输入区；保存时会校验 JSON，并按标题写入 `data/task_tree/<标题>.json`，标题会清洗为合法 Windows 文件名，保存后刷新文件列表并选中新文件。
+工作树页不调用 LLM。`/task-tree` 使用本地 vendored SimpleMindMap 以 `organizationStructure` 布局加载工作树 JSON，支持根在上、叶在下的矩形节点、拖拽、缩放、节点内容编辑、编辑模式和子树展开/收起。“选择文件”只扫描 `paths.task_tree_dir` 根目录下的 `.json` 文件，不递归子目录；菜单以文件名 stem 展示，读取时使用完整文件名作为 key。选择文件会把标题设为文件名 stem，并把磁盘里的 JSON 原文加载到输入区；左侧 JSON 输入只作为导入/导出缓冲区，点击“渲染输入”才会导入画布，点击“同步当前树”才会把画布导出为 JSON。保存时始终以当前画布树为准；如果 JSON 输入有未渲染改动，页面会阻止保存，要求先渲染输入或同步当前树。保存时会校验 JSON，并按“保存标题”写入 `data/task_tree/<标题>.json`，标题会清洗为合法 Windows 文件名，保存后刷新文件列表并选中新文件。
+
+工作树编辑模式打开后，节点右侧 `+` 会调用 SimpleMindMap 的 `INSERT_NODE` 新增同级节点，节点下侧 `+` 会调用 `INSERT_CHILD_NODE` 新增子节点；根节点不显示同级新增入口。右侧“节点属性”面板通过 `SET_NODE_TEXT` 修改节点标题，通过 `SET_NODE_DATA` 修改 `_xiushenlu.content`，删除节点调用 `REMOVE_NODE` 删除整支子树；撤销和重做分别调用 `BACK` 与 `FORWARD`。页面保存前会把 SimpleMindMap 当前数据转回项目工作树 JSON。
 
 工作树 JSON 根对象需要包含 `title` 和 `nodes`，可选 `summary`。节点包含 `title`，可选 `id`、`content` 和 `children`；`children` 是子节点数组，可省略或为空。旧 JSON 中的 `note` 会在保存时迁移为 `content`，`kind`、`cadence`、`status`、`tags` 等旧节点标签字段会被丢弃。
 
