@@ -86,7 +86,9 @@ class PlanUpdateTests(unittest.TestCase):
         self.assertIn("schedule_task", prompt)
         self.assertIn("schedule_priority", prompt)
         self.assertIn("schedule_estimate", prompt)
-        self.assertIn("状态和用时由程序写空", prompt)
+        self.assertIn("状态由程序写空", prompt)
+        self.assertIn("xiushenlu维护", prompt)
+        self.assertIn("不会使用预计和用时", prompt)
         self.assertIn("冒号前是目标分组标题", prompt)
         self.assertIn("分组展示必须统一为“【分组】”", prompt)
         self.assertIn("新增“杂事： 游泳”，必须新建或使用“【杂事】”", prompt)
@@ -201,6 +203,85 @@ class PlanUpdateTests(unittest.TestCase):
         self.assertIn("**2. 计划建议**", updated)
         self.assertIn("| 第二个任务 | P3 | 30m |  |  |", updated)
         self.assertNotIn("**新任务**", updated)
+
+    def test_update_daily_appends_daily_task_to_grouped_daily_table(self) -> None:
+        daily = """# 2026-05-23
+
+## 计划
+
+**今日待办**
+
+【日常】
+1. 喝水
+
+**任务管理**
+
+【目标】
+| 任务 | 优先级 | 预计 | 状态 | 用时 |
+|---|---|---|---|---|
+| 写复盘 | P1 | 30m |  |  |
+
+【日常】
+| 任务 | 优先级 | 预计 | 状态 | 用时 |
+|---|---|---|---|---|
+| 喝水 | P3 | 5m |  |  |
+
+【xiushenlu维护】
+| 任务 | 优先级 | 状态 |
+|---|---|---|
+
+## 记录
+
+- 10:00 开始
+"""
+
+        updated = update_daily_plan_text(
+            daily_text=daily,
+            date_text="2026-05-23",
+            updated_daily_original="【日常】\n1. 喝水\n2. 伸展",
+            schedule_row=ScheduleRow("伸展", "P3", "5m", category="日常"),
+        )
+
+        self.assertIn("【日常】\n| 任务 | 优先级 | 预计 | 状态 | 用时 |", updated)
+        self.assertIn("| 喝水 | P3 | 5m |  |  |\n| 伸展 | P3 | 5m |  |  |", updated)
+        self.assertNotIn("| 伸展 | P3 |\n", updated)
+
+    def test_update_daily_appends_maintenance_task_to_status_table(self) -> None:
+        daily = """# 2026-05-23
+
+## 计划
+
+**今日待办**
+
+【修身炉】
+1. 修复计划表
+
+**任务管理**
+
+【目标】
+| 任务 | 优先级 | 预计 | 状态 | 用时 |
+|---|---|---|---|---|
+
+【日常】
+| 任务 | 优先级 | 预计 | 状态 | 用时 |
+|---|---|---|---|---|
+
+【xiushenlu维护】
+| 任务 | 优先级 | 状态 |
+|---|---|---|
+| 修复计划表 | P1 |  |
+"""
+
+        updated = update_daily_plan_text(
+            daily_text=daily,
+            date_text="2026-05-23",
+            updated_daily_original="【修身炉】\n1. 修复计划表\n2. 优化任务管理表",
+            schedule_row=ScheduleRow("优化任务管理表", "P1", "30m", category="xiushenlu维护"),
+        )
+
+        self.assertIn("【xiushenlu维护】\n| 任务 | 优先级 | 状态 |\n|---|---|---|", updated)
+        self.assertIn("| 修复计划表 | P1 |  |\n| 优化任务管理表 | P1 |  |", updated)
+        self.assertNotIn("| 优化任务管理表 | P1 | 30m |", updated)
 
     def test_update_daily_creates_minimal_plan_when_missing(self) -> None:
         updated = update_daily_plan_text(

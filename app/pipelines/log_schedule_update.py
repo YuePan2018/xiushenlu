@@ -16,6 +16,8 @@ from app.safety import safe_write_text
 
 
 CURRENT_HEADERS = ("任务", "优先级", "预计", "状态", "用时")
+MAINTENANCE_HEADERS = ("任务", "优先级", "状态")
+LEGACY_MAINTENANCE_HEADERS = ("任务", "优先级")
 IN_PROGRESS_MARK = "○"
 CHECK_MARK = "✓"
 DROPPED_MARK = "×"
@@ -65,13 +67,29 @@ class ParsedSchedulePatch:
 
 
 @dataclass(frozen=True)
-class ScheduleTable:
+class ScheduleTableBlock:
     start_line: int
     end_line: int
+    category: str
+    headers: tuple[str, ...]
     rows: tuple[tuple[str, str, str, str, str], ...]
 
     def to_markdown(self) -> str:
-        return _render_table(self.rows)
+        lines = [f"【{self.category}】"] if self.category else []
+        lines.extend(_render_table(self.rows, self.headers).splitlines())
+        return "\n".join(lines)
+
+
+@dataclass(frozen=True)
+class ScheduleTable:
+    blocks: tuple[ScheduleTableBlock, ...]
+
+    @property
+    def rows(self) -> tuple[tuple[str, str, str, str, str], ...]:
+        return tuple(row for block in self.blocks for row in block.rows)
+
+    def to_markdown(self) -> str:
+        return "\n\n".join(block.to_markdown() for block in self.blocks)
 
 
 @dataclass(frozen=True)
@@ -148,8 +166,11 @@ def find_schedule_table(daily_text: str) -> ScheduleTable | None:
     if plan_start is None:
         return None
 
-    for index in range(plan_start, plan_end):
+    blocks: list[ScheduleTableBlock] = []
+    index = plan_start
+    while index < plan_end:
         if not _is_table_line(lines[index]):
+            index += 1
             continue
 
         table_start = index
@@ -158,10 +179,21 @@ def find_schedule_table(daily_text: str) -> ScheduleTable | None:
             table_end += 1
 
         table_lines = lines[table_start:table_end]
-        rows = _parse_table_lines(table_lines)
-        return ScheduleTable(start_line=table_start, end_line=table_end, rows=tuple(rows))
+        headers, rows = _parse_table_lines(table_lines)
+        blocks.append(
+            ScheduleTableBlock(
+                start_line=table_start,
+                end_line=table_end,
+                category=_category_before_table(lines, table_start),
+                headers=headers,
+                rows=tuple(rows),
+            )
+        )
+        index = table_end
 
-    return None
+    if not blocks:
+        return None
+    return ScheduleTable(blocks=tuple(blocks))
 
 
 def extract_daily_records(daily_text: str) -> tuple[DailyRecord, ...]:
@@ -253,19 +285,45 @@ def apply_schedule_patch(daily_text: str, parsed: ParsedSchedulePatch) -> tuple[
         raise LogScheduleUpdateParseError("schedule table not found.")
 
     records = extract_daily_records(daily_text)
-    rows = [list(row) for row in table.rows]
+    total_rows = len(table.rows)
     for update in parsed.updates:
-        if update.row_index < 1 or update.row_index > len(rows):
+        if update.row_index < 1 or update.row_index > total_rows:
             raise LogScheduleUpdateParseError("row_index is out of range.")
-        row = rows[update.row_index - 1]
-        if update.completion_mark is not None:
-            row[3] = update.completion_mark
-        if update.time_record_ids is not None:
-            total_seconds = _calculate_duration_seconds(update.time_record_ids, records)
-            row[4] = _format_duration(total_seconds)
 
-    new_table_lines = _render_table(tuple(tuple(row) for row in rows)).splitlines()
-    new_lines = lines[: table.start_line] + new_table_lines + lines[table.end_line :]
+    update_by_row_index = {update.row_index: update for update in parsed.updates}
+    updated_blocks: list[ScheduleTableBlock] = []
+    global_row_index = 0
+    for block in table.blocks:
+        rows: list[tuple[str, str, str, str, str]] = []
+        for source_row in block.rows:
+            global_row_index += 1
+            row = list(source_row)
+            update = update_by_row_index.get(global_row_index)
+            if update is not None:
+                if update.completion_mark is not None:
+                    row[3] = update.completion_mark
+                if update.time_record_ids is not None and block.headers == CURRENT_HEADERS:
+                    total_seconds = _calculate_duration_seconds(update.time_record_ids, records)
+                    row[4] = _format_duration(total_seconds)
+            rows.append(tuple(row))  # type: ignore[arg-type]
+        updated_blocks.append(
+            ScheduleTableBlock(
+                start_line=block.start_line,
+                end_line=block.end_line,
+                category=block.category,
+                headers=block.headers,
+                rows=tuple(rows),
+            )
+        )
+
+    new_lines = list(lines)
+    offset = 0
+    for old_block, new_block in zip(table.blocks, updated_blocks, strict=True):
+        start = old_block.start_line + offset
+        end = old_block.end_line + offset
+        new_table_lines = _render_table(new_block.rows, new_block.headers).splitlines()
+        new_lines = new_lines[:start] + new_table_lines + new_lines[end:]
+        offset += len(new_table_lines) - (old_block.end_line - old_block.start_line)
     updated = "\n".join(new_lines).rstrip() + "\n"
     return updated, len(parsed.updates)
 
@@ -278,7 +336,7 @@ def build_schedule_patch_prompt(
 ) -> str:
     record_text = record_content.strip()
     records_text = _format_records_for_prompt(records)
-    return f"""你是个人执行管理助手，只根据 daily 记录更新当天任务管理表的状态列和用时列。
+    return f"""你是个人执行管理助手，只根据 daily 记录更新当天任务管理表的状态列；目标/日常表可更新用时，xiushenlu维护表只更新状态。
 
 任务：根据本次记录返回 log_schedule_updates JSON。
 
@@ -295,11 +353,12 @@ def build_schedule_patch_prompt(
 
 硬性规则：
 - 你只能判断已有任务行的“状态”和“用时”是否需要变化，不要输出整张表。
-- row_index 使用 1-based 行号，第一条任务行是 1。
+- row_index 使用 1-based 行号，跨多个任务管理小表从上到下连续编号，第一条任务行是 1。
 - status 使用五种值：keep 表示状态列不变，not_started 表示状态列清空，in_progress 表示写为“{IN_PROGRESS_MARK}”，completed 表示写为“{CHECK_MARK}”，dropped 表示写为“{DROPPED_MARK}”。
 - 记录没有提到任务开始或推进时，用 keep 或不输出更新；记录提到开始做、正在做、推进中、完成了一部分但任务还会继续，使用 in_progress；记录明确完成，使用 completed。
 - 记录说删除这个任务、取消、不再追踪、不再纳入今天任务、短期内不做或这个任务今天不管了，使用 dropped；dropped 表示任务退出追踪，不等同于 completed。
 - 记录与计划任务的匹配：记录可能只写任务简称、删掉修饰词或只写核心关键词。但不要把没有共同核心词的记录强行匹配。
+- `【xiushenlu维护】` 表没有预计和用时列；维护任务只需要更新状态，不要为了维护任务输出 time_records。
 - 用时列是派生值：每次都从当天全部记录重新找出该任务相关记录，不要把旧表格里的用时当作累计变量。
 - time_records 填所有与该任务当天执行相关的记录 ID；不要判断哪条是开始或结束，程序只看这些记录的首尾时间。
 - 如果相关记录里有明确写出的时长，例如“20分钟”“用时40m”“耗时1.5h”，程序只使用最后一次明确时长作为最终用时，不累加，也不再计算首尾时间差。
@@ -316,30 +375,42 @@ JSON 格式固定为：
 """
 
 
-def _parse_table_lines(table_lines: list[str]) -> list[tuple[str, str, str, str, str]]:
+def _parse_table_lines(table_lines: list[str]) -> tuple[tuple[str, ...], list[tuple[str, str, str, str, str]]]:
     if len(table_lines) < 2:
         raise LogScheduleUpdateParseError("schedule table must contain header and separator.")
 
     headers = _split_table_row(table_lines[0])
-    if tuple(headers) != CURRENT_HEADERS:
+    normalized_headers = _normalize_table_headers(tuple(headers))
+    if normalized_headers is None:
         raise LogScheduleUpdateParseError("schedule table header is not the expected five columns.")
 
     separator = _split_table_row(table_lines[1])
-    if len(separator) != len(CURRENT_HEADERS) or not all(_is_separator_cell(cell) for cell in separator):
+    if len(separator) != len(headers) or not all(_is_separator_cell(cell) for cell in separator):
         raise LogScheduleUpdateParseError("schedule table separator is invalid.")
 
     rows: list[tuple[str, str, str, str, str]] = []
     for line in table_lines[2:]:
         cells = _split_table_row(line)
-        if len(cells) != len(CURRENT_HEADERS):
+        if len(cells) != len(headers):
             raise LogScheduleUpdateParseError("schedule table row does not match the expected columns.")
-        if cells[3] not in VALID_COMPLETION_MARKS:
+        if normalized_headers == CURRENT_HEADERS:
+            task, priority, estimate, status, duration = cells
+        elif tuple(headers) == MAINTENANCE_HEADERS:
+            task, priority, status = cells
+            estimate = ""
+            duration = ""
+        else:
+            task, priority = cells
+            estimate = ""
+            status = ""
+            duration = ""
+        if status not in VALID_COMPLETION_MARKS:
             raise LogScheduleUpdateParseError("status column must be empty, in progress, completed, or dropped.")
-        if "\n" in cells[4] or "|" in cells[4]:
+        if "\n" in duration or "|" in duration:
             raise LogScheduleUpdateParseError("duration column contains unsafe content.")
-        cells[4] = _normalize_duration_cell(cells[4])
-        rows.append(tuple(cells))  # type: ignore[arg-type]
-    return rows
+        duration = _normalize_duration_cell(duration)
+        rows.append((task, priority, estimate, status, duration))
+    return normalized_headers, rows
 
 
 def _parse_completion_mark(item: dict[str, Any]) -> str | None:
@@ -475,7 +546,16 @@ def _parse_clock_seconds(text: str) -> int:
     return hour * 3600 + minute * 60 + second
 
 
-def _render_table(rows: tuple[tuple[str, str, str, str, str], ...]) -> str:
+def _render_table(rows: tuple[tuple[str, str, str, str, str], ...], headers: tuple[str, ...] = CURRENT_HEADERS) -> str:
+    if headers == MAINTENANCE_HEADERS:
+        lines = [
+            "| 任务 | 优先级 | 状态 |",
+            "|---|---|---|",
+        ]
+        for task, priority, _estimate, status, _duration in rows:
+            lines.append(f"| {task} | {priority} | {status} |")
+        return "\n".join(lines)
+
     lines = [
         "| 任务 | 优先级 | 预计 | 状态 | 用时 |",
         "|---|---|---|---|---|",
@@ -483,6 +563,28 @@ def _render_table(rows: tuple[tuple[str, str, str, str, str], ...]) -> str:
     for row in rows:
         lines.append("| " + " | ".join(row) + " |")
     return "\n".join(lines)
+
+
+def _normalize_table_headers(headers: tuple[str, ...]) -> tuple[str, ...] | None:
+    if headers == CURRENT_HEADERS:
+        return CURRENT_HEADERS
+    if headers == MAINTENANCE_HEADERS:
+        return MAINTENANCE_HEADERS
+    if headers == LEGACY_MAINTENANCE_HEADERS:
+        return MAINTENANCE_HEADERS
+    return None
+
+
+def _category_before_table(lines: list[str], table_start: int) -> str:
+    index = table_start - 1
+    while index >= 0 and not lines[index].strip():
+        index -= 1
+    if index < 0:
+        return ""
+    line = lines[index].strip().strip("*").strip("#").strip()
+    if len(line) > 2 and line.startswith("【") and line.endswith("】"):
+        return line[1:-1].strip()
+    return ""
 
 
 def _format_records_for_prompt(records: tuple[DailyRecord, ...]) -> str:

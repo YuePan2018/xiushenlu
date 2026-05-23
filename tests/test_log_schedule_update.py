@@ -94,6 +94,60 @@ class LogScheduleUpdateTests(unittest.TestCase):
             self.assertNotIn("999h", daily_text)
             self.assertEqual([event["type"] for event in logger.events], ["llm_call", "schedule_updated_from_log"])
 
+    def test_update_schedule_handles_grouped_tables_and_maintenance_status(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            daily_file = _write_daily(
+                config,
+                "# 2026-05-10\n\n"
+                "## 计划\n\n"
+                "**今日待办**\n\n"
+                "【目标】\n"
+                "1. 写复盘\n\n"
+                "**任务管理**\n\n"
+                "【目标】\n"
+                "| 任务 | 优先级 | 预计 | 状态 | 用时 |\n"
+                "|---|---|---|---|---|\n"
+                "| 写复盘 | P1 | 30m |  |  |\n\n"
+                "【日常】\n"
+                "| 任务 | 优先级 | 预计 | 状态 | 用时 |\n"
+                "|---|---|---|---|---|\n"
+                "| 喝水 | P3 | 5m |  |  |\n\n"
+                "【xiushenlu维护】\n"
+                "| 任务 | 优先级 | 状态 |\n"
+                "|---|---|---|\n"
+                "| 修复计划表 | P1 |  |\n\n"
+                "## 记录\n\n"
+                "- 10:00:00 完成修复计划表，用时40m。\n",
+            )
+            reply = json.dumps(
+                {
+                    "updates": [
+                        {
+                            "row_index": 3,
+                            "status": "completed",
+                            "evidence": "完成修复计划表",
+                            "time_records": [1],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+            result = update_schedule_from_log(
+                FakeProvider(reply),
+                "完成修复计划表，用时40m。",
+                config=config,
+                target_date=date(2026, 5, 10),
+                logger=FakeLogger(),  # type: ignore[arg-type]
+            )
+
+            self.assertTrue(result.updated)
+            daily_text = daily_file.read_text(encoding="utf-8")
+            self.assertIn("| 修复计划表 | P1 | ✓ |", daily_text)
+            self.assertNotIn("| 修复计划表 | P1 |  | ✓ | 40m |", daily_text)
+            self.assertIn("| 写复盘 | P1 | 30m |  |  |", daily_text)
+
     def test_time_records_use_first_and_last_record_when_no_duration(self) -> None:
         with _temporary_directory() as temp_dir:
             config = _test_config(Path(temp_dir))
@@ -400,6 +454,8 @@ class LogScheduleUpdateTests(unittest.TestCase):
         self.assertIn("completed", prompt)
         self.assertIn("dropped", prompt)
         self.assertIn("用时列是派生值", prompt)
+        self.assertIn("xiushenlu维护表只更新状态", prompt)
+        self.assertIn("维护任务只需要更新状态", prompt)
         self.assertIn("不要把旧表格里的用时当作累计变量", prompt)
         self.assertIn("任务简称", prompt)
         self.assertIn("核心关键词", prompt)
