@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import re
 from dataclasses import dataclass
@@ -206,7 +207,10 @@ def _required_text(data: dict[str, Any], key: str, label: str) -> str:
     value = data.get(key)
     if not isinstance(value, str) or not value.strip():
         raise TaskTreeError(f"{label} 不能为空。")
-    return value.strip()
+    cleaned = _clean_title_text(value)
+    if not cleaned:
+        raise TaskTreeError(f"{label} 不能为空。")
+    return cleaned
 
 
 def _optional_text(value: Any) -> str:
@@ -229,6 +233,16 @@ def _strip_json_fence(text: str) -> str:
     if match is None:
         return stripped
     return match.group(1).strip()
+
+
+def _clean_title_text(value: str) -> str:
+    text = value.strip()
+    for _ in range(3):
+        decoded = html.unescape(text)
+        if decoded == text:
+            break
+        text = decoded
+    return re.sub(r"</?p\b[^>]*>", "", text, flags=re.IGNORECASE).strip()
 
 
 def _sanitize_filename_stem(title: str) -> str:

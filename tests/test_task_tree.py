@@ -98,6 +98,25 @@ class TaskTreeTests(unittest.TestCase):
             ],
         )
 
+    def test_parse_task_tree_strips_mind_map_paragraph_html_from_titles(self) -> None:
+        tree = parse_task_tree_text(
+            json.dumps(
+                {
+                    "title": "<p>&lt;p&gt;深层需求&lt;/p&gt;</p>",
+                    "nodes": [
+                        {
+                            "title": "<p>&lt;p&gt;第一层：资料进入&lt;/p&gt;</p>",
+                            "children": [],
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            )
+        )
+
+        self.assertEqual(tree["title"], "深层需求")
+        self.assertEqual(tree["nodes"][0]["title"], "第一层：资料进入")
+
     def test_parse_task_tree_requires_title_and_nodes(self) -> None:
         with self.assertRaisesRegex(TaskTreeError, "工作树标题"):
             parse_task_tree_text('{"nodes": []}')

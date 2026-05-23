@@ -950,7 +950,7 @@
       return {
         data: {
           uid: "root",
-          text: tree.title || "未命名工作树",
+          text: normalizeMindMapText(tree.title, "未命名工作树"),
           expand: true,
           _xiushenlu: {
             root: true,
@@ -969,7 +969,7 @@
       return {
         data: {
           uid: node.id || fallbackId,
-          text: node.title || "未命名节点",
+          text: normalizeMindMapText(node.title, "未命名节点"),
           expand: true,
           _xiushenlu: {
             content: node.content || node.note || "",
@@ -1004,7 +1004,7 @@
     function mindRootToTaskTree(root) {
       const data = root && root.data ? root.data : {};
       const meta = data._xiushenlu || {};
-      const title = normalizeText(data.text, "未命名工作树");
+      const title = normalizeMindMapText(data.text, "未命名工作树");
       return {
         version: Number(meta.version || 1),
         title,
@@ -1021,7 +1021,7 @@
       const children = Array.isArray(node.children) ? node.children : [];
       const taskNode = {
         id: safeNodeId(data.uid || fallbackId, fallbackId),
-        title: normalizeText(data.text, "未命名节点"),
+        title: normalizeMindMapText(data.text, "未命名节点"),
       };
       const content = normalizeText(meta.content || "", "");
       if (content) {
@@ -1055,7 +1055,7 @@
       state.selectedUid = uid;
       state.selectedIsRoot = Boolean(meta.root);
       const content = state.contentEdits.has(uid) ? state.contentEdits.get(uid) : (meta.content || "");
-      $("selectedNodeTitle").textContent = normalizeText(data.text, "未命名节点");
+      $("selectedNodeTitle").textContent = normalizeMindMapText(data.text, "未命名节点");
       $("nodeKindText").textContent = state.selectedIsRoot ? "根节点摘要" : "任务节点内容";
       $("nodeContentLabel").textContent = state.selectedIsRoot ? "摘要" : "内容";
       $("nodeContentInput").value = content;
@@ -1090,6 +1090,30 @@
     function normalizeText(value, fallback) {
       const text = String(value || "").trim();
       return text || fallback;
+    }
+
+    function normalizeMindMapText(value, fallback) {
+      const text = htmlishTextToPlain(value);
+      return text || fallback;
+    }
+
+    function htmlishTextToPlain(value) {
+      let text = String(value || "").trim();
+      for (let i = 0; i < 3; i += 1) {
+        const textarea = document.createElement("textarea");
+        textarea.innerHTML = text;
+        const decoded = textarea.value;
+        if (decoded === text) {
+          break;
+        }
+        text = decoded.trim();
+      }
+      if (!/[<&]/.test(text)) {
+        return text;
+      }
+      const template = document.createElement("template");
+      template.innerHTML = text;
+      return (template.content.textContent || text).trim();
     }
 
     function safeNodeId(value, fallback) {
