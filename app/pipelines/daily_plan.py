@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any, Callable
@@ -18,47 +18,14 @@ from app.pipelines.today_tasks_format import (
     format_today_tasks_snapshot,
 )
 
+
 FULL_TABLE_HEADERS = ("任务", "优先级", "预计", "状态", "用时")
 MAINTENANCE_TABLE_HEADERS = ("任务", "优先级", "状态")
 LEGACY_MAINTENANCE_TABLE_HEADERS = ("任务", "优先级")
-CATEGORY_TARGET = "目标"
-CATEGORY_DAILY = "日常"
-CATEGORY_MAINTENANCE = "xiushenlu维护"
-SCHEDULE_CATEGORIES = (CATEGORY_TARGET, CATEGORY_DAILY, CATEGORY_MAINTENANCE)
-MAINTENANCE_HEADINGS = {"xiushenlu", "修身炉", "xiushenlu维护", "修身炉维护"}
-MAINTENANCE_KEYWORDS = (
-    "bug",
-    "修bug",
-    "修复",
-    "修正",
-    "修补",
-    "排查",
-    "排错",
-    "报错",
-    "错误",
-    "问题",
-    "优化",
-    "维护",
-    "改进",
-    "调整",
-    "重构",
-    "清理",
-    "完善",
-)
-
-
-@dataclass(frozen=True)
-class SourceTaskItem:
-    heading: str
-    text: str
-
-
-@dataclass(frozen=True)
-class NormalizedScheduleRow:
-    category: str
-    task: str
-    priority: str
-    estimate: str
+TARGET_CATEGORY = "目标"
+DAILY_CATEGORY = "日常"
+MAINTENANCE_CATEGORY = "xiushenlu维护"
+TASK_MANAGEMENT_CATEGORIES = (TARGET_CATEGORY, DAILY_CATEGORY, MAINTENANCE_CATEGORY)
 
 
 @dataclass(frozen=True)
@@ -66,6 +33,19 @@ class DailyPlanResult:
     date: str
     path: Path
     plan: str
+
+
+@dataclass(frozen=True)
+class SourceTask:
+    heading: str
+    item: str
+
+
+@dataclass
+class CategorizedScheduleRows:
+    target: list[tuple[str, str, str, str, str]] = field(default_factory=list)
+    daily: list[tuple[str, str, str, str, str]] = field(default_factory=list)
+    maintenance: list[tuple[str, str, str]] = field(default_factory=list)
 
 
 def generate_daily_plan(
@@ -120,14 +100,15 @@ def _build_prompt(date_text: str, goals: str, tasks: str) -> str:
 请根据长期目标和今日待办，为 {date_text} 生成一份当天任务管理表。
 
 输出结构：
-1. 只输出"**任务管理**"、三个任务分类标题和 markdown 表格。
+1. 只输出"**任务管理**"、三个分类标题和 markdown 表格。
 2. 任务管理表格前固定输出一行：**任务管理**
-3. 必须拆成三个小表，标题固定为：`【目标】`、`【日常】`、`【xiushenlu维护】`。
-4. 表头必须使用英文竖线。`【目标】` 和 `【日常】` 表头固定为：| 任务 | 优先级 | 预计 | 状态 | 用时 |。“状态”和“用时”两列都不填。
-5. `【xiushenlu维护】` 只输出三列表头：| 任务 | 优先级 | 状态 |。“状态”列不填，不要输出“预计”或“用时”列。
-6. “任务”列必须逐字使用今日待办里的任务正文，不能改写、概括、扩写、删掉括号补充或改成短标题。
-7. 今日待办中 `【日常】` 分组的任务放入 `【日常】` 表；修身炉 / xiushenlu 项目的修 bug、修复、优化、维护类任务放入 `【xiushenlu维护】` 表；除此之外都放入 `【目标】` 表。
-8. 预估时要考虑用户会用 Codex 辅助工作。如果工作总时间超出6小时（工作外的杂事不算入时间），在表格后用一句话提示超时，并说明6小时内优先做哪几个任务。
+3. 必须依次输出三个分类标题：`【目标】`、`【日常】`、`【xiushenlu维护】`。
+4. 表格必须使用英文竖线。
+5. `【目标】` 和 `【日常】` 表头固定为：| 任务 | 优先级 | 预计 | 状态 | 用时 |。“状态”和“用时”两列都不填。
+6. `【xiushenlu维护】` 只输出三列表头：| 任务 | 优先级 | 状态 |。“状态”列不填，不要输出“预计”或“用时”列。
+7. “任务”列必须逐字使用今日待办里的任务正文，不能改写、概括、扩写、删掉括号补充或改成短标题。
+8. 分类规则：今日待办中 `【日常】` 分组下的任务放进 `【日常】`；对 xiushenlu/修身炉项目的修 bug、排障、维护和优化任务放进 `【xiushenlu维护】`；除此之外都放进 `【目标】`。
+9. 预估时要考虑用户会用 Codex 辅助工作。如果工作总时间超出6小时（工作外的杂事不算入时间），在表格后用一句话提示超时，并说明6小时内优先做哪几个任务。
 
 其他要求：
 - 不要输出“今日待办”原文；这部分由程序直接写入。
@@ -171,11 +152,213 @@ def _write_plan_section(config: dict[str, Any], date_text: str, plan: str) -> No
 
 
 def _normalize_schedule_table(schedule_text: str, tasks: str = "") -> str:
-    parsed = _collect_schedule_rows(schedule_text, task_items=_extract_task_items(tasks))
+    lines = schedule_text.splitlines()
+    source_tasks = _extract_source_tasks(tasks)
+    parsed = _extract_schedule_rows(lines, source_tasks)
     if parsed is None:
         return schedule_text
-    rows, notes = parsed
-    return _render_grouped_schedule(rows, notes)
+    categorized_rows, suffix = parsed
+    return _render_categorized_schedule(categorized_rows, suffix)
+
+
+def _extract_schedule_rows(
+    lines: list[str],
+    source_tasks: list[SourceTask],
+) -> tuple[CategorizedScheduleRows, list[str]] | None:
+    table_blocks: list[tuple[int, int, str | None, list[list[str]]]] = []
+    index = 0
+    while index < len(lines):
+        if not _looks_like_table_line(lines[index]):
+            index += 1
+            continue
+
+        table_start = index
+        table_end = table_start
+        while table_end < len(lines) and _looks_like_table_line(lines[table_end]):
+            table_end += 1
+
+        rows = [_split_table_row(line) for line in lines[table_start:table_end]]
+        if _is_supported_schedule_rows(rows):
+            table_blocks.append(
+                (table_start, table_end, _category_before_table(lines, table_start), rows)
+            )
+        index = table_end
+
+    if not table_blocks:
+        return None
+
+    categorized_rows = CategorizedScheduleRows()
+    used_source_indexes: set[int] = set()
+    for _, _, table_category, rows in table_blocks:
+        _collect_categorized_rows(
+            rows,
+            table_category=table_category,
+            source_tasks=source_tasks,
+            used_source_indexes=used_source_indexes,
+            categorized_rows=categorized_rows,
+        )
+
+    suffix = _schedule_suffix_after_last_table(lines, table_blocks[-1][1])
+    return categorized_rows, suffix
+
+
+def _is_supported_schedule_rows(rows: list[list[str]]) -> bool:
+    if len(rows) < 2:
+        return False
+    headers = tuple(rows[0])
+    return headers in {FULL_TABLE_HEADERS, MAINTENANCE_TABLE_HEADERS, LEGACY_MAINTENANCE_TABLE_HEADERS}
+
+
+def _collect_categorized_rows(
+    rows: list[list[str]],
+    *,
+    table_category: str | None,
+    source_tasks: list[SourceTask],
+    used_source_indexes: set[int],
+    categorized_rows: CategorizedScheduleRows,
+) -> None:
+    headers = tuple(rows[0])
+    expected_cols = len(headers)
+    separator = rows[1]
+    if len(separator) != expected_cols:
+        return
+
+    for cells in rows[2:]:
+        if len(cells) != expected_cols:
+            continue
+        task = cells[0]
+        priority = cells[1]
+        estimate = cells[2] if headers == FULL_TABLE_HEADERS else ""
+        status = cells[2] if headers == MAINTENANCE_TABLE_HEADERS else ""
+        source_task = _match_source_task(task, source_tasks, used_source_indexes)
+        source_text = source_task.item if source_task is not None else task
+        category = _resolve_schedule_category(
+            source_task=source_task,
+            table_category=table_category,
+            table_task=task,
+        )
+        if category == MAINTENANCE_CATEGORY:
+            categorized_rows.maintenance.append((source_text, priority, status))
+        elif category == DAILY_CATEGORY:
+            categorized_rows.daily.append((source_text, priority, estimate, "", ""))
+        else:
+            categorized_rows.target.append((source_text, priority, estimate, "", ""))
+
+
+def _resolve_schedule_category(
+    *,
+    source_task: SourceTask | None,
+    table_category: str | None,
+    table_task: str,
+) -> str:
+    if source_task is not None and _normalize_category(source_task.heading) == DAILY_CATEGORY:
+        return DAILY_CATEGORY
+    if table_category == MAINTENANCE_CATEGORY:
+        return MAINTENANCE_CATEGORY
+    if source_task is not None and _is_xiushenlu_maintenance_task(source_task.item, source_task.heading):
+        return MAINTENANCE_CATEGORY
+    if _is_xiushenlu_maintenance_task(table_task, ""):
+        return MAINTENANCE_CATEGORY
+    if table_category == DAILY_CATEGORY:
+        return DAILY_CATEGORY
+    return TARGET_CATEGORY
+
+
+def _render_categorized_schedule(rows: CategorizedScheduleRows, suffix: list[str]) -> str:
+    parts = [
+        "**任务管理**",
+        "",
+        f"【{TARGET_CATEGORY}】",
+        _render_full_schedule_table(rows.target),
+        "",
+        f"【{DAILY_CATEGORY}】",
+        _render_full_schedule_table(rows.daily),
+        "",
+        f"【{MAINTENANCE_CATEGORY}】",
+        _render_maintenance_schedule_table(rows.maintenance),
+    ]
+    if suffix:
+        parts.extend(["", *suffix])
+    return "\n".join(parts).strip()
+
+
+def _render_full_schedule_table(rows: list[tuple[str, str, str, str, str]]) -> str:
+    lines = [
+        "| 任务 | 优先级 | 预计 | 状态 | 用时 |",
+        "|---|---|---|---|---|",
+    ]
+    lines.extend(f"| {task} | {priority} | {estimate} |  |  |" for task, priority, estimate, _, _ in rows)
+    return "\n".join(lines)
+
+
+def _render_maintenance_schedule_table(rows: list[tuple[str, str, str]]) -> str:
+    lines = [
+        "| 任务 | 优先级 | 状态 |",
+        "|---|---|---|",
+    ]
+    lines.extend(f"| {task} | {priority} | {status} |" for task, priority, status in rows)
+    return "\n".join(lines)
+
+
+def _category_before_table(lines: list[str], table_start: int) -> str | None:
+    index = table_start - 1
+    while index >= 0:
+        category = _parse_category_heading(lines[index])
+        if category is not None:
+            return category
+        if lines[index].strip() and _is_table_boundary_text(lines[index]):
+            return None
+        index -= 1
+    return None
+
+
+def _parse_category_heading(line: str) -> str | None:
+    text = line.strip().strip("*").strip("#").strip()
+    if len(text) > 2 and text.startswith("【") and text.endswith("】"):
+        text = text[1:-1].strip()
+    return _normalize_category(text)
+
+
+def _normalize_category(text: str) -> str | None:
+    normalized = text.strip().casefold()
+    if normalized in {"目标", "target"}:
+        return TARGET_CATEGORY
+    if normalized in {"日常", "daily"}:
+        return DAILY_CATEGORY
+    if normalized in {"xiushenlu维护", "修身炉维护", "xiushenlu 維護".casefold()}:
+        return MAINTENANCE_CATEGORY
+    return None
+
+
+def _is_table_boundary_text(line: str) -> bool:
+    text = line.strip().strip("*").strip("#").strip()
+    return text in {"任务管理", "时间安排"} or text.startswith("总")
+
+
+def _schedule_suffix_after_last_table(lines: list[str], start: int) -> list[str]:
+    suffix: list[str] = []
+    for line in lines[start:]:
+        stripped = line.strip()
+        if not stripped:
+            if suffix:
+                suffix.append(line)
+            continue
+        if _parse_category_heading(stripped) is not None:
+            continue
+        if _looks_like_table_line(stripped):
+            continue
+        suffix.append(line)
+    while suffix and not suffix[-1].strip():
+        suffix.pop()
+    return suffix
+
+
+def _has_task_management_title(schedule_text: str) -> bool:
+    for line in schedule_text.splitlines():
+        if not line.strip():
+            continue
+        return line.strip().strip("*").strip("#").strip() == "任务管理"
+    return False
 
 
 def _find_schedule_table_start(lines: list[str]) -> int | None:
@@ -192,70 +375,17 @@ def _find_schedule_table_start(lines: list[str]) -> int | None:
     return None
 
 
-def _collect_schedule_rows(
-    schedule_text: str,
-    task_items: list[SourceTaskItem],
-) -> tuple[list[NormalizedScheduleRow], list[str]] | None:
-    lines = schedule_text.splitlines()
-    rows: list[NormalizedScheduleRow] = []
-    notes: list[str] = []
-    used_source_indexes: set[int] = set()
-    category_hint: str | None = None
-    saw_table = False
-    index = 0
-    while index < len(lines):
-        line = lines[index]
-        stripped = line.strip()
-        category = _parse_schedule_category(stripped)
-        if _is_task_management_heading(stripped) or _is_time_schedule_heading(stripped):
-            index += 1
-            continue
-        if category is not None:
-            category_hint = category
-            index += 1
-            continue
-        if _looks_like_table_line(line):
-            table_end = index
-            while table_end < len(lines) and _looks_like_table_line(lines[table_end]):
-                table_end += 1
-            normalized_rows = _normalize_table_lines(
-                lines[index:table_end],
-                task_items=task_items,
-                used_source_indexes=used_source_indexes,
-                category_hint=category_hint,
-            )
-            if normalized_rows is None:
-                return None
-            rows.extend(normalized_rows)
-            saw_table = True
-            index = table_end
-            continue
-        if stripped:
-            notes.append(stripped)
-        index += 1
-
-    if not saw_table:
-        return None
-    return rows, notes
-
-
 def _normalize_table_lines(
     table_lines: list[str],
-    task_items: list[SourceTaskItem],
-    used_source_indexes: set[int],
-    category_hint: str | None,
-) -> list[NormalizedScheduleRow] | None:
+    task_items: list[SourceTask] | None = None,
+) -> list[str] | None:
     if len(table_lines) < 2:
         return None
 
     rows = [_split_table_row(line) for line in table_lines]
-    headers = tuple(rows[0])
-    if headers == FULL_TABLE_HEADERS:
-        expected_cols = len(FULL_TABLE_HEADERS)
-    elif headers == MAINTENANCE_TABLE_HEADERS:
-        expected_cols = len(MAINTENANCE_TABLE_HEADERS)
-    elif headers == LEGACY_MAINTENANCE_TABLE_HEADERS:
-        expected_cols = len(LEGACY_MAINTENANCE_TABLE_HEADERS)
+    headers = rows[0]
+    if tuple(headers) == FULL_TABLE_HEADERS:
+        expected_cols = 5
     else:
         return None
 
@@ -263,58 +393,57 @@ def _normalize_table_lines(
     if len(separator) != expected_cols:
         return None
 
-    normalized: list[NormalizedScheduleRow] = []
+    normalized = [
+        "| 任务 | 优先级 | 预计 | 状态 | 用时 |",
+        "|---|---|---|---|---|",
+    ]
     data_rows = rows[2:]
+    source_items = task_items or []
+    used_source_indexes: set[int] = set()
     for cells in data_rows:
         if len(cells) != expected_cols:
             return None
-        task = cells[0]
-        priority = cells[1]
-        estimate = cells[2] if headers == FULL_TABLE_HEADERS else ""
-        source_task = _match_source_task(task, task_items, used_source_indexes)
-        source_heading = source_task.heading if source_task is not None else ""
+        task, priority, estimate = cells[:3]
+        source_task = _match_source_task(task, source_items, used_source_indexes)
         if source_task is not None:
-            task = source_task.text
-        category = _resolve_schedule_category(category_hint, source_heading, task)
-        if category == CATEGORY_MAINTENANCE:
-            estimate = ""
-        normalized.append(
-            NormalizedScheduleRow(
-                category=category,
-                task=task,
-                priority=priority,
-                estimate=estimate,
-            )
-        )
+            task = source_task.item
+        normalized.append(f"| {task} | {priority} | {estimate} |  |  |")
     return normalized
 
 
-def _extract_task_items(tasks: str) -> list[SourceTaskItem]:
+def _extract_source_tasks(tasks: str) -> list[SourceTask]:
     formatted = format_today_tasks_snapshot(tasks)
     if formatted == EMPTY_TODAY_TASKS_PLACEHOLDER:
         return []
 
-    items: list[SourceTaskItem] = []
-    current_heading = ""
+    items: list[SourceTask] = []
+    heading = "待办"
     for line in formatted.splitlines():
         stripped = line.strip()
-        heading = _parse_bracket_heading(stripped)
-        if heading is not None:
-            current_heading = heading
+        parsed_heading = _parse_today_task_heading(stripped)
+        if parsed_heading is not None:
+            heading = parsed_heading
             continue
         prefix, separator, item = stripped.partition(". ")
         if separator and prefix.isdecimal() and item.strip():
             candidate = item.strip()
             if _is_safe_table_cell(candidate):
-                items.append(SourceTaskItem(heading=current_heading, text=candidate))
+                items.append(SourceTask(heading=heading, item=candidate))
     return items
+
+
+def _parse_today_task_heading(line: str) -> str | None:
+    stripped = line.strip()
+    if len(stripped) > 2 and stripped.startswith("【") and stripped.endswith("】"):
+        return stripped[1:-1].strip()
+    return None
 
 
 def _match_source_task(
     table_task: str,
-    source_items: list[SourceTaskItem],
+    source_items: list[SourceTask],
     used_source_indexes: set[int],
-) -> SourceTaskItem | None:
+) -> SourceTask | None:
     table_key = _task_match_key(table_task)
     if not table_key:
         return None
@@ -325,7 +454,7 @@ def _match_source_task(
     for index, source_item in enumerate(source_items):
         if index in used_source_indexes:
             continue
-        source_key = _task_match_key(source_item.text)
+        source_key = _task_match_key(source_item.item)
         if not source_key:
             continue
         if source_key == table_key:
@@ -359,9 +488,9 @@ def _match_source_task(
 
 def _pick_best_fuzzy_source(
     fuzzy_matches: list[tuple[float, int]],
-    source_items: list[SourceTaskItem],
+    source_items: list[SourceTask],
     used_source_indexes: set[int],
-) -> SourceTaskItem | None:
+) -> SourceTask | None:
     if not fuzzy_matches:
         return None
 
@@ -376,92 +505,27 @@ def _pick_best_fuzzy_source(
     return source_items[matched_index]
 
 
-def _resolve_schedule_category(category_hint: str | None, source_heading: str, task: str) -> str:
-    if category_hint == CATEGORY_DAILY or _normalize_category_text(source_heading) == CATEGORY_DAILY:
-        return CATEGORY_DAILY
-    if category_hint == CATEGORY_MAINTENANCE or _is_maintenance_task(task, source_heading):
-        return CATEGORY_MAINTENANCE
-    return CATEGORY_TARGET
-
-
-def _is_maintenance_task(task: str, heading: str = "") -> bool:
-    heading_key = _normalize_category_text(heading)
-    task_key = task.casefold()
-    if heading_key not in MAINTENANCE_HEADINGS and CATEGORY_MAINTENANCE not in heading_key:
-        return False
-    return any(keyword.casefold() in task_key for keyword in MAINTENANCE_KEYWORDS)
-
-
-def _render_grouped_schedule(rows: list[NormalizedScheduleRow], notes: list[str]) -> str:
-    grouped = {category: [] for category in SCHEDULE_CATEGORIES}
-    for row in rows:
-        grouped.setdefault(row.category, []).append(row)
-
-    lines: list[str] = ["**任务管理**", ""]
-    lines.extend(_render_full_category(CATEGORY_TARGET, grouped[CATEGORY_TARGET]))
-    lines.append("")
-    lines.extend(_render_full_category(CATEGORY_DAILY, grouped[CATEGORY_DAILY]))
-    lines.append("")
-    lines.extend(_render_maintenance_category(grouped[CATEGORY_MAINTENANCE]))
-    if notes:
-        lines.append("")
-        lines.extend(notes)
-    return "\n".join(lines).strip()
-
-
-def _render_full_category(category: str, rows: list[NormalizedScheduleRow]) -> list[str]:
-    lines = [
-        f"【{category}】",
-        "| 任务 | 优先级 | 预计 | 状态 | 用时 |",
-        "|---|---|---|---|---|",
-    ]
-    for row in rows:
-        lines.append(f"| {row.task} | {row.priority} | {row.estimate} |  |  |")
-    return lines
-
-
-def _render_maintenance_category(rows: list[NormalizedScheduleRow]) -> list[str]:
-    lines = [
-        f"【{CATEGORY_MAINTENANCE}】",
-        "| 任务 | 优先级 | 状态 |",
-        "|---|---|---|",
-    ]
-    for row in rows:
-        lines.append(f"| {row.task} | {row.priority} |  |")
-    return lines
-
-
-def _parse_schedule_category(line: str) -> str | None:
-    heading = _parse_bracket_heading(line)
-    if heading is None:
-        return None
-    normalized = _normalize_category_text(heading)
-    if normalized == CATEGORY_DAILY:
-        return CATEGORY_DAILY
-    if normalized in {CATEGORY_MAINTENANCE, "修身炉维护"}:
-        return CATEGORY_MAINTENANCE
-    if normalized == CATEGORY_TARGET:
-        return CATEGORY_TARGET
-    return None
-
-
-def _parse_bracket_heading(line: str) -> str | None:
-    stripped = line.strip().strip("*").strip("#").strip()
-    if len(stripped) > 2 and stripped.startswith("【") and stripped.endswith("】"):
-        return stripped[1:-1].strip()
-    return None
-
-
-def _normalize_category_text(text: str) -> str:
-    return text.strip().strip("*").strip("#").strip().casefold()
-
-
-def _is_task_management_heading(line: str) -> bool:
-    return line.strip().strip("*").strip("#").strip() == "任务管理"
-
-
-def _is_time_schedule_heading(line: str) -> bool:
-    return line.strip().strip("*").strip("#").strip() == "时间安排"
+def _is_xiushenlu_maintenance_task(task: str, heading: str) -> bool:
+    text = f"{heading} {task}".casefold()
+    project_markers = ("xiushenlu", "修身炉", "本项目", "项目")
+    maintenance_keywords = (
+        "修bug",
+        "bug",
+        "修复",
+        "排障",
+        "报错",
+        "错误",
+        "异常",
+        "维护",
+        "优化",
+        "改进",
+        "重构",
+        "调整",
+        "回归",
+    )
+    return any(marker in text for marker in project_markers) and any(
+        keyword in text for keyword in maintenance_keywords
+    )
 
 
 def _task_similarity(left: str, right: str) -> float:
@@ -494,10 +558,6 @@ def _drop_trailing_schedule_heading(lines: list[str]) -> list[str]:
     while prefix and not prefix[-1].strip():
         prefix.pop()
     return prefix
-
-
-def _has_task_management_title(schedule_text: str) -> bool:
-    return any(_is_task_management_heading(line.strip()) for line in schedule_text.splitlines())
 
 
 def _ensure_task_management_title(schedule_text: str) -> str:

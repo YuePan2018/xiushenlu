@@ -62,34 +62,45 @@ class SchedulePatch:
 
 
 @dataclass(frozen=True)
+class MaintenanceAddition:
+    task: str
+    priority: str
+    completion_mark: str
+    evidence: str
+
+
+@dataclass(frozen=True)
 class ParsedSchedulePatch:
     updates: tuple[SchedulePatch, ...]
+    maintenance_additions: tuple[MaintenanceAddition, ...] = ()
 
 
 @dataclass(frozen=True)
 class ScheduleTableBlock:
     start_line: int
     end_line: int
-    category: str
+    heading: str
     headers: tuple[str, ...]
     rows: tuple[tuple[str, str, str, str, str], ...]
-
-    def to_markdown(self) -> str:
-        lines = [f"【{self.category}】"] if self.category else []
-        lines.extend(_render_table(self.rows, self.headers).splitlines())
-        return "\n".join(lines)
 
 
 @dataclass(frozen=True)
 class ScheduleTable:
     blocks: tuple[ScheduleTableBlock, ...]
-
-    @property
-    def rows(self) -> tuple[tuple[str, str, str, str, str], ...]:
-        return tuple(row for block in self.blocks for row in block.rows)
+    rows: tuple[tuple[str, str, str, str, str], ...]
 
     def to_markdown(self) -> str:
-        return "\n\n".join(block.to_markdown() for block in self.blocks)
+        if len(self.blocks) == 1:
+            return _render_block_table(self.blocks[0])
+
+        parts: list[str] = []
+        for block in self.blocks:
+            if not block.rows:
+                continue
+            if block.heading:
+                parts.append(block.heading)
+            parts.append(_render_block_table(block))
+        return "\n\n".join(parts) if parts else _render_table(())
 
 
 @dataclass(frozen=True)
@@ -133,7 +144,7 @@ def update_schedule_from_log(
 
     try:
         parsed = parse_schedule_patch_response(raw_reply, record_content=record_content, records=records)
-        if not parsed.updates:
+        if not parsed.updates and not parsed.maintenance_additions:
             return LogScheduleUpdateResult(date=date_text, path=path, updated=False, reason="no_updates")
         updated_daily, updates_count = apply_schedule_patch(daily_text, parsed)
     except LogScheduleUpdateParseError as exc:
@@ -179,21 +190,25 @@ def find_schedule_table(daily_text: str) -> ScheduleTable | None:
             table_end += 1
 
         table_lines = lines[table_start:table_end]
-        headers, rows = _parse_table_lines(table_lines)
+        rows = _parse_table_lines(table_lines)
+        index = table_end
+        if rows is None:
+            continue
         blocks.append(
             ScheduleTableBlock(
                 start_line=table_start,
                 end_line=table_end,
-                category=_category_before_table(lines, table_start),
-                headers=headers,
+                heading=_heading_before_table(lines, table_start),
+                headers=_normalize_table_headers(tuple(_split_table_row(table_lines[0]))),
                 rows=tuple(rows),
             )
         )
-        index = table_end
 
-    if not blocks:
-        return None
-    return ScheduleTable(blocks=tuple(blocks))
+    if blocks:
+        all_rows = tuple(row for block in blocks for row in block.rows)
+        return ScheduleTable(blocks=tuple(blocks), rows=all_rows)
+
+    return None
 
 
 def extract_daily_records(daily_text: str) -> tuple[DailyRecord, ...]:
@@ -272,11 +287,61 @@ def parse_schedule_patch_response(
             )
         )
 
-    return ParsedSchedulePatch(updates=tuple(parsed))
+    additions = _parse_maintenance_additions(data, record_text)
+    return ParsedSchedulePatch(updates=tuple(parsed), maintenance_additions=additions)
+
+
+def _parse_maintenance_additions(
+    data: dict[str, Any],
+    record_text: str,
+) -> tuple[MaintenanceAddition, ...]:
+    additions = data.get("maintenance_additions", [])
+    if additions is None:
+        return ()
+    if not isinstance(additions, list):
+        raise LogScheduleUpdateParseError("maintenance_additions must be a list.")
+
+    parsed: list[MaintenanceAddition] = []
+    for item in additions:
+        if not isinstance(item, dict):
+            raise LogScheduleUpdateParseError("Each maintenance addition must be a JSON object.")
+
+        task = item.get("task")
+        priority = item.get("priority")
+        completion_mark = _parse_completion_mark(item)
+        evidence = item.get("evidence", "")
+        if not isinstance(task, str) or not task.strip():
+            raise LogScheduleUpdateParseError("maintenance addition task must be a non-empty string.")
+        if not isinstance(priority, str) or not priority.strip():
+            raise LogScheduleUpdateParseError("maintenance addition priority must be a non-empty string.")
+        if completion_mark is None:
+            raise LogScheduleUpdateParseError("maintenance addition status must not be keep or omitted.")
+        if not isinstance(evidence, str) or not evidence.strip():
+            raise LogScheduleUpdateParseError("maintenance addition evidence must be a non-empty string.")
+
+        task_text = task.strip()
+        priority_text = priority.strip()
+        evidence_text = evidence.strip()
+        if any(char in task_text for char in ("\n", "\r", "|")):
+            raise LogScheduleUpdateParseError("maintenance addition task must not contain line breaks or table separators.")
+        if any(char in priority_text for char in ("\n", "\r", "|")):
+            raise LogScheduleUpdateParseError("maintenance addition priority must not contain line breaks or table separators.")
+        if evidence_text not in record_text:
+            raise LogScheduleUpdateParseError("maintenance addition evidence must be an exact substring of a daily record.")
+
+        parsed.append(
+            MaintenanceAddition(
+                task=task_text,
+                priority=priority_text,
+                completion_mark=completion_mark,
+                evidence=evidence_text,
+            )
+        )
+    return tuple(parsed)
 
 
 def apply_schedule_patch(daily_text: str, parsed: ParsedSchedulePatch) -> tuple[str, int]:
-    if not parsed.updates:
+    if not parsed.updates and not parsed.maintenance_additions:
         return daily_text, 0
 
     lines = daily_text.splitlines()
@@ -285,47 +350,45 @@ def apply_schedule_patch(daily_text: str, parsed: ParsedSchedulePatch) -> tuple[
         raise LogScheduleUpdateParseError("schedule table not found.")
 
     records = extract_daily_records(daily_text)
-    total_rows = len(table.rows)
+    rows = [list(row) for row in table.rows]
+    row_has_duration = [
+        block.headers == CURRENT_HEADERS
+        for block in table.blocks
+        for _ in block.rows
+    ]
+    _validate_maintenance_additions(table, parsed.maintenance_additions)
     for update in parsed.updates:
-        if update.row_index < 1 or update.row_index > total_rows:
+        if update.row_index < 1 or update.row_index > len(rows):
             raise LogScheduleUpdateParseError("row_index is out of range.")
-
-    update_by_row_index = {update.row_index: update for update in parsed.updates}
-    updated_blocks: list[ScheduleTableBlock] = []
-    global_row_index = 0
-    for block in table.blocks:
-        rows: list[tuple[str, str, str, str, str]] = []
-        for source_row in block.rows:
-            global_row_index += 1
-            row = list(source_row)
-            update = update_by_row_index.get(global_row_index)
-            if update is not None:
-                if update.completion_mark is not None:
-                    row[3] = update.completion_mark
-                if update.time_record_ids is not None and block.headers == CURRENT_HEADERS:
-                    total_seconds = _calculate_duration_seconds(update.time_record_ids, records)
-                    row[4] = _format_duration(total_seconds)
-            rows.append(tuple(row))  # type: ignore[arg-type]
-        updated_blocks.append(
-            ScheduleTableBlock(
-                start_line=block.start_line,
-                end_line=block.end_line,
-                category=block.category,
-                headers=block.headers,
-                rows=tuple(rows),
-            )
-        )
+        row = rows[update.row_index - 1]
+        if update.completion_mark is not None:
+            row[3] = update.completion_mark
+        if update.time_record_ids is not None and row_has_duration[update.row_index - 1]:
+            total_seconds = _calculate_duration_seconds(update.time_record_ids, records)
+            row[4] = _format_duration(total_seconds)
 
     new_lines = list(lines)
-    offset = 0
-    for old_block, new_block in zip(table.blocks, updated_blocks, strict=True):
-        start = old_block.start_line + offset
-        end = old_block.end_line + offset
-        new_table_lines = _render_table(new_block.rows, new_block.headers).splitlines()
-        new_lines = new_lines[:start] + new_table_lines + new_lines[end:]
-        offset += len(new_table_lines) - (old_block.end_line - old_block.start_line)
+    row_start = len(rows)
+    additions_written = False
+    for block in reversed(table.blocks):
+        row_count = len(block.rows)
+        block_rows = tuple(tuple(row) for row in rows[row_start - row_count : row_start])
+        row_start -= row_count
+        if block.headers == MAINTENANCE_HEADERS and parsed.maintenance_additions:
+            block_rows = block_rows + _maintenance_addition_rows(parsed.maintenance_additions)
+            additions_written = True
+        new_table_lines = _render_block_table_with_rows(block, block_rows).splitlines()
+        new_lines = new_lines[: block.start_line] + new_table_lines + new_lines[block.end_line :]
+    if parsed.maintenance_additions and not additions_written:
+        insert_at = table.blocks[-1].end_line
+        addition_lines = [
+            "",
+            "【xiushenlu维护】",
+            *_render_maintenance_table(_maintenance_addition_rows(parsed.maintenance_additions)).splitlines(),
+        ]
+        new_lines = new_lines[:insert_at] + addition_lines + new_lines[insert_at:]
     updated = "\n".join(new_lines).rstrip() + "\n"
-    return updated, len(parsed.updates)
+    return updated, len(parsed.updates) + len(parsed.maintenance_additions)
 
 
 def build_schedule_patch_prompt(
@@ -336,7 +399,7 @@ def build_schedule_patch_prompt(
 ) -> str:
     record_text = record_content.strip()
     records_text = _format_records_for_prompt(records)
-    return f"""你是个人执行管理助手，只根据 daily 记录更新当天任务管理表的状态列；目标/日常表可更新用时，xiushenlu维护表只更新状态。
+    return f"""你是个人执行管理助手，只根据 daily 记录更新当天任务管理表的状态列和用时列。
 
 任务：根据本次记录返回 log_schedule_updates JSON。
 
@@ -352,65 +415,93 @@ def build_schedule_patch_prompt(
 {records_text}
 
 硬性规则：
-- 你只能判断已有任务行的“状态”和“用时”是否需要变化，不要输出整张表。
-- row_index 使用 1-based 行号，跨多个任务管理小表从上到下连续编号，第一条任务行是 1。
+- 你只能判断已有任务行的“状态”和“用时”是否需要变化，不要输出整张表；没有“用时”列的维护表只判断“状态”。
+- row_index 使用 1-based 行号，第一条任务行是 1。
 - status 使用五种值：keep 表示状态列不变，not_started 表示状态列清空，in_progress 表示写为“{IN_PROGRESS_MARK}”，completed 表示写为“{CHECK_MARK}”，dropped 表示写为“{DROPPED_MARK}”。
 - 记录没有提到任务开始或推进时，用 keep 或不输出更新；记录提到开始做、正在做、推进中、完成了一部分但任务还会继续，使用 in_progress；记录明确完成，使用 completed。
 - 记录说删除这个任务、取消、不再追踪、不再纳入今天任务、短期内不做或这个任务今天不管了，使用 dropped；dropped 表示任务退出追踪，不等同于 completed。
 - 记录与计划任务的匹配：记录可能只写任务简称、删掉修饰词或只写核心关键词。但不要把没有共同核心词的记录强行匹配。
-- `【xiushenlu维护】` 表没有预计和用时列；维护任务只需要更新状态，不要为了维护任务输出 time_records。
 - 用时列是派生值：每次都从当天全部记录重新找出该任务相关记录，不要把旧表格里的用时当作累计变量。
+- 只有表格里有“用时”列的任务才填写 time_records；`【xiushenlu维护】` 只有“状态”列，不要为维护任务填写 time_records。
+- 如果本次记录属于修身炉 / xiushenlu 项目的修 bug、修复、优化、维护类工作，但当前 `【xiushenlu维护】` 表里没有对应任务行，把它作为新维护任务放进 maintenance_additions，并同时给出优先级和状态；不要为目标或日常任务新增行。
+- maintenance_additions 的 task 应尽量使用本次记录里的原文短句，不要扩写；priority 使用 P0、P1、P2、P3；status 不允许 keep；evidence 必须是当天记录里的原文片段。
 - time_records 填所有与该任务当天执行相关的记录 ID；不要判断哪条是开始或结束，程序只看这些记录的首尾时间。
 - 如果相关记录里有明确写出的时长，例如“20分钟”“用时40m”“耗时1.5h”，程序只使用最后一次明确时长作为最终用时，不累加，也不再计算首尾时间差。
 - 如果相关记录里没有明确时长，只有 time_records 最后一条记录内容包含“{INTERVAL_DURATION_MARKER}”时，程序才使用最后一条相关记录的 HH:MM:SS 减去第一条相关记录的 HH:MM:SS；最后一条不含“{INTERVAL_DURATION_MARKER}”或只有一条相关记录时，用时留空。
 - evidence 如果填写，必须是当天记录里的原文片段；没有可靠证据时用空字符串。
-- 不要新增任务行，不要删除任务行，不要改任务名、优先级、预计或行顺序。
+- 除 maintenance_additions 外，不要新增任务行；不要删除任务行，不要改已有任务名、优先级、预计或行顺序。
 
 你必须只输出一个严格 JSON 对象，不要使用代码块，不要输出解释文字。
 JSON 格式固定为：
-{{"updates":[{{"row_index":1,"status":"completed","evidence":"完成原文","time_records":[2,3,5,6]}}]}}
+{{"updates":[{{"row_index":1,"status":"completed","evidence":"完成原文","time_records":[2,3,5,6]}}],"maintenance_additions":[{{"task":"修复计划表状态更新","priority":"P1","status":"completed","evidence":"修复计划表状态更新完成"}}]}}
 如果只需要改状态且不改用时，可以省略 time_records。
 如果只需要重算用时且状态不变，status 使用 keep。
-如果没有任何任务行需要变化，输出 {{"updates":[]}}。
+如果没有任何任务行需要变化，也没有新增维护任务，输出 {{"updates":[],"maintenance_additions":[]}}。
 """
 
 
-def _parse_table_lines(table_lines: list[str]) -> tuple[tuple[str, ...], list[tuple[str, str, str, str, str]]]:
+def _parse_table_lines(table_lines: list[str]) -> list[tuple[str, str, str, str, str]] | None:
     if len(table_lines) < 2:
         raise LogScheduleUpdateParseError("schedule table must contain header and separator.")
 
     headers = _split_table_row(table_lines[0])
-    normalized_headers = _normalize_table_headers(tuple(headers))
-    if normalized_headers is None:
+    if tuple(headers) in {MAINTENANCE_HEADERS, LEGACY_MAINTENANCE_HEADERS}:
+        return _parse_maintenance_table_lines(table_lines, tuple(headers))
+    if tuple(headers) != CURRENT_HEADERS:
         raise LogScheduleUpdateParseError("schedule table header is not the expected five columns.")
 
     separator = _split_table_row(table_lines[1])
-    if len(separator) != len(headers) or not all(_is_separator_cell(cell) for cell in separator):
+    if len(separator) != len(CURRENT_HEADERS) or not all(_is_separator_cell(cell) for cell in separator):
         raise LogScheduleUpdateParseError("schedule table separator is invalid.")
 
     rows: list[tuple[str, str, str, str, str]] = []
     for line in table_lines[2:]:
         cells = _split_table_row(line)
-        if len(cells) != len(headers):
+        if len(cells) != len(CURRENT_HEADERS):
             raise LogScheduleUpdateParseError("schedule table row does not match the expected columns.")
-        if normalized_headers == CURRENT_HEADERS:
-            task, priority, estimate, status, duration = cells
-        elif tuple(headers) == MAINTENANCE_HEADERS:
-            task, priority, status = cells
-            estimate = ""
-            duration = ""
-        else:
-            task, priority = cells
-            estimate = ""
-            status = ""
-            duration = ""
+        if cells[3] not in VALID_COMPLETION_MARKS:
+            raise LogScheduleUpdateParseError("status column must be empty, in progress, completed, or dropped.")
+        if "\n" in cells[4] or "|" in cells[4]:
+            raise LogScheduleUpdateParseError("duration column contains unsafe content.")
+        cells[4] = _normalize_duration_cell(cells[4])
+        rows.append(tuple(cells))  # type: ignore[arg-type]
+    return rows
+
+
+def _parse_maintenance_table_lines(
+    table_lines: list[str],
+    headers: tuple[str, ...],
+) -> list[tuple[str, str, str, str, str]]:
+    separator = _split_table_row(table_lines[1])
+    if len(separator) != len(headers) or not all(_is_separator_cell(cell) for cell in separator):
+        raise LogScheduleUpdateParseError("maintenance table separator is invalid.")
+
+    rows: list[tuple[str, str, str, str, str]] = []
+    for line in table_lines[2:]:
+        cells = _split_table_row(line)
+        if len(cells) != len(headers):
+            raise LogScheduleUpdateParseError("maintenance table row does not match the expected columns.")
+        status = cells[2] if headers == MAINTENANCE_HEADERS else ""
         if status not in VALID_COMPLETION_MARKS:
             raise LogScheduleUpdateParseError("status column must be empty, in progress, completed, or dropped.")
-        if "\n" in duration or "|" in duration:
-            raise LogScheduleUpdateParseError("duration column contains unsafe content.")
-        duration = _normalize_duration_cell(duration)
-        rows.append((task, priority, estimate, status, duration))
-    return normalized_headers, rows
+        rows.append((cells[0], cells[1], "", status, ""))
+    return rows
+
+
+def _normalize_table_headers(headers: tuple[str, ...]) -> tuple[str, ...]:
+    if headers == LEGACY_MAINTENANCE_HEADERS:
+        return MAINTENANCE_HEADERS
+    return headers
+
+
+def _heading_before_table(lines: list[str], table_start: int) -> str:
+    index = table_start - 1
+    while index >= 0:
+        stripped = lines[index].strip()
+        if stripped:
+            return stripped
+        index -= 1
+    return ""
 
 
 def _parse_completion_mark(item: dict[str, Any]) -> str | None:
@@ -546,16 +637,7 @@ def _parse_clock_seconds(text: str) -> int:
     return hour * 3600 + minute * 60 + second
 
 
-def _render_table(rows: tuple[tuple[str, str, str, str, str], ...], headers: tuple[str, ...] = CURRENT_HEADERS) -> str:
-    if headers == MAINTENANCE_HEADERS:
-        lines = [
-            "| 任务 | 优先级 | 状态 |",
-            "|---|---|---|",
-        ]
-        for task, priority, _estimate, status, _duration in rows:
-            lines.append(f"| {task} | {priority} | {status} |")
-        return "\n".join(lines)
-
+def _render_table(rows: tuple[tuple[str, str, str, str, str], ...]) -> str:
     lines = [
         "| 任务 | 优先级 | 预计 | 状态 | 用时 |",
         "|---|---|---|---|---|",
@@ -565,26 +647,60 @@ def _render_table(rows: tuple[tuple[str, str, str, str, str], ...], headers: tup
     return "\n".join(lines)
 
 
-def _normalize_table_headers(headers: tuple[str, ...]) -> tuple[str, ...] | None:
-    if headers == CURRENT_HEADERS:
-        return CURRENT_HEADERS
-    if headers == MAINTENANCE_HEADERS:
-        return MAINTENANCE_HEADERS
-    if headers == LEGACY_MAINTENANCE_HEADERS:
-        return MAINTENANCE_HEADERS
-    return None
+def _render_maintenance_table(rows: tuple[tuple[str, str, str, str, str], ...]) -> str:
+    lines = [
+        "| 任务 | 优先级 | 状态 |",
+        "|---|---|---|",
+    ]
+    for task, priority, _estimate, status, _duration in rows:
+        lines.append(f"| {task} | {priority} | {status} |")
+    return "\n".join(lines)
 
 
-def _category_before_table(lines: list[str], table_start: int) -> str:
-    index = table_start - 1
-    while index >= 0 and not lines[index].strip():
-        index -= 1
-    if index < 0:
-        return ""
-    line = lines[index].strip().strip("*").strip("#").strip()
-    if len(line) > 2 and line.startswith("【") and line.endswith("】"):
-        return line[1:-1].strip()
-    return ""
+def _maintenance_addition_rows(
+    additions: tuple[MaintenanceAddition, ...],
+) -> tuple[tuple[str, str, str, str, str], ...]:
+    return tuple(
+        (addition.task, addition.priority, "", addition.completion_mark, "")
+        for addition in additions
+    )
+
+
+def _validate_maintenance_additions(
+    table: ScheduleTable,
+    additions: tuple[MaintenanceAddition, ...],
+) -> None:
+    if not additions:
+        return
+    existing = {
+        _task_key(row[0])
+        for block in table.blocks
+        if block.headers == MAINTENANCE_HEADERS
+        for row in block.rows
+    }
+    new_keys: set[str] = set()
+    for addition in additions:
+        key = _task_key(addition.task)
+        if key in existing or key in new_keys:
+            raise LogScheduleUpdateParseError("maintenance addition task already exists.")
+        new_keys.add(key)
+
+
+def _task_key(text: str) -> str:
+    return re.sub(r"\s+", "", text.strip()).casefold()
+
+
+def _render_block_table(block: ScheduleTableBlock) -> str:
+    return _render_block_table_with_rows(block, block.rows)
+
+
+def _render_block_table_with_rows(
+    block: ScheduleTableBlock,
+    rows: tuple[tuple[str, str, str, str, str], ...],
+) -> str:
+    if block.headers == MAINTENANCE_HEADERS:
+        return _render_maintenance_table(rows)
+    return _render_table(rows)
 
 
 def _format_records_for_prompt(records: tuple[DailyRecord, ...]) -> str:

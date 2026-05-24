@@ -29,30 +29,9 @@ REQUIRED_RESPONSE_KEYS = (
 SCHEDULE_HEADERS = ("任务", "优先级", "预计", "状态", "用时")
 MAINTENANCE_HEADERS = ("任务", "优先级", "状态")
 LEGACY_MAINTENANCE_HEADERS = ("任务", "优先级")
-CATEGORY_TARGET = "目标"
-CATEGORY_DAILY = "日常"
-CATEGORY_MAINTENANCE = "xiushenlu维护"
-SCHEDULE_CATEGORIES = (CATEGORY_TARGET, CATEGORY_DAILY, CATEGORY_MAINTENANCE)
-MAINTENANCE_HEADINGS = {"xiushenlu", "修身炉", "xiushenlu维护", "修身炉维护"}
-MAINTENANCE_KEYWORDS = (
-    "bug",
-    "修bug",
-    "修复",
-    "修正",
-    "修补",
-    "排查",
-    "排错",
-    "报错",
-    "错误",
-    "问题",
-    "优化",
-    "维护",
-    "改进",
-    "调整",
-    "重构",
-    "清理",
-    "完善",
-)
+TARGET_CATEGORY = "目标"
+DAILY_CATEGORY = "日常"
+MAINTENANCE_CATEGORY = "xiushenlu维护"
 
 
 class PlanUpdateParseError(ValueError):
@@ -64,25 +43,7 @@ class ScheduleRow:
     task: str
     priority: str
     estimate: str
-    category: str = CATEGORY_TARGET
-
-
-@dataclass(frozen=True)
-class ScheduleTableRow:
-    task: str
-    priority: str
-    estimate: str
-    status: str
-    duration: str
-    category: str
-
-
-@dataclass(frozen=True)
-class ScheduleTableBlock:
-    start_line: int
-    end_line: int
-    category_hint: str | None
-    headers: tuple[str, ...]
+    category: str = TARGET_CATEGORY
 
 
 @dataclass(frozen=True)
@@ -252,7 +213,7 @@ def normalize_plan_update_content(
             task=new_task_intent.task_text,
             priority=parsed.schedule_row.priority,
             estimate=parsed.schedule_row.estimate,
-            category=_classify_schedule_category(target_heading, new_task_intent.task_text),
+            category=_schedule_category_for_new_task(new_task_intent),
         ),
     )
 
@@ -299,6 +260,38 @@ def _parse_heading_line(line: str) -> str | None:
 def _is_bracket_heading(line: str) -> bool:
     stripped = line.strip()
     return len(stripped) > 2 and stripped.startswith("【") and stripped.endswith("】")
+
+
+def _schedule_category_for_new_task(new_task_intent: NewTaskIntent) -> str:
+    heading = new_task_intent.target_heading or ""
+    if _normalize_heading_name(heading) == DAILY_CATEGORY:
+        return DAILY_CATEGORY
+    if _is_xiushenlu_maintenance_task(new_task_intent.task_text, heading):
+        return MAINTENANCE_CATEGORY
+    return TARGET_CATEGORY
+
+
+def _is_xiushenlu_maintenance_task(task: str, heading: str) -> bool:
+    text = f"{heading} {task}".casefold()
+    project_markers = ("xiushenlu", "修身炉", "本项目", "项目")
+    maintenance_keywords = (
+        "修bug",
+        "bug",
+        "修复",
+        "排障",
+        "报错",
+        "错误",
+        "异常",
+        "维护",
+        "优化",
+        "改进",
+        "重构",
+        "调整",
+        "回归",
+    )
+    return any(marker in text for marker in project_markers) and any(
+        keyword in text for keyword in maintenance_keywords
+    )
 
 
 def update_daily_plan_text(
@@ -354,7 +347,7 @@ def _minimal_plan_section(updated_daily_original: str, schedule_row: ScheduleRow
         "## 计划\n\n"
         "**今日待办**\n\n"
         f"{updated_daily_original.strip()}\n\n"
-        f"{_render_grouped_schedule_tables([_new_table_row(schedule_row)])}"
+        f"{_render_grouped_schedule_tables(schedule_row)}"
     )
 
 
@@ -385,15 +378,45 @@ def _replace_daily_original(plan_section: str, updated_daily_original: str) -> s
 
 def _append_schedule_row(plan_section: str, schedule_row: ScheduleRow) -> str:
     lines = plan_section.splitlines()
-    blocks = _find_schedule_table_blocks(lines)
-    new_row = _new_table_row(schedule_row)
-    if not blocks:
-        return f"{plan_section.rstrip()}\n\n{_render_grouped_schedule_tables([new_row])}"
+    table_ranges = _find_schedule_table_ranges(lines)
+    if _uses_grouped_schedule_tables(lines, table_ranges):
+        return _append_grouped_schedule_row(lines, schedule_row, table_ranges)
 
-    existing_rows = _parse_schedule_blocks(lines, blocks)
-    area_start, area_end = _schedule_area_range(lines, blocks)
-    new_table = _render_grouped_schedule_tables(existing_rows + [new_row]).splitlines()
-    return "\n".join(lines[:area_start] + new_table + lines[area_end:]).rstrip()
+    table_range = table_ranges[0] if table_ranges else None
+    new_row = _schedule_row_to_cells(schedule_row)
+    if table_range is None:
+        return f"{plan_section.rstrip()}\n\n{_render_grouped_schedule_tables(schedule_row)}"
+
+    start, end = table_range
+    existing_rows = _parse_schedule_table(lines[start:end])
+    new_table = _render_schedule_table(existing_rows + [new_row]).splitlines()
+    return "\n".join(lines[:start] + new_table + lines[end:]).rstrip()
+
+
+def _append_grouped_schedule_row(
+    lines: list[str],
+    schedule_row: ScheduleRow,
+    table_ranges: list[tuple[int, int]],
+) -> str:
+    target_range = _find_schedule_table_range_for_category(lines, table_ranges, schedule_row.category)
+    if target_range is None:
+        rendered = _render_single_category_schedule_table(schedule_row)
+        return "\n".join(lines).rstrip() + f"\n\n{rendered}"
+
+    start, end = target_range
+    table_lines = lines[start:end]
+    headers = tuple(_split_table_row(table_lines[0]))
+    if schedule_row.category == MAINTENANCE_CATEGORY:
+        existing_rows = _parse_maintenance_schedule_table(table_lines)
+        new_table = _render_maintenance_schedule_table(
+            existing_rows + [_maintenance_schedule_row_to_cells(schedule_row)]
+        ).splitlines()
+    elif headers == SCHEDULE_HEADERS:
+        existing_rows = _parse_schedule_table(table_lines)
+        new_table = _render_schedule_table(existing_rows + [_schedule_row_to_cells(schedule_row)]).splitlines()
+    else:
+        return "\n".join(lines).rstrip() + f"\n\n{_render_single_category_schedule_table(schedule_row)}"
+    return "\n".join(lines[:start] + new_table + lines[end:]).rstrip()
 
 
 def _find_daily_original_heading(lines: list[str]) -> int | None:
@@ -444,8 +467,13 @@ def _looks_like_plan_subsection(line: str) -> bool:
     return any(keyword in text for keyword in keywords)
 
 
-def _find_schedule_table_blocks(lines: list[str]) -> list[ScheduleTableBlock]:
-    blocks: list[ScheduleTableBlock] = []
+def _find_schedule_table_range(lines: list[str]) -> tuple[int, int] | None:
+    ranges = _find_schedule_table_ranges(lines)
+    return ranges[0] if ranges else None
+
+
+def _find_schedule_table_ranges(lines: list[str]) -> list[tuple[int, int]]:
+    ranges: list[tuple[int, int]] = []
     index = 0
     while index < len(lines):
         if not _is_schedule_table_start(lines, index):
@@ -454,27 +482,56 @@ def _find_schedule_table_blocks(lines: list[str]) -> list[ScheduleTableBlock]:
         table_end = index
         while table_end < len(lines) and _is_table_line(lines[table_end]):
             table_end += 1
-        headers = tuple(_split_table_row(lines[index]))
-        blocks.append(
-            ScheduleTableBlock(
-                start_line=index,
-                end_line=table_end,
-                category_hint=_category_hint_before_table(lines, index),
-                headers=_normalize_table_headers(headers),
-            )
-        )
+        ranges.append((index, table_end))
         index = table_end
-    return blocks
+    return ranges
 
 
-def _find_schedule_table_range(lines: list[str]) -> tuple[int, int] | None:
-    for index in range(len(lines)):
-        if not _is_schedule_table_start(lines, index):
+def _uses_grouped_schedule_tables(
+    lines: list[str],
+    table_ranges: list[tuple[int, int]],
+) -> bool:
+    for start, _ in table_ranges:
+        headers = tuple(_split_table_row(lines[start]))
+        if headers == MAINTENANCE_HEADERS:
+            return True
+        if _schedule_category_before_table(lines, start) is not None:
+            return True
+    return False
+
+
+def _find_schedule_table_range_for_category(
+    lines: list[str],
+    table_ranges: list[tuple[int, int]],
+    category: str,
+) -> tuple[int, int] | None:
+    for start, end in table_ranges:
+        if _schedule_category_before_table(lines, start) == category:
+            return start, end
+    return None
+
+
+def _schedule_category_before_table(lines: list[str], table_start: int) -> str | None:
+    index = table_start - 1
+    while index >= 0:
+        stripped = lines[index].strip()
+        if not stripped:
+            index -= 1
             continue
-        table_end = index
-        while table_end < len(lines) and _is_table_line(lines[table_end]):
-            table_end += 1
-        return index, table_end
+        return _parse_schedule_category_heading(stripped)
+    return None
+
+
+def _parse_schedule_category_heading(line: str) -> str | None:
+    text = line.strip().strip("*").strip("#").strip()
+    if len(text) > 2 and text.startswith("【") and text.endswith("】"):
+        text = text[1:-1].strip()
+    if text == TARGET_CATEGORY:
+        return TARGET_CATEGORY
+    if text == DAILY_CATEGORY:
+        return DAILY_CATEGORY
+    if text in {MAINTENANCE_CATEGORY, "修身炉维护"}:
+        return MAINTENANCE_CATEGORY
     return None
 
 
@@ -482,186 +539,101 @@ def _is_schedule_table_start(lines: list[str], index: int) -> bool:
     if index + 1 >= len(lines) or not _is_table_line(lines[index]):
         return False
     headers = _split_table_row(lines[index])
-    normalized_headers = _normalize_table_headers(tuple(headers))
-    if normalized_headers is None:
+    if tuple(headers) not in {SCHEDULE_HEADERS, MAINTENANCE_HEADERS, LEGACY_MAINTENANCE_HEADERS}:
         return False
     separator = _split_table_row(lines[index + 1])
     return len(separator) == len(headers) and all(_is_separator_cell(cell) for cell in separator)
 
 
-def _parse_schedule_blocks(lines: list[str], blocks: list[ScheduleTableBlock]) -> list[ScheduleTableRow]:
-    rows: list[ScheduleTableRow] = []
-    for block in blocks:
-        table_lines = lines[block.start_line : block.end_line]
-        rows.extend(_parse_schedule_table(table_lines, block))
+def _parse_schedule_table(table_lines: list[str]) -> list[tuple[str, str, str, str, str]]:
+    if len(table_lines) < 2:
+        raise PlanUpdateParseError("schedule table must contain header and separator.")
+    headers = _split_table_row(table_lines[0])
+    if tuple(headers) != SCHEDULE_HEADERS:
+        raise PlanUpdateParseError("schedule table header is not the expected five columns.")
+
+    rows: list[tuple[str, str, str, str, str]] = []
+    for line in table_lines[2:]:
+        cells = _split_table_row(line)
+        if len(cells) != len(SCHEDULE_HEADERS):
+            raise PlanUpdateParseError("schedule table row does not match the expected columns.")
+        cells[4] = _normalize_duration_cell(cells[4])
+        rows.append(tuple(cells))  # type: ignore[arg-type]
     return rows
 
 
-def _parse_schedule_table(table_lines: list[str], block: ScheduleTableBlock) -> list[ScheduleTableRow]:
+def _parse_maintenance_schedule_table(table_lines: list[str]) -> list[tuple[str, str, str]]:
     if len(table_lines) < 2:
         raise PlanUpdateParseError("schedule table must contain header and separator.")
-    headers = tuple(_split_table_row(table_lines[0]))
-    normalized_headers = _normalize_table_headers(headers)
-    if normalized_headers is None:
-        raise PlanUpdateParseError("schedule table header is not the expected columns.")
+    headers = _split_table_row(table_lines[0])
+    if tuple(headers) not in {MAINTENANCE_HEADERS, LEGACY_MAINTENANCE_HEADERS}:
+        raise PlanUpdateParseError("maintenance schedule table header is not the expected columns.")
 
-    rows: list[ScheduleTableRow] = []
+    separator = _split_table_row(table_lines[1])
+    if len(separator) != len(headers) or not all(_is_separator_cell(cell) for cell in separator):
+        raise PlanUpdateParseError("schedule table separator is invalid.")
+
+    rows: list[tuple[str, str, str]] = []
     for line in table_lines[2:]:
         cells = _split_table_row(line)
         if len(cells) != len(headers):
-            raise PlanUpdateParseError("schedule table row does not match the expected columns.")
-        if normalized_headers == SCHEDULE_HEADERS:
-            task, priority, estimate, status, duration = cells
-            duration = _normalize_duration_cell(duration)
-        elif headers == MAINTENANCE_HEADERS:
-            task, priority, status = cells
-            estimate = ""
-            duration = ""
-        else:
-            task, priority = cells
-            estimate = ""
-            status = ""
-            duration = ""
-        rows.append(
-            ScheduleTableRow(
-                task=task,
-                priority=priority,
-                estimate=estimate,
-                status=status,
-                duration=duration,
-                category=_resolve_schedule_category(block.category_hint, task),
-            )
-        )
+            raise PlanUpdateParseError("maintenance schedule table row does not match the expected columns.")
+        status = cells[2] if tuple(headers) == MAINTENANCE_HEADERS else ""
+        rows.append((cells[0], cells[1], status))
     return rows
 
 
-def _render_grouped_schedule_tables(rows: list[ScheduleTableRow]) -> str:
-    grouped = {category: [] for category in SCHEDULE_CATEGORIES}
-    for row in rows:
-        grouped.setdefault(row.category, []).append(row)
-
-    lines: list[str] = ["**任务管理**", ""]
-    lines.extend(_render_full_schedule_category(CATEGORY_TARGET, grouped[CATEGORY_TARGET]))
-    lines.append("")
-    lines.extend(_render_full_schedule_category(CATEGORY_DAILY, grouped[CATEGORY_DAILY]))
-    lines.append("")
-    lines.extend(_render_maintenance_schedule_category(grouped[CATEGORY_MAINTENANCE]))
-    return "\n".join(lines)
-
-
-def _render_full_schedule_category(category: str, rows: list[ScheduleTableRow]) -> list[str]:
+def _render_schedule_table(rows: list[tuple[str, str, str, str, str]]) -> str:
     lines = [
-        f"【{category}】",
         "| 任务 | 优先级 | 预计 | 状态 | 用时 |",
         "|---|---|---|---|---|",
     ]
     for row in rows:
-        lines.append(f"| {row.task} | {row.priority} | {row.estimate} | {row.status} | {row.duration} |")
-    return lines
+        lines.append("| " + " | ".join(row) + " |")
+    return "\n".join(lines)
 
 
-def _render_maintenance_schedule_category(rows: list[ScheduleTableRow]) -> list[str]:
+def _render_maintenance_schedule_table(rows: list[tuple[str, str, str]]) -> str:
     lines = [
-        f"【{CATEGORY_MAINTENANCE}】",
         "| 任务 | 优先级 | 状态 |",
         "|---|---|---|",
     ]
     for row in rows:
-        lines.append(f"| {row.task} | {row.priority} | {row.status} |")
-    return lines
+        lines.append("| " + " | ".join(row) + " |")
+    return "\n".join(lines)
 
 
-def _new_table_row(schedule_row: ScheduleRow) -> ScheduleTableRow:
-    category = _normalize_schedule_category(schedule_row.category)
-    estimate = "" if category == CATEGORY_MAINTENANCE else schedule_row.estimate
-    return ScheduleTableRow(
-        task=schedule_row.task,
-        priority=schedule_row.priority,
-        estimate=estimate,
-        status="",
-        duration="",
-        category=category,
+def _render_grouped_schedule_tables(schedule_row: ScheduleRow) -> str:
+    return "\n\n".join(
+        [
+            "**任务管理**",
+            _render_single_category_schedule_table(schedule_row, category=TARGET_CATEGORY),
+            _render_single_category_schedule_table(schedule_row, category=DAILY_CATEGORY),
+            _render_single_category_schedule_table(schedule_row, category=MAINTENANCE_CATEGORY),
+        ]
     )
 
 
-def _schedule_area_range(lines: list[str], blocks: list[ScheduleTableBlock]) -> tuple[int, int]:
-    start = blocks[0].start_line
-    while start > 0:
-        previous = lines[start - 1].strip()
-        if not previous or _is_task_management_heading(previous) or _parse_schedule_category(previous) is not None:
-            start -= 1
-            continue
-        break
-    end = blocks[-1].end_line
-    while end < len(lines) and not lines[end].strip():
-        end += 1
-    return start, end
+def _render_single_category_schedule_table(
+    schedule_row: ScheduleRow,
+    category: str | None = None,
+) -> str:
+    target_category = category or schedule_row.category
+    if target_category == MAINTENANCE_CATEGORY:
+        rows = [_maintenance_schedule_row_to_cells(schedule_row)] if schedule_row.category == target_category else []
+        table = _render_maintenance_schedule_table(rows)
+    else:
+        rows = [_schedule_row_to_cells(schedule_row)] if schedule_row.category == target_category else []
+        table = _render_schedule_table(rows)
+    return f"【{target_category}】\n{table}"
 
 
-def _category_hint_before_table(lines: list[str], table_start: int) -> str | None:
-    index = table_start - 1
-    while index >= 0 and not lines[index].strip():
-        index -= 1
-    if index < 0:
-        return None
-    return _parse_schedule_category(lines[index].strip())
+def _schedule_row_to_cells(schedule_row: ScheduleRow) -> tuple[str, str, str, str, str]:
+    return (schedule_row.task, schedule_row.priority, schedule_row.estimate, "", "")
 
 
-def _normalize_table_headers(headers: tuple[str, ...]) -> tuple[str, ...] | None:
-    if headers == SCHEDULE_HEADERS:
-        return SCHEDULE_HEADERS
-    if headers == MAINTENANCE_HEADERS:
-        return MAINTENANCE_HEADERS
-    if headers == LEGACY_MAINTENANCE_HEADERS:
-        return MAINTENANCE_HEADERS
-    return None
-
-
-def _resolve_schedule_category(category_hint: str | None, task: str) -> str:
-    if category_hint in SCHEDULE_CATEGORIES:
-        return category_hint
-    return _classify_schedule_category(category_hint or "", task)
-
-
-def _classify_schedule_category(heading: str, task: str) -> str:
-    normalized_heading = _normalize_schedule_category(heading)
-    if normalized_heading == CATEGORY_DAILY:
-        return CATEGORY_DAILY
-    if _is_maintenance_task(task, normalized_heading):
-        return CATEGORY_MAINTENANCE
-    return CATEGORY_TARGET
-
-
-def _normalize_schedule_category(text: str) -> str:
-    normalized = text.strip().strip("*").strip("#").strip().casefold()
-    if normalized == CATEGORY_DAILY:
-        return CATEGORY_DAILY
-    if normalized in {CATEGORY_MAINTENANCE, "修身炉维护"}:
-        return CATEGORY_MAINTENANCE
-    if normalized == CATEGORY_TARGET:
-        return CATEGORY_TARGET
-    return normalized
-
-
-def _is_maintenance_task(task: str, heading: str) -> bool:
-    heading_key = heading.casefold()
-    task_key = task.casefold()
-    if heading_key not in MAINTENANCE_HEADINGS and CATEGORY_MAINTENANCE not in heading_key:
-        return False
-    return any(keyword.casefold() in task_key for keyword in MAINTENANCE_KEYWORDS)
-
-
-def _parse_schedule_category(line: str) -> str | None:
-    text = line.strip().strip("*").strip("#").strip()
-    if len(text) > 2 and text.startswith("【") and text.endswith("】"):
-        normalized = _normalize_schedule_category(text[1:-1])
-        if normalized in SCHEDULE_CATEGORIES:
-            return normalized
-    return None
-
-
-def _is_task_management_heading(line: str) -> bool:
-    return line.strip().strip("*").strip("#").strip() == "任务管理"
+def _maintenance_schedule_row_to_cells(schedule_row: ScheduleRow) -> tuple[str, str, str]:
+    return (schedule_row.task, schedule_row.priority, "")
 
 
 def _normalize_duration_cell(text: str) -> str:
@@ -705,7 +677,7 @@ def _build_prompt(
 你的任务：
 1. 把“新增任务”逐字插入 today_tasks.md，不能改写、概括或扩写。
 2. 同步更新 daily 里的“今日待办”小节，只更新待办快照，不重写原有计划建议。
-3. 为任务管理表提供一行新增任务的任务名、优先级和预计耗时；状态由程序写空；`xiushenlu维护` 表不会使用预计和用时。
+3. 为任务管理表提供一行新增任务的任务名、优先级和预计耗时；状态由程序写空，xiushenlu维护表不会使用预计和用时。
 
 日期：{date_text}
 
@@ -729,10 +701,10 @@ def _build_prompt(
 - `updated_today_tasks` 是完整的新 today_tasks.md；可以保留原有 `# 今日待办` 标题，但只允许增加这一个新增任务，除必要编号外不要改动旧内容。
 - `updated_daily_original` 只填写 daily “今日待办”小节的新内容，并包含逐字新增任务正文；不要包含计划建议、时间安排表或任何 Markdown 标题行。
 - daily “今日待办”小节和 today_tasks.md 的最终样式都必须类似：“【杂事】”下一行“1. 游泳”；不要输出“杂事：\n游泳”或“杂事：游泳”。
-- `target_heading` 只用于内部归类，不会展示在 daily；今日待办中的“日常”归入任务管理 `【日常】`，修身炉 / xiushenlu 项目的修 bug、修复、优化、维护类任务归入 `【xiushenlu维护】`，其他任务归入 `【目标】`。
-- `schedule_task` 是写入任务管理表“任务”列的任务正文，必须逐字等于新增任务正文；如果新增任务是“标题：任务正文”格式，只填冒号后的任务正文；不能缩短、概括或扩写，不能包含换行或 `|`。
+- `target_heading` 只用于内部归类，不会展示在 daily。
+- `schedule_task` 是写入时间安排表“任务”列的任务正文，必须逐字等于新增任务正文；如果新增任务是“标题：任务正文”格式，只填冒号后的任务正文；不能缩短、概括或扩写，不能包含换行或 `|`。
 - `schedule_priority` 是“优先级”列，例如 P0、P1、P2、P3，不能包含换行或 `|`。
-- `schedule_estimate` 是“预计”列，例如 30m、1h、1.5h，不能包含换行或 `|`；如果新增任务属于 `xiushenlu维护`，程序会忽略这个值。
+- `schedule_estimate` 是“预计”列，例如 30m、1h、1.5h，不能包含换行或 `|`；如果任务归入 `【xiushenlu维护】`，程序会忽略它。
 - 不要输出状态、用时、单独建议正文、“新任务”标题或“### 新增”。
 
 插入格式示例：

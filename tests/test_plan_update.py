@@ -87,8 +87,7 @@ class PlanUpdateTests(unittest.TestCase):
         self.assertIn("schedule_priority", prompt)
         self.assertIn("schedule_estimate", prompt)
         self.assertIn("状态由程序写空", prompt)
-        self.assertIn("xiushenlu维护", prompt)
-        self.assertIn("不会使用预计和用时", prompt)
+        self.assertIn("xiushenlu维护表不会使用预计和用时", prompt)
         self.assertIn("冒号前是目标分组标题", prompt)
         self.assertIn("分组展示必须统一为“【分组】”", prompt)
         self.assertIn("新增“杂事： 游泳”，必须新建或使用“【杂事】”", prompt)
@@ -204,6 +203,21 @@ class PlanUpdateTests(unittest.TestCase):
         self.assertIn("| 第二个任务 | P3 | 30m |  |  |", updated)
         self.assertNotIn("**新任务**", updated)
 
+    def test_update_daily_creates_minimal_plan_when_missing(self) -> None:
+        updated = update_daily_plan_text(
+            daily_text="# 2026-04-30\n\n## 记录\n\n- 已有记录\n",
+            date_text="2026-04-30",
+            updated_daily_original="学习python",
+            schedule_row=ScheduleRow("学习python", "P2", "45m"),
+        )
+
+        self.assertIn("## 计划", updated)
+        self.assertIn("**今日待办**", updated)
+        self.assertIn("| 学习python | P2 | 45m |  |  |", updated)
+        self.assertIn("## 记录", updated)
+        self.assertNotIn("**新任务**", updated)
+        self.assertLess(updated.index("## 计划"), updated.index("## 记录"))
+
     def test_update_daily_appends_daily_task_to_grouped_daily_table(self) -> None:
         daily = """# 2026-05-23
 
@@ -282,21 +296,6 @@ class PlanUpdateTests(unittest.TestCase):
         self.assertIn("【xiushenlu维护】\n| 任务 | 优先级 | 状态 |\n|---|---|---|", updated)
         self.assertIn("| 修复计划表 | P1 |  |\n| 优化任务管理表 | P1 |  |", updated)
         self.assertNotIn("| 优化任务管理表 | P1 | 30m |", updated)
-
-    def test_update_daily_creates_minimal_plan_when_missing(self) -> None:
-        updated = update_daily_plan_text(
-            daily_text="# 2026-04-30\n\n## 记录\n\n- 已有记录\n",
-            date_text="2026-04-30",
-            updated_daily_original="学习python",
-            schedule_row=ScheduleRow("学习python", "P2", "45m"),
-        )
-
-        self.assertIn("## 计划", updated)
-        self.assertIn("**今日待办**", updated)
-        self.assertIn("| 学习python | P2 | 45m |  |  |", updated)
-        self.assertIn("## 记录", updated)
-        self.assertNotIn("**新任务**", updated)
-        self.assertLess(updated.index("## 计划"), updated.index("## 记录"))
 
     def test_generate_plan_update_writes_files_and_events(self) -> None:
         with _temporary_directory() as temp_dir:

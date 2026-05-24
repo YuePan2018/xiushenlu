@@ -97,10 +97,9 @@ class DailyPlanTests(unittest.TestCase):
             ),
         )
 
+        self.assertIn("【目标】\n| 任务 | 优先级 | 预计 | 状态 | 用时 |", plan)
         self.assertIn("| 看 NotebookLM 的分享视频 | P1 | 45m |  |  |", plan)
         self.assertIn("| 整理知识库入口 | P2 | 30m |  |  |", plan)
-        self.assertIn("【目标】\n| 任务 | 优先级 | 预计 | 状态 | 用时 |", plan)
-        self.assertIn("【xiushenlu维护】\n| 任务 | 优先级 | 状态 |", plan)
         self.assertNotIn("深度理解 NotebookLM 视频内容", plan)
         self.assertNotIn("整理知识库入口结构", plan)
 
@@ -127,12 +126,12 @@ class DailyPlanTests(unittest.TestCase):
         )
 
         self.assertIn("| codex子代理 | P0 | 3.5h |  |  |", plan)
+        self.assertIn("| 看近几日的b站视频学习 | P1 | 2.0h |  |  |", plan)
+        self.assertIn("【日常】\n| 任务 | 优先级 | 预计 | 状态 | 用时 |", plan)
         self.assertIn("| 昨天的照片整理好，发给深深 | P1 | 0.5h |  |  |", plan)
         self.assertIn("| 小红书工作信息 | P2 | 0.5h |  |  |", plan)
         self.assertIn("| 微信资讯 | P2 | 0.5h |  |  |", plan)
-        self.assertIn("| 看近几日的b站视频学习 | P1 | 2.0h |  |  |", plan)
         self.assertIn("| b站关注的当日动态看完。 | P3 | 0.5h |  |  |", plan)
-        self.assertIn("【日常】\n| 任务 | 优先级 | 预计 | 状态 | 用时 |", plan)
         self.assertNotIn("Codex子代理开发与调试", plan)
         self.assertNotIn("整理昨日照片并发送给深深", plan)
         self.assertNotIn("观看B站学习视频（结合Codex辅助总结）", plan)
@@ -158,9 +157,10 @@ class DailyPlanTests(unittest.TestCase):
             ),
         )
 
-        self.assertIn("**任务管理**", plan)
+        self.assertIn("| 任务 | 优先级 | 预计 | 状态 | 用时 |", plan)
+        self.assertIn("**任务管理**\n\n【目标】", plan)
         self.assertIn("【xiushenlu维护】\n| 任务 | 优先级 | 状态 |", plan)
-        self.assertIn("| 修复表格渲染 | P0 |  |", plan)
+        self.assertIn("| 修复表格渲染 | P0 |", plan)
         self.assertNotIn("｜", plan)
         self.assertNotIn("时间安排", plan)
         self.assertNotIn("40m", plan)
@@ -182,15 +182,15 @@ class DailyPlanTests(unittest.TestCase):
     def test_build_prompt_only_requests_schedule_table(self) -> None:
         prompt = _build_prompt("2026-05-09", "长期目标", "修身炉：\n1. 只写待办")
 
-        self.assertIn('只输出"**任务管理**"、三个任务分类标题和 markdown 表格', prompt)
+        self.assertIn('只输出"**任务管理**"、三个分类标题和 markdown 表格', prompt)
         self.assertIn("任务管理表格前固定输出一行：**任务管理**", prompt)
-        self.assertIn("| 任务 | 优先级 | 预计 | 状态 | 用时 |", prompt)
-        self.assertIn("| 任务 | 优先级 | 状态 |", prompt)
         self.assertIn("【目标】", prompt)
         self.assertIn("【日常】", prompt)
         self.assertIn("【xiushenlu维护】", prompt)
+        self.assertIn("| 任务 | 优先级 | 预计 | 状态 | 用时 |", prompt)
+        self.assertIn("| 任务 | 优先级 | 状态 |", prompt)
         self.assertIn("必须使用英文竖线", prompt)
-        self.assertIn("不要输出“预计”或“用时”列", prompt)
+        self.assertIn("“状态”和“用时”两列都不填", prompt)
         self.assertIn("“任务”列必须逐字使用今日待办里的任务正文", prompt)
         self.assertNotIn("建议时段", prompt)
         self.assertNotIn("调度风险与调整规则", prompt)

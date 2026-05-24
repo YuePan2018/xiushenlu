@@ -163,6 +163,9 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn('/static/vendor/marked-16.2.1.umd.js', html)
             self.assertIn('/static/vendor/dompurify-3.2.6.min.js', html)
             self.assertIn("DOMPurify.sanitize", html)
+            self.assertIn("collapseOriginalTasksSnapshot", html)
+            self.assertIn("原始待办快照", html)
+            self.assertIn("daily-snapshot", html)
             self.assertNotIn('<pre id="dailyText"', html)
             self.assertNotIn("<h2>日内更新</h2>", html)
 

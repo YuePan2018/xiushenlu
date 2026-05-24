@@ -1688,6 +1688,40 @@ CONSOLE_HTML = f"""<!doctype html>
       border-top: 1px solid var(--line);
       margin: 16px 0;
     }}
+    .daily-snapshot {{
+      margin: 0 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fffefa;
+    }}
+    .daily-snapshot summary {{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      color: var(--text);
+      font-weight: 700;
+      list-style: none;
+      padding: 8px 10px;
+    }}
+    .daily-snapshot summary::-webkit-details-marker {{
+      display: none;
+    }}
+    .daily-snapshot summary::before {{
+      content: "▶";
+      color: var(--accent);
+      font-size: 12px;
+    }}
+    .daily-snapshot[open] summary::before {{
+      content: "▼";
+    }}
+    .daily-snapshot-body {{
+      border-top: 1px solid #ebe4d8;
+      padding: 10px;
+    }}
+    .daily-snapshot-body > :last-child {{
+      margin-bottom: 0;
+    }}
     .slots {{
       display: grid;
       grid-template-columns: 1fr;
@@ -1995,6 +2029,49 @@ CONSOLE_HTML = f"""<!doctype html>
       }}
       const html = marked.parse(markdown);
       el.innerHTML = DOMPurify.sanitize(html, {{ USE_PROFILES: {{ html: true }} }});
+      collapseOriginalTasksSnapshot(el);
+    }}
+
+    function collapseOriginalTasksSnapshot(container) {{
+      const children = Array.from(container.children);
+      const startIndex = children.findIndex(isOriginalTasksMarker);
+      if (startIndex < 0) {{
+        return;
+      }}
+      const endIndex = children.findIndex((node, index) =>
+        index > startIndex && isTaskManagementMarker(node)
+      );
+      if (endIndex <= startIndex + 1) {{
+        return;
+      }}
+
+      const marker = children[startIndex];
+      const details = document.createElement("details");
+      details.className = "daily-snapshot";
+      const summary = document.createElement("summary");
+      summary.textContent = "原始待办快照";
+      const body = document.createElement("div");
+      body.className = "daily-snapshot-body";
+
+      children.slice(startIndex + 1, endIndex).forEach((node) => body.appendChild(node));
+      details.appendChild(summary);
+      details.appendChild(body);
+      marker.replaceWith(details);
+    }}
+
+    function isOriginalTasksMarker(node) {{
+      return ["今日待办", "今日待办原文"].includes(normalizeMarkerText(node.textContent));
+    }}
+
+    function isTaskManagementMarker(node) {{
+      return normalizeMarkerText(node.textContent) === "任务管理";
+    }}
+
+    function normalizeMarkerText(text) {{
+      return String(text || "")
+        .replace(/^\\s*\\d+[.)、]\\s*/, "")
+        .replace(/[：:]/g, "")
+        .trim();
     }}
 
     function renderFuture(items) {{
