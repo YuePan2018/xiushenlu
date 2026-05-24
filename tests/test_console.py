@@ -240,6 +240,8 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn('id="nodePreview"', html)
             self.assertIn("node_mouseenter", html)
             self.assertIn("node_mouseleave", html)
+            self.assertNotIn("node-preview-kind", html)
+            self.assertNotIn("node-preview-title", html)
             self.assertIn("/api/task-tree/delete", html)
             self.assertIn("确定删除工作树文件", html)
             self.assertNotIn("contentEdits", html)

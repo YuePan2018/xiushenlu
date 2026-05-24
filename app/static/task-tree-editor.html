@@ -632,22 +632,8 @@
       display: none;
     }
 
-    .node-preview-kind {
-      color: var(--muted);
-      font-size: 12px;
-    }
-
-    .node-preview-title {
-      margin-top: 3px;
-      font-size: 14px;
-      font-weight: 760;
-      line-height: 1.35;
-      overflow-wrap: anywhere;
-    }
-
     .node-preview-content {
       display: -webkit-box;
-      margin-top: 8px;
       color: #344054;
       font-size: 13px;
       line-height: 1.55;
@@ -1324,12 +1310,7 @@
       const data = node.nodeData.data;
       const meta = data._xiushenlu || {};
       const content = normalizeText(meta.content || "", "暂无内容。");
-      const kind = meta.root ? "根节点摘要" : "任务节点内容";
-      $("nodePreview").innerHTML = [
-        `<div class="node-preview-kind">${escapeHtml(kind)}</div>`,
-        `<div class="node-preview-title">${escapeHtml(normalizeMindMapText(data.text, "未命名节点"))}</div>`,
-        `<div class="node-preview-content">${escapeHtml(content)}</div>`,
-      ].join("");
+      $("nodePreview").innerHTML = `<div class="node-preview-content">${escapeHtml(content)}</div>`;
       $("nodePreview").hidden = false;
       positionNodePreview(event);
     }
