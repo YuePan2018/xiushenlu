@@ -43,7 +43,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py status
 conda run --no-capture-output -n xiushenlu python app/main.py plan --tasks "今天完成项目文档更新；整理面试讲解；晚上复盘"
 
 # 2. 临时新增任务并局部更新今日计划，会调用 LLM
-conda run --no-capture-output -n xiushenlu python app/main.py plan --add "补一版资料导入格式"
+conda run --no-capture-output -n xiushenlu python app/main.py plan --add "补一版资料吸纳格式"
 
 # 3. 追加过程记录，并让 LLM 返回受限补丁更新“任务管理”表的状态/用时列
 conda run --no-capture-output -n xiushenlu python app/main.py log "整理了 README 和技术说明"
@@ -64,7 +64,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py cost
 conda run --no-capture-output -n xiushenlu python app/main.py console
 ```
 
-控制台目前支持查看 daily、查看今日待办、保存今日待办、打开待办文件、写入记录、生成计划、日内局部更新、生成复盘、停止当前 LLM 操作、手动 token 统计、小红书图文发布和工作树编辑。首页日期右侧的菜单可进入 `/xhs` 发布页和 `/task-tree` 工作树页。自动化、通知、审批、工具和知识区域只预留布局。
+控制台目前支持查看 daily、查看今日待办、保存今日待办、打开待办文件、写入记录、生成计划、日内局部更新、生成复盘、停止当前 LLM 操作、手动 token 统计、小红书图文发布和工作树编辑。首页日期右侧的菜单可进入 `/xhs` 发布页和 `/task-tree` 工作树页。资料吸纳、自动化、通知、审批、工具和知识库区域只预留布局。
 
 控制台里的“保存待办”和“生成计划”是两个独立动作：“保存待办”只写入 `data/user_inputs/today_tasks.md`，不调用 LLM；“生成计划”等价于 `python app/main.py plan`。
 

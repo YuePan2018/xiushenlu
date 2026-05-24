@@ -30,7 +30,7 @@
 
 ## 当前 Milestone
 
-当前可交付 Milestone 是日常资料记录：让 daily、计划、过程记录、复盘、post 草稿、链接、文本、文件摘要和 agent 协作记录稳定进入系统。
+当前可交付 Milestone 是资料吸纳：让 daily、计划、过程记录、复盘、post 草稿、链接、文本、文件摘要和 agent 协作记录稳定进入系统。
 
 后续方向：
 
