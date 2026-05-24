@@ -1269,6 +1269,7 @@ CONSOLE_HTML = f"""<!doctype html>
       --warn: #a15d18;
       --danger: #a33b32;
       --shadow: 0 16px 36px rgba(37, 32, 25, 0.08);
+      --daily-table-meta-width: 72px;
     }}
     * {{ box-sizing: border-box; }}
     body {{
@@ -1644,6 +1645,7 @@ CONSOLE_HTML = f"""<!doctype html>
     .daily-markdown table {{
       width: 100%;
       border-collapse: collapse;
+      table-layout: fixed;
       overflow-wrap: normal;
     }}
     .daily-markdown th,
@@ -1651,6 +1653,17 @@ CONSOLE_HTML = f"""<!doctype html>
       border: 1px solid var(--line);
       padding: 7px 9px;
       vertical-align: top;
+    }}
+    .daily-markdown th:first-child,
+    .daily-markdown td:first-child {{
+      width: auto;
+      overflow-wrap: anywhere;
+    }}
+    .daily-markdown th:not(:first-child),
+    .daily-markdown td:not(:first-child) {{
+      width: var(--daily-table-meta-width);
+      text-align: center;
+      white-space: nowrap;
     }}
     .daily-markdown th {{
       background: var(--surface-2);
