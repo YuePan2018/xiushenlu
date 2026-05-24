@@ -66,7 +66,8 @@ class LogScheduleUpdateTests(unittest.TestCase):
                             "row_index": 1,
                             "completed": True,
                             "evidence": "完成计划表更新",
-                            "task": "不要改任务名",
+                            "task": "计划表更新",
+                            "ignored_task": "不要改任务名",
                             "priority": "P9",
                             "estimate": "999h",
                         }
@@ -139,6 +140,82 @@ class LogScheduleUpdateTests(unittest.TestCase):
             self.assertIn("| 喝水 | P3 | 5m | ✓ |  |", daily_text)
             self.assertIn("| 修复计划表 | P1 |  |", daily_text)
             self.assertNotIn("| 修复计划表 | P1 |  |  |", daily_text)
+
+    def test_update_schedule_rejects_row_index_when_task_field_points_elsewhere(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            daily_file = _write_daily(
+                config,
+                _daily_text(
+                    "| 小红书工作信息 | P1 | 30m |  |  |\n"
+                    "| 微信资讯 | P2 | 15m |  |  |",
+                    records="- 10:00:00 开始看微信资讯\n",
+                ),
+            )
+            original = daily_file.read_text(encoding="utf-8")
+            reply = json.dumps(
+                {
+                    "updates": [
+                        {
+                            "row_index": 1,
+                            "task": "微信资讯",
+                            "status": "in_progress",
+                            "evidence": "开始看微信资讯",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+            result = update_schedule_from_log(
+                FakeProvider(reply),
+                "开始看微信资讯",
+                config=config,
+                target_date=date(2026, 5, 10),
+                logger=FakeLogger(),  # type: ignore[arg-type]
+            )
+
+            self.assertFalse(result.updated)
+            self.assertIn("task does not match row_index", result.reason)
+            self.assertEqual(daily_file.read_text(encoding="utf-8"), original)
+
+    def test_update_schedule_rejects_status_when_evidence_belongs_to_other_task(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            daily_file = _write_daily(
+                config,
+                _daily_text(
+                    "| 小红书工作信息 | P1 | 30m |  |  |\n"
+                    "| 微信资讯 | P2 | 15m |  |  |",
+                    records="- 10:00:00 开始看微信资讯\n",
+                ),
+            )
+            original = daily_file.read_text(encoding="utf-8")
+            reply = json.dumps(
+                {
+                    "updates": [
+                        {
+                            "row_index": 1,
+                            "task": "小红书工作信息",
+                            "status": "in_progress",
+                            "evidence": "开始看微信资讯",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+            result = update_schedule_from_log(
+                FakeProvider(reply),
+                "开始看微信资讯",
+                config=config,
+                target_date=date(2026, 5, 10),
+                logger=FakeLogger(),  # type: ignore[arg-type]
+            )
+
+            self.assertFalse(result.updated)
+            self.assertIn("evidence does not match target task", result.reason)
+            self.assertEqual(daily_file.read_text(encoding="utf-8"), original)
 
     def test_update_schedule_changes_maintenance_status_without_duration(self) -> None:
         with _temporary_directory() as temp_dir:
@@ -232,6 +309,39 @@ class LogScheduleUpdateTests(unittest.TestCase):
             daily_text = daily_file.read_text(encoding="utf-8")
             self.assertIn("| 修复 log_schedule_update 新维护任务追加 | P1 | ✓ |", daily_text)
             self.assertNotIn("| 修复 log_schedule_update 新维护任务追加 | P1 |  | ✓ |", daily_text)
+
+    def test_optimization_marker_forces_maintenance_addition(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            daily_file = _write_daily(
+                config,
+                "# 2026-05-10\n\n"
+                "## 计划\n\n"
+                "**任务管理**\n\n"
+                "【目标】\n"
+                "| 任务 | 优先级 | 预计 | 状态 | 用时 |\n"
+                "|---|---|---|---|---|\n"
+                "| 写复盘 | P1 | 30m |  |  |\n\n"
+                "【xiushenlu维护】\n"
+                "| 任务 | 优先级 | 状态 |\n"
+                "|---|---|---|\n\n"
+                "## 记录\n\n"
+                "- 10:00:00 优化：固定 daily 表格列宽。\n",
+            )
+
+            result = update_schedule_from_log(
+                FakeProvider(json.dumps({"updates": [], "maintenance_additions": []}, ensure_ascii=False)),
+                "优化：固定 daily 表格列宽。",
+                config=config,
+                target_date=date(2026, 5, 10),
+                logger=FakeLogger(),  # type: ignore[arg-type]
+            )
+
+            self.assertTrue(result.updated)
+            self.assertEqual(result.updates_count, 1)
+            daily_text = daily_file.read_text(encoding="utf-8")
+            self.assertIn("| 优化：固定 daily 表格列宽 | P2 | ○ |", daily_text)
+            self.assertIn("| 写复盘 | P1 | 30m |  |  |", daily_text)
 
     def test_time_records_use_first_and_last_record_when_no_duration(self) -> None:
         with _temporary_directory() as temp_dir:
@@ -538,6 +648,7 @@ class LogScheduleUpdateTests(unittest.TestCase):
         self.assertIn("in_progress", prompt)
         self.assertIn("completed", prompt)
         self.assertIn("dropped", prompt)
+        self.assertIn("task 必须逐字填写", prompt)
         self.assertIn("用时列是派生值", prompt)
         self.assertIn("不要把旧表格里的用时当作累计变量", prompt)
         self.assertIn("任务简称", prompt)
@@ -546,6 +657,7 @@ class LogScheduleUpdateTests(unittest.TestCase):
         self.assertIn("time_records", prompt)
         self.assertIn("maintenance_additions", prompt)
         self.assertIn("不要为目标或日常任务新增行", prompt)
+        self.assertIn("包含“优化：”", prompt)
         self.assertIn("最后一次明确时长", prompt)
         self.assertNotIn("direct_duration", prompt)
         self.assertNotIn("record_interval", prompt)

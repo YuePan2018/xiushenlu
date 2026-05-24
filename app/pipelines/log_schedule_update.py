@@ -40,6 +40,7 @@ DURATION_TOKEN_RE = re.compile(
 )
 CLOCK_TIME_RE = re.compile(r"^(?P<hour>\d{1,2}):(?P<minute>\d{2})(?::(?P<second>\d{2}))?$")
 INTERVAL_DURATION_MARKER = "&"
+OPTIMIZATION_MAINTENANCE_RE = re.compile(r"优化[：:]\s*(?P<task>[^\r\n]+)")
 
 
 class LogScheduleUpdateParseError(ValueError):
@@ -58,6 +59,7 @@ class SchedulePatch:
     row_index: int
     completion_mark: str | None
     evidence: str
+    task: str | None = None
     time_record_ids: tuple[int, ...] | None = None
 
 
@@ -144,6 +146,7 @@ def update_schedule_from_log(
 
     try:
         parsed = parse_schedule_patch_response(raw_reply, record_content=record_content, records=records)
+        parsed = _force_optimization_marker_into_maintenance(parsed, record_content, table)
         if not parsed.updates and not parsed.maintenance_additions:
             return LogScheduleUpdateResult(date=date_text, path=path, updated=False, reason="no_updates")
         updated_daily, updates_count = apply_schedule_patch(daily_text, parsed)
@@ -267,22 +270,31 @@ def parse_schedule_patch_response(
         row_index = item.get("row_index")
         completion_mark = _parse_completion_mark(item)
         evidence = item.get("evidence", "")
+        task = item.get("task")
         time_record_ids = _parse_time_record_ids(item, records)
 
         if not isinstance(row_index, int):
             raise LogScheduleUpdateParseError("row_index must be an integer.")
         if not isinstance(evidence, str):
             raise LogScheduleUpdateParseError("evidence must be a string.")
+        if task is not None and not isinstance(task, str):
+            raise LogScheduleUpdateParseError("task must be a string.")
 
         evidence_text = evidence.strip()
         if evidence_text and evidence_text not in record_text:
             raise LogScheduleUpdateParseError("evidence must be an exact substring of a daily record.")
+        task_text = task.strip() if isinstance(task, str) else None
+        if task_text == "":
+            raise LogScheduleUpdateParseError("task must not be empty when provided.")
+        if task_text is not None and any(char in task_text for char in ("\n", "\r", "|")):
+            raise LogScheduleUpdateParseError("task must not contain line breaks or table separators.")
 
         parsed.append(
             SchedulePatch(
                 row_index=row_index,
                 completion_mark=completion_mark,
                 evidence=evidence_text,
+                task=task_text,
                 time_record_ids=time_record_ids,
             )
         )
@@ -361,6 +373,7 @@ def apply_schedule_patch(daily_text: str, parsed: ParsedSchedulePatch) -> tuple[
         if update.row_index < 1 or update.row_index > len(rows):
             raise LogScheduleUpdateParseError("row_index is out of range.")
         row = rows[update.row_index - 1]
+        _validate_update_targets_row(update, row[0], records)
         if update.completion_mark is not None:
             row[3] = update.completion_mark
         if update.time_record_ids is not None and row_has_duration[update.row_index - 1]:
@@ -416,24 +429,25 @@ def build_schedule_patch_prompt(
 
 硬性规则：
 - 你只能判断已有任务行的“状态”和“用时”是否需要变化，不要输出整张表；没有“用时”列的维护表只判断“状态”。
-- row_index 使用 1-based 行号，第一条任务行是 1。
+- row_index 使用 1-based 行号，第一条任务行是 1；task 必须逐字填写该行“任务”列原文，用于代码二次校验。
 - status 使用五种值：keep 表示状态列不变，not_started 表示状态列清空，in_progress 表示写为“{IN_PROGRESS_MARK}”，completed 表示写为“{CHECK_MARK}”，dropped 表示写为“{DROPPED_MARK}”。
 - 记录没有提到任务开始或推进时，用 keep 或不输出更新；记录提到开始做、正在做、推进中、完成了一部分但任务还会继续，使用 in_progress；记录明确完成，使用 completed。
 - 记录说删除这个任务、取消、不再追踪、不再纳入今天任务、短期内不做或这个任务今天不管了，使用 dropped；dropped 表示任务退出追踪，不等同于 completed。
 - 记录与计划任务的匹配：记录可能只写任务简称、删掉修饰词或只写核心关键词。但不要把没有共同核心词的记录强行匹配。
 - 用时列是派生值：每次都从当天全部记录重新找出该任务相关记录，不要把旧表格里的用时当作累计变量。
 - 只有表格里有“用时”列的任务才填写 time_records；`【xiushenlu维护】` 只有“状态”列，不要为维护任务填写 time_records。
+- 如果本次记录包含“优化：”，无条件视为 `【xiushenlu维护】` 工作；当前维护表没有对应行时，必须放进 maintenance_additions，不要归到目标或日常任务。
 - 如果本次记录属于修身炉 / xiushenlu 项目的修 bug、修复、优化、维护类工作，但当前 `【xiushenlu维护】` 表里没有对应任务行，把它作为新维护任务放进 maintenance_additions，并同时给出优先级和状态；不要为目标或日常任务新增行。
 - maintenance_additions 的 task 应尽量使用本次记录里的原文短句，不要扩写；priority 使用 P0、P1、P2、P3；status 不允许 keep；evidence 必须是当天记录里的原文片段。
 - time_records 填所有与该任务当天执行相关的记录 ID；不要判断哪条是开始或结束，程序只看这些记录的首尾时间。
 - 如果相关记录里有明确写出的时长，例如“20分钟”“用时40m”“耗时1.5h”，程序只使用最后一次明确时长作为最终用时，不累加，也不再计算首尾时间差。
 - 如果相关记录里没有明确时长，只有 time_records 最后一条记录内容包含“{INTERVAL_DURATION_MARKER}”时，程序才使用最后一条相关记录的 HH:MM:SS 减去第一条相关记录的 HH:MM:SS；最后一条不含“{INTERVAL_DURATION_MARKER}”或只有一条相关记录时，用时留空。
-- evidence 如果填写，必须是当天记录里的原文片段；没有可靠证据时用空字符串。
+- 状态变化必须填写 evidence，且必须是当天记录里能指向该任务的原文片段；没有可靠证据时不要输出该更新。
 - 除 maintenance_additions 外，不要新增任务行；不要删除任务行，不要改已有任务名、优先级、预计或行顺序。
 
 你必须只输出一个严格 JSON 对象，不要使用代码块，不要输出解释文字。
 JSON 格式固定为：
-{{"updates":[{{"row_index":1,"status":"completed","evidence":"完成原文","time_records":[2,3,5,6]}}],"maintenance_additions":[{{"task":"修复计划表状态更新","priority":"P1","status":"completed","evidence":"修复计划表状态更新完成"}}]}}
+{{"updates":[{{"row_index":1,"task":"计划表更新","status":"completed","evidence":"完成原文","time_records":[2,3,5,6]}}],"maintenance_additions":[{{"task":"修复计划表状态更新","priority":"P1","status":"completed","evidence":"修复计划表状态更新完成"}}]}}
 如果只需要改状态且不改用时，可以省略 time_records。
 如果只需要重算用时且状态不变，status 使用 keep。
 如果没有任何任务行需要变化，也没有新增维护任务，输出 {{"updates":[],"maintenance_additions":[]}}。
@@ -684,6 +698,172 @@ def _validate_maintenance_additions(
         if key in existing or key in new_keys:
             raise LogScheduleUpdateParseError("maintenance addition task already exists.")
         new_keys.add(key)
+
+
+def _validate_update_targets_row(
+    update: SchedulePatch,
+    target_task: str,
+    records: tuple[DailyRecord, ...],
+) -> None:
+    if update.task is not None and _task_identity_key(update.task) != _task_identity_key(target_task):
+        raise LogScheduleUpdateParseError("update task does not match row_index.")
+
+    if update.completion_mark is not None:
+        if not update.evidence:
+            raise LogScheduleUpdateParseError("status update evidence must not be empty.")
+        if not _evidence_matches_task(target_task, update.evidence):
+            raise LogScheduleUpdateParseError("status update evidence does not match target task.")
+
+    if update.time_record_ids is None:
+        return
+
+    records_by_index = {record.index: record for record in records}
+    selected_records = [records_by_index[record_id] for record_id in update.time_record_ids]
+    if not any(_evidence_matches_task(target_task, record.content) for record in selected_records):
+        raise LogScheduleUpdateParseError("time_records do not match target task.")
+
+
+def _evidence_matches_task(task: str, evidence: str) -> bool:
+    task_key = _task_identity_key(task)
+    evidence_key = _task_identity_key(evidence)
+    if not task_key or not evidence_key:
+        return False
+    if task_key in evidence_key:
+        return True
+
+    task_core = _strip_status_noise(task_key)
+    evidence_core = _strip_status_noise(evidence_key)
+    if task_core and task_core in evidence_core:
+        return True
+    if evidence_core and len(evidence_core) >= 3 and evidence_core in task_core:
+        return True
+    return _longest_common_substring_length(task_core, evidence_core) >= 3
+
+
+def _task_identity_key(text: str) -> str:
+    return re.sub(r"[\s，,。.!！？、：:；;（）()【】\[\]《》<>\"'`*_#|｜-]+", "", text).casefold()
+
+
+def _strip_status_noise(text: str) -> str:
+    noise_words = (
+        "不再纳入今天任务",
+        "完成了一部分",
+        "短期内不做",
+        "还未开始",
+        "还没开始",
+        "尚未开始",
+        "处理完",
+        "不再追踪",
+        "今天不管了",
+        "已经完成",
+        "开始做",
+        "开始看",
+        "未开始",
+        "没开始",
+        "已完成",
+        "正在",
+        "继续",
+        "开始",
+        "结束",
+        "完成",
+        "取消",
+        "删除",
+        "搞定",
+        "做完",
+        "修好",
+        "用时",
+        "耗时",
+        "花了",
+        "已经",
+    )
+    result = text
+    for word in noise_words:
+        result = result.replace(word.casefold(), "")
+    return result
+
+
+def _longest_common_substring_length(left: str, right: str) -> int:
+    if not left or not right:
+        return 0
+
+    previous = [0] * (len(right) + 1)
+    best = 0
+    for left_char in left:
+        current = [0]
+        for index, right_char in enumerate(right, start=1):
+            value = previous[index - 1] + 1 if left_char == right_char else 0
+            current.append(value)
+            if value > best:
+                best = value
+        previous = current
+    return best
+
+
+def _force_optimization_marker_into_maintenance(
+    parsed: ParsedSchedulePatch,
+    record_content: str,
+    table: ScheduleTable,
+) -> ParsedSchedulePatch:
+    if parsed.maintenance_additions:
+        return parsed
+
+    match = OPTIMIZATION_MAINTENANCE_RE.search(record_content)
+    if match is None:
+        return parsed
+
+    maintenance_row_indexes = _maintenance_row_indexes(table)
+    if any(update.row_index in maintenance_row_indexes for update in parsed.updates):
+        return parsed
+
+    task = _optimization_maintenance_task(match)
+    if _task_key(task) in _existing_maintenance_task_keys(table):
+        return parsed
+
+    return ParsedSchedulePatch(
+        updates=parsed.updates,
+        maintenance_additions=(
+            MaintenanceAddition(
+                task=task,
+                priority="P2",
+                completion_mark=_optimization_record_completion_mark(record_content),
+                evidence=match.group(0).strip(),
+            ),
+        ),
+    )
+
+
+def _optimization_maintenance_task(match: re.Match[str]) -> str:
+    task = match.group("task").strip()
+    task = re.split(r"[。！？!?；;]", task, maxsplit=1)[0].strip()
+    task = task.replace("|", "｜")
+    return f"优化：{task}" if task else "优化"
+
+
+def _optimization_record_completion_mark(record_content: str) -> str:
+    completed_markers = ("完成", "已完成", "搞定", "做完", "处理完", "修好")
+    if any(marker in record_content for marker in completed_markers):
+        return CHECK_MARK
+    return IN_PROGRESS_MARK
+
+
+def _maintenance_row_indexes(table: ScheduleTable) -> set[int]:
+    indexes: set[int] = set()
+    row_index = 1
+    for block in table.blocks:
+        for _row in block.rows:
+            if block.headers == MAINTENANCE_HEADERS:
+                indexes.add(row_index)
+            row_index += 1
+    return indexes
+
+
+def _existing_maintenance_task_keys(table: ScheduleTable) -> set[str]:
+    return {
+        _task_key(row[0])
+        for block in table.blocks
+        if block.headers == MAINTENANCE_HEADERS
+        for row in block.rows
+    }
 
 
 def _task_key(text: str) -> str:
