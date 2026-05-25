@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 from app.config import load_config
 from app.cost import append_token_usage_report
-from app.daily import daily_path, read_daily, write_daily_section
+from app.daily import daily_path, read_daily, remove_daily_section, write_daily_section
 from app.inbox import (
     clear_tomorrow_plan,
     read_tomorrow_plan,
@@ -24,13 +24,13 @@ from app.pipelines.today_tasks_format import (
 )
 
 
-REQUIRED_ROLLOVER_KEYS = ("review", "next_today_tasks")
-_REVIEW_STRUCTURE_INSTRUCTION = "输出“完成了什么”“改进建议”“值得肯定的行为”三部分；重点分析学习工作的安排和工程经验，而不是每个目标的技术实现。"
-_REVIEW_EVIDENCE_INSTRUCTION = "daily记录的“##记录”标题下，没有的内容，说明没有完成。记录的内容，可能包含不是原定计划。"
-_REVIEW_PRAISE_INSTRUCTION = "最后另起一个独立段落，基于事实给三句话表扬；表扬要自然真诚，贴合当天记录。"
+REQUIRED_REVIEW_KEYS = ("praise",)
+REQUIRED_ROLLOVER_KEYS = (*REQUIRED_REVIEW_KEYS, "next_today_tasks")
+PRAISE_SECTION_TITLE = "表扬"
+_REVIEW_PRAISE_INSTRUCTION = "praise 字段只输出一段不超过100字的表扬；基于当天工作，真诚自然，贴合 daily 记录，不要空泛夸奖；不要使用 Markdown 标题、列表或分段。"
 _RECORD_TAGS_INSTRUCTION = """“记录”的标签：
 “临时：”代表临时插入的任务，不在当天任务计划内
-“经验：”代表学习和工作中产生的心得，需要在review中总结归纳。"""
+“经验：”代表学习和工作中产生的心得，可作为表扬依据。"""
 
 
 class NightlyReviewParseError(ValueError):
@@ -50,8 +50,13 @@ class NightlyReviewResult:
 
 @dataclass(frozen=True)
 class ParsedNightlyReview:
-    review: str
+    praise: str
     next_today_tasks: str
+
+
+@dataclass(frozen=True)
+class ParsedReview:
+    praise: str
 
 
 def generate_nightly_review(
@@ -84,29 +89,49 @@ def generate_nightly_review(
             cancel_check()
         append_llm_call_event(event_logger, provider, "nightly_review")
         parsed = parse_nightly_review_response(raw_reply)
-        review = parsed.review
+        praise = parsed.praise
         next_today_tasks = _merge_recurring_daily_tasks(parsed.next_today_tasks, daily_context)
 
-        path = write_daily_section("复盘", review, cfg, date_text, mode="replace")
+        remove_daily_section("复盘", cfg, date_text)
         next_tasks_path = write_today_tasks(next_today_tasks, cfg)
         next_tomorrow_plan_path = clear_tomorrow_plan(cfg)
         if current_date == today:
             append_token_usage_report(cfg, event_logger, current_date)
+        path = write_daily_section(
+            PRAISE_SECTION_TITLE,
+            praise,
+            cfg,
+            date_text,
+            mode="replace",
+            include_generated_at=False,
+            place_at_end=True,
+        )
     else:
         prompt = _build_prompt(date_text, _build_daily_review_context(day_text))
-        review = provider.chat(prompt).strip()
+        raw_reply = provider.chat(prompt).strip()
         if cancel_check is not None:
             cancel_check()
         append_llm_call_event(event_logger, provider, "nightly_review")
+        parsed = parse_review_response(raw_reply)
+        praise = parsed.praise
 
-        path = write_daily_section("复盘", review, cfg, date_text, mode="replace")
+        remove_daily_section("复盘", cfg, date_text)
+        path = write_daily_section(
+            PRAISE_SECTION_TITLE,
+            praise,
+            cfg,
+            date_text,
+            mode="replace",
+            include_generated_at=False,
+            place_at_end=True,
+        )
         next_today_tasks = None
         next_tasks_path = None
         next_tomorrow_plan_path = None
 
     event_logger.append_event(
         "review_generated",
-        f"生成 {date_text} 的复盘",
+        f"生成 {date_text} 的表扬",
         {
             "date": date_text,
             "daily_path": str(daily_path(cfg, date_text)),
@@ -121,7 +146,7 @@ def generate_nightly_review(
     return NightlyReviewResult(
         date=date_text,
         path=path,
-        review=review,
+        review=praise,
         today_tasks_path=next_tasks_path,
         tomorrow_plan_path=next_tomorrow_plan_path,
         next_today_tasks=next_today_tasks,
@@ -130,6 +155,21 @@ def generate_nightly_review(
 
 
 def parse_nightly_review_response(text: str) -> ParsedNightlyReview:
+    data = _parse_review_json(text)
+    values = _extract_review_values(data, REQUIRED_ROLLOVER_KEYS)
+    return ParsedNightlyReview(
+        praise=values["praise"],
+        next_today_tasks=_normalize_next_today_tasks(values["next_today_tasks"]),
+    )
+
+
+def parse_review_response(text: str) -> ParsedReview:
+    data = _parse_review_json(text)
+    values = _extract_review_values(data, REQUIRED_REVIEW_KEYS)
+    return ParsedReview(praise=values["praise"])
+
+
+def _parse_review_json(text: str) -> dict[str, Any]:
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -138,21 +178,25 @@ def parse_nightly_review_response(text: str) -> ParsedNightlyReview:
     if not isinstance(data, dict):
         raise NightlyReviewParseError("LLM response must be a JSON object.")
 
-    missing = [key for key in REQUIRED_ROLLOVER_KEYS if key not in data]
+    return data
+
+
+def _extract_review_values(data: dict[str, Any], required_keys: tuple[str, ...]) -> dict[str, str]:
+    missing = [key for key in required_keys if key not in data]
     if missing:
         raise NightlyReviewParseError(f"LLM response is missing keys: {', '.join(missing)}")
 
     values: dict[str, str] = {}
-    for key in REQUIRED_ROLLOVER_KEYS:
+    for key in required_keys:
         value = data[key]
         if not isinstance(value, str) or not value.strip():
             raise NightlyReviewParseError(f"LLM response key must be a non-empty string: {key}")
         value = value.strip()
-        if key == "next_today_tasks":
-            value = _normalize_next_today_tasks(value)
+        if key == "praise":
+            value = _normalize_praise(value)
         values[key] = value
 
-    return ParsedNightlyReview(review=values["review"], next_today_tasks=values["next_today_tasks"])
+    return values
 
 
 def _events_for_date(logger: EventLogger, date_text: str) -> list[dict[str, Any]]:
@@ -167,12 +211,16 @@ class DailyReviewContext:
 
 
 def _build_prompt(date_text: str, daily_context: DailyReviewContext) -> str:
-    return f"""你是一个帮助用户复盘学习和工作的个人执行助手。
+    return f"""你是一个帮助用户整理每日记录的个人执行助手。
 
-请根据 {date_text} 的 daily 记录，生成review。
+请根据 {date_text} 的 daily 记录，只生成 daily 末尾表扬。
 
-要求：
-{_build_review_requirements()}
+你必须只输出一个严格 JSON 对象，不要使用代码块，不要输出解释文字。
+JSON 必须包含且只需要包含这些字符串字段：
+- praise：daily 末尾表扬段落，必须遵守下面的“表扬要求”。
+
+表扬要求：
+- {_REVIEW_PRAISE_INSTRUCTION}
 
 {_RECORD_TAGS_INSTRUCTION}
 
@@ -186,42 +234,32 @@ def _build_rollover_prompt(
     tomorrow_plan: str,
 ) -> str:
     tomorrow_plan_text = tomorrow_plan.strip() or "（明日计划.md 为空）"
-    return f"""你是一个帮助用户复盘学习和工作的个人执行助手。
+    return f"""你是一个帮助用户整理每日记录的个人执行助手。
 
-请根据 {date_text} 的 daily 当天快照生成晚间复盘，并为明天滚动生成完整的 today_tasks.md 内容。
+请根据 {date_text} 的 daily 当天快照只生成 daily 末尾表扬，并为明天滚动生成完整的 today_tasks.md 内容。
 
 你必须只输出一个严格 JSON 对象，不要使用代码块，不要输出解释文字。
 JSON 必须包含且只需要包含这些字符串字段：
-- review：晚间复盘正文，必须遵守下面的“复盘要求”。
+- praise：daily 末尾表扬段落，必须遵守下面的“表扬要求”。
 - next_today_tasks：新的完整 today_tasks.md 内容。只能由“任务管理”里的未完成计划任务、“今日待办”里“日常”分组的每日重复任务，和“明日计划.md”的显式内容组成；必须使用“【分组】”加编号列表；禁止输出“任务管理”标题或任何 Markdown 表格；不要输出任何 Markdown 标题行，禁止输出任何以 `#` 开头的标题行；不要生成口号、总结句或装饰性标题；不要判断优先级；未完成的任务，优先按“今日待办”的原小标题归类。
 
-复盘要求：
-{_build_review_requirements()}
+表扬要求：
+- {_REVIEW_PRAISE_INSTRUCTION}
 
 {_RECORD_TAGS_INSTRUCTION}
 
 判断未完成任务的规则：
-- 今日记录只作为完成证据、取消证据或 review 分析依据；禁止从记录内容新增、派生或沉淀任务。记录里的临时任务、开始做某事，如果不在“今日待办”中，也不能写入 next_today_tasks。
+- 今日记录只作为完成证据、取消证据或表扬依据；禁止从记录内容新增、派生或沉淀任务。记录里的临时任务、开始做某事，如果不在“今日待办”中，也不能写入 next_today_tasks。
 - 今日待办里标题或分组为“日常”的任务代表每日重复；即使计划表“状态”列为“✓”表示今天已完成，仍必须继续写入 next_today_tasks 的“日常”分组。
 - 计划表“状态”列为“×”的任务，表示已删除或取消，不能写入 next_today_tasks；非“日常”任务的“状态”列为“✓”表示已经完成，也不能写入 next_today_tasks。
 - 如果今天没有未完成任务且明日计划也为空，next_today_tasks 仍输出完整 today_tasks.md，保留中文分组风格或写出空任务占位，但不要输出“任务管理”标题或任何 Markdown 表格，不要输出任何 Markdown 标题行，禁止输出任何以 `#` 开头的标题行，也不要生成新的口号。
-- 生成 review 时不要引用“明日计划.md”；明日计划只允许用于生成 next_today_tasks。
+- 生成 praise 时不要引用“明日计划.md”；明日计划只允许用于生成 next_today_tasks。
 
 {_build_daily_context_block(daily_context, today_tasks_label="今日待办（来自 daily 的当天快照，不读取当前 today_tasks.md）")}
 
-明日计划.md（只用于 next_today_tasks，不用于 review）：
+明日计划.md（只用于 next_today_tasks，不用于表扬）：
 {tomorrow_plan_text}
 """
-
-
-def _build_review_requirements() -> str:
-    return "\n".join(
-        [
-            f"- {_REVIEW_STRUCTURE_INSTRUCTION}",
-            f"- {_REVIEW_EVIDENCE_INSTRUCTION}",
-            f"- {_REVIEW_PRAISE_INSTRUCTION}",
-        ]
-    )
 
 
 def _build_daily_context_block(
@@ -325,6 +363,15 @@ def _looks_like_plan_notes_heading(line: str) -> bool:
 
 def _normalize_next_today_tasks(text: str) -> str:
     return format_today_tasks_snapshot(_drop_markdown_tables(text))
+
+
+def _normalize_praise(text: str) -> str:
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text.strip()) if part.strip()]
+    paragraph = paragraphs[0] if paragraphs else text.strip()
+    paragraph = re.sub(r"^#+\s*", "", paragraph).strip()
+    paragraph = re.sub(r"^\s*(?:[-*+]\s+|\d+[.)、]\s*)", "", paragraph).strip()
+    paragraph = re.sub(r"\s+", " ", paragraph).strip()
+    return paragraph[:100].strip()
 
 
 def _merge_recurring_daily_tasks(next_today_tasks: str, daily_context: DailyReviewContext) -> str:

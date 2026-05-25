@@ -4,7 +4,7 @@
 
 ## 定位
 
-修身炉当前是一个本地优先的 Python 执行闭环，用固定 pipeline 帮助记录资料、生成计划、沉淀复盘，并为后续知识库、post、工具、通知和自动化打基础。
+修身炉当前是一个本地优先的 Python 执行闭环，用固定 pipeline 帮助记录资料、生成计划、沉淀晚间表扬，并为后续知识库、post、工具、通知和自动化打基础。
 
 当前主路径：
 
@@ -40,7 +40,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py status
 
 ```powershell
 # 1. 写入今日待办并生成计划，会调用 LLM
-conda run --no-capture-output -n xiushenlu python app/main.py plan --tasks "今天完成项目文档更新；整理面试讲解；晚上复盘"
+conda run --no-capture-output -n xiushenlu python app/main.py plan --tasks "今天完成项目文档更新；整理面试讲解；晚上生成表扬"
 
 # 2. 临时新增任务并局部更新今日计划，会调用 LLM
 conda run --no-capture-output -n xiushenlu python app/main.py plan --add "补一版资料吸纳格式"
@@ -51,7 +51,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py log "整理了 REA
 # 4. 查看今天的 daily，不调用 LLM
 conda run --no-capture-output -n xiushenlu python app/main.py status
 
-# 5. 生成晚间复盘，会调用 LLM；默认会滚动待办，当天 review 还会更新 token 统计
+# 5. 生成晚间表扬，会调用 LLM；默认会滚动待办，当天 review 还会更新 token 统计
 conda run --no-capture-output -n xiushenlu python app/main.py review
 
 # 6. 手动重新统计今日和本月 token，不调用 LLM
@@ -64,7 +64,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py cost
 conda run --no-capture-output -n xiushenlu python app/main.py console
 ```
 
-控制台目前支持查看 daily、查看今日待办、保存今日待办、打开待办文件、写入记录、生成计划、日内局部更新、生成复盘、停止当前 LLM 操作、手动 token 统计、小红书图文发布和工作树编辑。首页日期右侧的菜单可进入 `/xhs` 发布页和 `/task-tree` 工作树页。资料吸纳、自动化、通知、审批、工具和知识库区域只预留布局。
+控制台目前支持查看 daily、查看今日待办、保存今日待办、打开待办文件、写入记录、生成计划、日内局部更新、生成表扬、停止当前 LLM 操作、手动 token 统计、小红书图文发布和工作树编辑。首页日期右侧的菜单可进入 `/xhs` 发布页和 `/task-tree` 工作树页。资料吸纳、自动化、通知、审批、工具和知识库区域只预留布局。
 
 控制台里的“保存待办”和“生成计划”是两个独立动作：“保存待办”只写入 `data/user_inputs/today_tasks.md`，不调用 LLM；“生成计划”等价于 `python app/main.py plan`。
 
@@ -180,9 +180,9 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 | `python app/main.py plan --tasks "..."` | 是 | 先覆盖写入今日待办，再生成计划。 |
 | `python app/main.py plan --add "..."` | 是 | 追加一条今日待办，并把新增任务并入 daily 的待办原文和任务管理表。 |
 | `python app/main.py log "..."` | 是 | 先追加一条过程记录，再让 LLM 返回补丁，由代码更新“任务管理”表的 `状态` 和 `用时` 两列；状态支持空、`○`、`✓`、`×`，其中 `×` 表示删除、取消或不再追踪；失败时保留记录。 |
-| `python app/main.py review` | 是 | 根据今天 daily 生成复盘，滚动明日待办，并更新 token 统计；状态为 `×` 的任务不会滚动到明天。 |
-| `python app/main.py review --date YYYY-MM-DD` | 是 | 对指定日期生成复盘，并默认把未完成项滚动到当前 `today_tasks.md`。历史日期不会把本次 token 统计写回历史 daily。 |
-| `python app/main.py review --date YYYY-MM-DD --no-rollover` | 是 | 只对指定日期生成复盘，不滚动当前待办。 |
+| `python app/main.py review` | 是 | 根据今天 daily 在末尾生成一段表扬，滚动明日待办，并更新 token 统计；状态为 `×` 的任务不会滚动到明天。 |
+| `python app/main.py review --date YYYY-MM-DD` | 是 | 对指定日期生成一段表扬，并默认把未完成项滚动到当前 `today_tasks.md`。历史日期不会把本次 token 统计写回历史 daily。 |
+| `python app/main.py review --date YYYY-MM-DD --no-rollover` | 是 | 只对指定日期生成一段表扬，不滚动当前待办。 |
 | `python app/main.py status` | 否 | 打印今天的 daily。 |
 | `python app/main.py cost` | 否 | 汇总今日和本月 token，并覆盖 daily 的 token 统计区块。 |
 | `python app/main.py xhs status` | 否 | 通过本地 `xiaohongshu-mcp` 检查 MCP 连通性和本地缓存状态。 |
@@ -197,7 +197,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 
 任务管理表的备注功能已删除，目标/日常表头只接受 `| 任务 | 优先级 | 预计 | 状态 | 用时 |`；维护表头只接受 `| 任务 | 优先级 | 状态 |`。历史 daily 如果仍是旧 `备注` 表头，后续 `log` 不会自动更新任务表；需要人工或单独迁移为 `用时` 表头后再继续使用自动更新。
 
-`review` 的事实来源是 daily 里固化的 `今日待办原文` 和 `记录`，不是当前 `today_tasks.md`。默认会滚动生成新的 `today_tasks.md`；需要只补历史复盘时显式加 `--no-rollover`。`明日计划.md` 只用于生成新的 `today_tasks.md`，不用于复盘正文。解析失败时不会写复盘、不会覆盖 `today_tasks.md`，也不会清空 `明日计划.md`。
+`review` 的事实来源是 daily 里固化的 `今日待办原文` 和 `记录`，不是当前 `today_tasks.md`。默认会滚动生成新的 `today_tasks.md`；需要只补历史表扬时显式加 `--no-rollover`。`明日计划.md` 只用于生成新的 `today_tasks.md`，不用于表扬内容。daily 末尾只写一段基于当天工作、自然真诚且不超过 100 字的表扬；如果已有旧 `## 复盘` 区块，本次成功生成后会移除旧复盘。解析失败时不会写表扬、不会覆盖 `today_tasks.md`，也不会清空 `明日计划.md`。
 
 ## 配置
 
@@ -238,7 +238,7 @@ conda run --no-capture-output -n xiushenlu python app/main.py xhs publish --draf
 | `app/pipelines/daily_plan.py` | 今日计划 pipeline；LLM 生成任务管理表，程序回填 `任务` 列并拆分为目标、日常和 xiushenlu 维护三类。 |
 | `app/pipelines/log_schedule_update.py` | 写入记录后的任务管理表更新 pipeline；LLM 返回状态和计时线索，代码重算并写入可更新表的 `状态` 和 `用时` 两列。 |
 | `app/pipelines/plan_update.py` | 日内计划局部更新 pipeline；更新待办原文并把新增任务追加到对应任务管理表，解析失败时停止写入。 |
-| `app/pipelines/nightly_review.py` | 晚间复盘 pipeline；当天复盘成功后滚动待办并清空 `明日计划.md`。 |
+| `app/pipelines/nightly_review.py` | 晚间表扬 pipeline；当天生成成功后滚动待办并清空 `明日计划.md`。 |
 | `app/posting/` | 小红书图文发布与封面生成适配：读取 `data/post/data` 草稿、校验参数、调用本地 MCP、调用 DashScope 图片模型并记录事件。 |
 | `app/desktop_pet/` | 桌宠素材下载校验、spritesheet 切片、位置状态和 Tkinter 透明窗口。 |
 | `app/task_tree.py` | 工作树 JSON 校验、标题文件名清洗和 `data/task_tree` 安全读写。 |

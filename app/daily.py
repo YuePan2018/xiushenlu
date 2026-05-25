@@ -38,6 +38,7 @@ def write_daily_section(
     *,
     mode: str = "replace",
     include_generated_at: bool = True,
+    place_at_end: bool = False,
 ) -> Path:
     cfg = config or load_config()
     path = daily_path(cfg, target_date)
@@ -51,7 +52,7 @@ def write_daily_section(
     if path.exists():
         original = safe_read_text(path, cfg).strip()
         if mode == "replace":
-            content = _replace_or_append_section(original, title, section)
+            content = _replace_or_append_section(original, title, section, place_at_end=place_at_end)
         elif mode == "append":
             content = original.rstrip() + "\n\n" + section
         else:
@@ -59,6 +60,22 @@ def write_daily_section(
     else:
         content = f"# {day}\n\n{section}"
 
+    safe_write_text(path, content.rstrip() + "\n", cfg)
+    return path
+
+
+def remove_daily_section(
+    title: str,
+    config: dict[str, Any] | None = None,
+    target_date: date | str | None = None,
+) -> Path:
+    cfg = config or load_config()
+    path = daily_path(cfg, target_date)
+    if not path.exists():
+        return path
+
+    original = safe_read_text(path, cfg).strip()
+    content = _remove_section(original, title)
     safe_write_text(path, content.rstrip() + "\n", cfg)
     return path
 
@@ -98,16 +115,45 @@ def _format_record(timestamp: str, content: str) -> str:
     return "\n".join(formatted)
 
 
-def _replace_or_append_section(original: str, title: str, section: str) -> str:
+def _replace_or_append_section(
+    original: str,
+    title: str,
+    section: str,
+    *,
+    place_at_end: bool = False,
+) -> str:
     heading = f"## {title}"
     if heading not in original:
         return original.rstrip() + "\n\n" + section
 
     start = original.index(heading)
     next_heading = original.find("\n## ", start + len(heading))
+    if place_at_end:
+        if next_heading == -1:
+            without_section = original[:start].rstrip()
+        else:
+            before = original[:start].rstrip()
+            after = original[next_heading:].lstrip("\n")
+            without_section = f"{before}\n\n{after}".strip()
+        if not without_section:
+            return section
+        return without_section.rstrip() + "\n\n" + section
+
     if next_heading == -1:
         return original[:start].rstrip() + "\n\n" + section
     return original[:start].rstrip() + "\n\n" + section.rstrip() + "\n" + original[next_heading:]
+
+
+def _remove_section(original: str, title: str) -> str:
+    heading = f"## {title}"
+    if heading not in original:
+        return original
+
+    start = original.index(heading)
+    next_heading = original.find("\n## ", start + len(heading))
+    if next_heading == -1:
+        return original[:start].rstrip()
+    return (original[:start].rstrip() + "\n\n" + original[next_heading:].lstrip("\n")).strip()
 
 
 def _append_to_section(original: str, title: str, line: str) -> str:

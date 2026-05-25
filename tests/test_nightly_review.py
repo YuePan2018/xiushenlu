@@ -11,12 +11,9 @@ from typing import Any
 from app.llm.provider import LLMCallUsage, LLMProvider
 from app.pipelines.nightly_review import (
     NightlyReviewParseError,
-    _REVIEW_EVIDENCE_INSTRUCTION,
     _REVIEW_PRAISE_INSTRUCTION,
-    _REVIEW_STRUCTURE_INSTRUCTION,
     _build_daily_review_context,
     _build_prompt,
-    _build_review_requirements,
     _build_rollover_prompt,
     generate_nightly_review,
     parse_nightly_review_response,
@@ -63,21 +60,21 @@ class NightlyReviewTests(unittest.TestCase):
         parsed = parse_nightly_review_response(
             json.dumps(
                 {
-                    "review": "完成了什么\n- 完成复盘",
+                    "praise": "今天能把复盘闭环跑完，这份稳定很值得肯定。",
                     "next_today_tasks": "修身炉：\n1. 规划下一进度",
                 },
                 ensure_ascii=False,
             )
         )
 
-        self.assertIn("完成复盘", parsed.review)
+        self.assertIn("复盘闭环", parsed.praise)
         self.assertIn("规划下一进度", parsed.next_today_tasks)
 
     def test_parse_nightly_review_response_drops_task_management_table(self) -> None:
         parsed = parse_nightly_review_response(
             json.dumps(
                 {
-                    "review": "完成了什么\n- 完成复盘",
+                    "praise": "今天能把复盘闭环跑完，这份稳定很值得肯定。",
                     "next_today_tasks": (
                         "【学习】\n"
                         "1. codex子代理\n\n"
@@ -104,15 +101,15 @@ class NightlyReviewTests(unittest.TestCase):
         self.assertNotIn("总工作时长", parsed.next_today_tasks)
         self.assertNotIn("|", parsed.next_today_tasks)
 
-    def test_review_prompts_share_review_requirements(self) -> None:
+    def test_review_prompts_request_only_praise_for_daily(self) -> None:
         daily_text = (
             "# 2026-05-16\n\n"
             "## 计划\n\n"
             "1. 今日待办原文\n\n"
             "修身炉：\n"
-            "1. 调整复盘提示词\n\n"
+            "1. 调整表扬提示词\n\n"
             "## 记录\n\n"
-            "- 完成日期联动和复盘提示词调整\n"
+            "- 完成日期联动和表扬提示词调整\n"
         )
         context = _build_daily_review_context(daily_text)
 
@@ -120,24 +117,28 @@ class NightlyReviewTests(unittest.TestCase):
             _build_prompt("2026-05-16", context),
             _build_rollover_prompt("2026-05-16", context, "继续验证控制台"),
         ]
-        shared_requirements = _build_review_requirements()
 
         for prompt in prompts:
-            self.assertIn(shared_requirements, prompt)
-            self.assertIn(_REVIEW_STRUCTURE_INSTRUCTION, prompt)
-            self.assertIn(_REVIEW_EVIDENCE_INSTRUCTION, prompt)
             self.assertIn(_REVIEW_PRAISE_INSTRUCTION, prompt)
-            self.assertEqual(prompt.count(shared_requirements), 1)
             self.assertEqual(prompt.count(_REVIEW_PRAISE_INSTRUCTION), 1)
+            self.assertIn("只生成 daily 末尾表扬", prompt)
+            self.assertIn("不超过100字", prompt)
+            self.assertIn("真诚自然", prompt)
+            self.assertNotIn("完成了什么", prompt)
+            self.assertNotIn("改进建议", prompt)
+            self.assertNotIn("值得肯定的行为", prompt)
+            self.assertNotIn("三句话", prompt)
             self.assertNotIn("一句话", prompt)
 
         normal_prompt, rollover_prompt = prompts
-        self.assertNotIn("严格 JSON", normal_prompt)
+        self.assertIn("严格 JSON", normal_prompt)
+        self.assertIn("praise", normal_prompt)
+        self.assertNotIn("- review", normal_prompt)
         self.assertNotIn("next_today_tasks", normal_prompt)
         self.assertIn("严格 JSON", rollover_prompt)
-        self.assertIn("review", rollover_prompt)
+        self.assertIn("praise", rollover_prompt)
         self.assertIn("next_today_tasks", rollover_prompt)
-        self.assertIn("明日计划.md（只用于 next_today_tasks，不用于 review）", rollover_prompt)
+        self.assertIn("明日计划.md（只用于 next_today_tasks，不用于表扬）", rollover_prompt)
         self.assertIn("禁止从记录内容新增、派生或沉淀任务", rollover_prompt)
         self.assertIn("必须使用“【分组】”加编号列表", rollover_prompt)
         self.assertIn("禁止输出“任务管理”标题或任何 Markdown 表格", rollover_prompt)
@@ -227,9 +228,10 @@ class NightlyReviewTests(unittest.TestCase):
                 "旧复盘不应再次喂给 LLM\n",
                 encoding="utf-8",
             )
+            praise = "今天能把真实进展记下来，也能看见需要收口的地方，这份稳定很值得肯定。"
             reply = json.dumps(
                 {
-                    "review": "完成了什么\n- 做了别的事\n\n改进建议\n- 明天收口。\n\n值得肯定的行为\n- 有记录。",
+                    "praise": praise,
                     "next_today_tasks": "修身炉：\n1. 未完成任务\n\n杂事：\n去浙大",
                 },
                 ensure_ascii=False,
@@ -248,7 +250,6 @@ class NightlyReviewTests(unittest.TestCase):
             self.assertEqual(result.today_tasks_path, today_tasks)
             self.assertEqual(result.tomorrow_plan_path, tomorrow_plan)
             daily_text = daily_file.read_text(encoding="utf-8")
-            self.assertIn("做了别的事", daily_text)
             self.assertIn("token 消耗统计", daily_text)
             self.assertIn("今日 LLM 调用：1 次", daily_text)
             self.assertIn("今日 token 数：30", daily_text)
@@ -256,6 +257,10 @@ class NightlyReviewTests(unittest.TestCase):
             self.assertIn("本月 token 数：30", daily_text)
             self.assertIn("今日文生图图片数：0 张", daily_text)
             self.assertIn("本月文生图图片数：0 张", daily_text)
+            self.assertNotIn("## 复盘", daily_text)
+            self.assertLess(daily_text.rfind("## token 消耗统计"), daily_text.rfind("## 表扬"))
+            self.assertEqual(daily_text.count(praise), 1)
+            self.assertTrue(daily_text.rstrip().endswith(praise))
             self.assertNotIn("输入 token", daily_text)
             self.assertNotIn("输出 token", daily_text)
             saved_tasks = today_tasks.read_text(encoding="utf-8")
@@ -310,7 +315,7 @@ class NightlyReviewTests(unittest.TestCase):
             )
             reply = json.dumps(
                 {
-                    "review": "完成了什么\n- 做了别的事",
+                    "praise": "今天记录了真实进展，也看见了任务边界，值得肯定。",
                     "next_today_tasks": "修身炉：\n1. 未完成任务\n\n杂事：\n去浙大",
                 },
                 ensure_ascii=False,
@@ -371,7 +376,7 @@ class NightlyReviewTests(unittest.TestCase):
             provider = FakeProvider(
                 json.dumps(
                     {
-                        "review": "完成了什么\n- 喝水完成",
+                        "praise": "今天把日常完成情况记清楚了，这种稳定的小闭环很值得肯定。",
                         "next_today_tasks": "项目：\n1. 未完成项目",
                     },
                     ensure_ascii=False,
@@ -419,7 +424,7 @@ class NightlyReviewTests(unittest.TestCase):
             provider = FakeProvider(
                 json.dumps(
                     {
-                        "review": "历史复盘",
+                        "praise": "今天把历史记录补回系统里，这种回收资料的动作很扎实。",
                         "next_today_tasks": "旧任务\n明日输入",
                     },
                     ensure_ascii=False,
@@ -430,8 +435,11 @@ class NightlyReviewTests(unittest.TestCase):
 
             self.assertTrue(result.rolled_over)
             self.assertEqual(result.today_tasks_path, today_tasks)
-            self.assertIn("历史复盘", daily_file.read_text(encoding="utf-8"))
-            self.assertNotIn("token 消耗统计", daily_file.read_text(encoding="utf-8"))
+            daily_text = daily_file.read_text(encoding="utf-8")
+            self.assertNotIn("## 复盘", daily_text)
+            self.assertIn("## 表扬", daily_text)
+            self.assertTrue(daily_text.rstrip().endswith("今天把历史记录补回系统里，这种回收资料的动作很扎实。"))
+            self.assertNotIn("token 消耗统计", daily_text)
             self.assertEqual(today_tasks.read_text(encoding="utf-8"), "【待办】\n1. 旧任务\n2. 明日输入\n")
             self.assertEqual(tomorrow_plan.read_text(encoding="utf-8"), "")
             self.assertIn("严格 JSON", provider.prompts[0])
@@ -453,7 +461,15 @@ class NightlyReviewTests(unittest.TestCase):
             today_tasks.write_text("# 今日待办\n\n当前任务\n", encoding="utf-8")
             tomorrow_plan.write_text("明日输入\n", encoding="utf-8")
             daily_file.write_text(f"# {date_text}\n\n## 记录\n\n- 历史记录\n", encoding="utf-8")
-            provider = FakeProvider("历史复盘")
+            no_rollover_praise = "今天能把历史记录单独复盘清楚，这份补齐闭环的意识值得肯定。"
+            provider = FakeProvider(
+                json.dumps(
+                    {
+                        "praise": no_rollover_praise,
+                    },
+                    ensure_ascii=False,
+                )
+            )
 
             result = generate_nightly_review(
                 provider,
@@ -464,11 +480,15 @@ class NightlyReviewTests(unittest.TestCase):
 
             self.assertFalse(result.rolled_over)
             self.assertIsNone(result.today_tasks_path)
-            self.assertIn("历史复盘", daily_file.read_text(encoding="utf-8"))
-            self.assertNotIn("token 消耗统计", daily_file.read_text(encoding="utf-8"))
+            daily_text = daily_file.read_text(encoding="utf-8")
+            self.assertNotIn("## 复盘", daily_text)
+            self.assertIn("## 表扬", daily_text)
+            self.assertTrue(daily_text.rstrip().endswith(no_rollover_praise))
+            self.assertNotIn("token 消耗统计", daily_text)
             self.assertEqual(today_tasks.read_text(encoding="utf-8"), "# 今日待办\n\n当前任务\n")
             self.assertEqual(tomorrow_plan.read_text(encoding="utf-8"), "明日输入\n")
-            self.assertNotIn("严格 JSON", provider.prompts[0])
+            self.assertIn("严格 JSON", provider.prompts[0])
+            self.assertNotIn("next_today_tasks", provider.prompts[0])
 
     def test_rollover_parse_error_does_not_write_any_user_files(self) -> None:
         with _temporary_directory() as temp_dir:

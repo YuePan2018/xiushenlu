@@ -39,8 +39,15 @@ class FakeProvider(LLMProvider):
         if "next_today_tasks" in prompt:
             return json.dumps(
                 {
-                    "review": "控制台测试复盘",
+                    "praise": "控制台测试表扬",
                     "next_today_tasks": "# 今日待办\n\n控制台明日任务",
+                },
+                ensure_ascii=False,
+            )
+        if "praise" in prompt:
+            return json.dumps(
+                {
+                    "praise": "控制台测试表扬",
                 },
                 ensure_ascii=False,
             )
@@ -1213,7 +1220,8 @@ class ConsoleTests(unittest.TestCase):
 
             self.assertEqual(response.status_code, 200)
             daily_text = response.json()["state"]["daily"]["text"]
-            self.assertIn("控制台测试复盘", daily_text)
+            self.assertIn("控制台测试表扬", daily_text)
+            self.assertNotIn("## 复盘", daily_text)
             self.assertIn("token 消耗统计", daily_text)
             self.assertIn("今日 LLM 调用：1 次", daily_text)
             self.assertIn("今日 token 数：18", daily_text)
@@ -1241,7 +1249,8 @@ class ConsoleTests(unittest.TestCase):
 
             self.assertEqual(response.status_code, 200)
             daily_text = response.json()["state"]["daily"]["text"]
-            self.assertIn("控制台测试计划", daily_text)
+            self.assertIn("控制台测试表扬", daily_text)
+            self.assertNotIn("## 复盘", daily_text)
             self.assertNotIn("token 消耗统计", daily_text)
             self.assertEqual((inbox_dir / "today_tasks.md").read_text(encoding="utf-8"), "# 今日待办\n\n原任务\n")
             self.assertEqual((inbox_dir / "明日计划.md").read_text(encoding="utf-8"), "控制台明日任务\n")
