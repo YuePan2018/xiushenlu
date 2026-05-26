@@ -2045,6 +2045,28 @@ CONSOLE_HTML = f"""<!doctype html>
       collapseOriginalTasksSnapshot(el);
     }}
 
+    function scrollDailyToHeading(headingText) {{
+      const container = $("dailyText");
+      const target = Array.from(container.children).find((node) =>
+        normalizeMarkerText(node.textContent) === headingText
+      );
+      if (!target) {{
+        return false;
+      }}
+      const top = target.getBoundingClientRect().top
+        - container.getBoundingClientRect().top
+        + container.scrollTop
+        - 8;
+      container.scrollTo({{ top: Math.max(0, top), behavior: "auto" }});
+      return true;
+    }}
+
+    function revealDailyRecords() {{
+      window.requestAnimationFrame(() => {{
+        scrollDailyToHeading("记录");
+      }});
+    }}
+
     function collapseOriginalTasksSnapshot(container) {{
       const children = Array.from(container.children);
       const startIndex = children.findIndex(isOriginalTasksMarker);
@@ -2115,6 +2137,9 @@ CONSOLE_HTML = f"""<!doctype html>
           renderState(data.state);
         }} else {{
           await loadState();
+        }}
+        if (label === "生成计划") {{
+          revealDailyRecords();
         }}
         setStatus(data.message || `${{label}}完成`);
       }} catch (error) {{

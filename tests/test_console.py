@@ -171,6 +171,9 @@ class ConsoleTests(unittest.TestCase):
             self.assertIn('/static/vendor/dompurify-3.2.6.min.js', html)
             self.assertIn("DOMPurify.sanitize", html)
             self.assertIn("collapseOriginalTasksSnapshot", html)
+            self.assertIn("scrollDailyToHeading", html)
+            self.assertIn("revealDailyRecords", html)
+            self.assertIn('label === "生成计划"', html)
             self.assertIn("原始待办快照", html)
             self.assertIn("daily-snapshot", html)
             self.assertNotIn('<pre id="dailyText"', html)
@@ -1110,6 +1113,37 @@ class ConsoleTests(unittest.TestCase):
             self.assertEqual(len(provider.prompts), 1)
             self.assertIn("本地保存的任务", provider.prompts[0])
             self.assertIn("控制台测试计划", response.json()["state"]["daily"]["text"])
+
+    def test_plan_endpoint_preserves_existing_daily_records_in_state(self) -> None:
+        with _temporary_directory() as temp_dir:
+            config = _test_config(Path(temp_dir))
+            inbox_dir = Path(config["paths"]["inbox_dir"])
+            daily_dir = Path(config["paths"]["daily_dir"])
+            memory_dir = Path(config["paths"]["memory_dir"])
+            inbox_dir.mkdir(parents=True)
+            daily_dir.mkdir(parents=True)
+            memory_dir.mkdir(parents=True)
+            (inbox_dir / "today_tasks.md").write_text("# 今日待办\n\n本地保存的任务", encoding="utf-8")
+            today = date.today().isoformat()
+            (daily_dir / f"{today}.md").write_text(
+                f"# {today}\n\n"
+                "## 计划\n\n"
+                "旧计划\n\n"
+                "## 记录\n\n"
+                "- 10:00:00 之前的记录\n",
+                encoding="utf-8",
+            )
+            provider = FakeProvider()
+            client = TestClient(create_app(config=config, provider_factory=lambda: provider))
+
+            response = client.post("/api/plan", json={})
+
+            self.assertEqual(response.status_code, 200)
+            daily_text = response.json()["state"]["daily"]["text"]
+            self.assertIn("控制台测试计划", daily_text)
+            self.assertIn("## 记录", daily_text)
+            self.assertIn("之前的记录", daily_text)
+            self.assertNotIn("旧计划", daily_text)
 
     def test_plan_update_endpoint_updates_original_and_schedule_table(self) -> None:
         with _temporary_directory() as temp_dir:
