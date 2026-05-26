@@ -2572,6 +2572,59 @@ XHS_HTML = """<!doctype html>
     }
     .meta.ok { color: var(--ok); }
     .meta.error { color: var(--danger); }
+    .menu-wrap {
+      position: relative;
+    }
+    .menu-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 38px;
+      min-width: 38px;
+      height: 38px;
+      border: 1px solid var(--line);
+      background: #fffefa;
+      color: var(--text);
+      padding: 0;
+    }
+    .menu-button:hover {
+      background: var(--surface-2);
+      color: var(--text);
+    }
+    .menu-icon {
+      display: grid;
+      gap: 4px;
+      width: 16px;
+    }
+    .menu-icon span {
+      display: block;
+      height: 2px;
+      border-radius: 999px;
+      background: currentColor;
+    }
+    .menu-list {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 4px);
+      z-index: 20;
+      min-width: 168px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      padding: 6px;
+    }
+    .menu-list a {
+      display: block;
+      border-radius: 6px;
+      color: var(--text);
+      padding: 8px 10px;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .menu-list a:hover {
+      background: var(--surface-2);
+    }
     @media (max-width: 900px) {
       main { grid-template-columns: 1fr; }
     }
@@ -2591,7 +2644,19 @@ XHS_HTML = """<!doctype html>
         <div class="meta">修身炉内容出口</div>
       </div>
       <div class="row">
-        <a href="/"><button class="secondary" type="button">返回控制台</button></a>
+        <div class="menu-wrap">
+          <button class="menu-button" id="menuBtn" type="button" aria-label="菜单" title="菜单" aria-haspopup="menu" aria-expanded="false">
+            <span class="menu-icon" aria-hidden="true">
+              <span></span>
+              <span></span>
+              <span></span>
+            </span>
+          </button>
+          <div class="menu-list" id="pageMenu" hidden>
+            <a href="/">控制台</a>
+            <a href="/task-tree">工作树</a>
+          </div>
+        </div>
       </div>
     </div>
   </header>
@@ -2975,6 +3040,21 @@ XHS_HTML = """<!doctype html>
     $("publishBtn").addEventListener("click", publishXhs);
     $("draftInput").addEventListener("input", schedulePathStatus);
     $("imageInput").addEventListener("input", schedulePathStatus);
+    $("menuBtn").addEventListener("click", (event) => {
+      event.stopPropagation();
+      const menu = $("pageMenu");
+      const hidden = menu.hidden;
+      menu.hidden = !hidden;
+      $("menuBtn").setAttribute("aria-expanded", String(hidden));
+    });
+    document.addEventListener("click", (event) => {
+      const menu = $("pageMenu");
+      const button = $("menuBtn");
+      if (!menu.hidden && !menu.contains(event.target) && event.target !== button) {
+        menu.hidden = true;
+        button.setAttribute("aria-expanded", "false");
+      }
+    });
     loadDefaults()
       .then(checkStatus)
       .catch((error) => {

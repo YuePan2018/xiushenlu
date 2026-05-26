@@ -188,6 +188,72 @@
       opacity: 0.56;
     }
 
+    .header-actions {
+      flex: 0 0 auto;
+      justify-content: flex-end;
+    }
+
+    .menu-wrap {
+      position: relative;
+    }
+
+    .menu-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 38px;
+      min-width: 38px;
+      height: 38px;
+      border-color: var(--line);
+      background: var(--surface);
+      color: var(--text);
+      padding: 0;
+    }
+
+    .menu-button:hover {
+      border-color: #bfd0c7;
+      background: var(--surface-tint);
+      color: var(--text);
+    }
+
+    .menu-icon {
+      display: grid;
+      gap: 4px;
+      width: 16px;
+    }
+
+    .menu-icon span {
+      display: block;
+      height: 2px;
+      border-radius: 999px;
+      background: currentColor;
+    }
+
+    .menu-list {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 4px);
+      z-index: 30;
+      min-width: 168px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      padding: 6px;
+    }
+
+    .menu-list a {
+      display: block;
+      border-radius: 6px;
+      color: var(--text);
+      padding: 8px 10px;
+      white-space: nowrap;
+    }
+
+    .menu-list a:hover {
+      background: var(--surface-tint);
+    }
+
     select,
     input,
     textarea {
@@ -771,8 +837,20 @@
         <h1>工作树</h1>
         <div class="meta">工作树视图</div>
       </div>
-      <div class="row">
-        <a class="button-link secondary" href="/">返回控制台</a>
+      <div class="row header-actions">
+        <div class="menu-wrap">
+          <button class="menu-button" id="menuBtn" type="button" aria-label="菜单" title="菜单" aria-haspopup="menu" aria-expanded="false">
+            <span class="menu-icon" aria-hidden="true">
+              <span></span>
+              <span></span>
+              <span></span>
+            </span>
+          </button>
+          <div class="menu-list" id="pageMenu" hidden>
+            <a href="/">控制台</a>
+            <a href="/xhs">发布小红书</a>
+          </div>
+        </div>
       </div>
     </div>
   </header>
@@ -1637,6 +1715,21 @@
     $("nodeContentInput").addEventListener("input", updateSelectedContent);
     $("deleteNodeBtn").addEventListener("click", deleteSelectedNode);
     $("mindMap").addEventListener("mousemove", positionNodePreview);
+    $("menuBtn").addEventListener("click", (event) => {
+      event.stopPropagation();
+      const menu = $("pageMenu");
+      const hidden = menu.hidden;
+      menu.hidden = !hidden;
+      $("menuBtn").setAttribute("aria-expanded", String(hidden));
+    });
+    document.addEventListener("click", (event) => {
+      const menu = $("pageMenu");
+      const button = $("menuBtn");
+      if (!menu.hidden && !menu.contains(event.target) && event.target !== button) {
+        menu.hidden = true;
+        button.setAttribute("aria-expanded", "false");
+      }
+    });
     window.addEventListener("resize", () => {
       hideNodePreview();
       resizeMap();
